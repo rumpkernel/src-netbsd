@@ -34,6 +34,13 @@ __RCSID("$NetBSD: pthread.c,v 1.144 2014/01/31 20:44:01 christos Exp $");
 
 #define	__EXPOSE_STACK	1
 
+#ifdef _PLATFORM_MAKECONTEXT
+#define _lwp_makecontext _PLATFORM_MAKECONTEXT
+#endif
+#ifdef _PLATFORM_GETTCB
+struct tls_tcb *_PLATFORM_GETTCB(void);
+#endif
+
 #include <sys/param.h>
 #include <sys/exec_elf.h>
 #include <sys/mman.h>
@@ -378,6 +385,9 @@ pthread__getstack(pthread_t newthread, const pthread_attr_t *attr)
 	newthread->pt_stack_allocated = allocated;
 	return 0;
 }
+
+void _lwp_mymakecontext(ucontext_t *, void (*)(void *),
+	void *, void *, void *, size_t);
 
 int
 pthread_create(pthread_t *thread, const pthread_attr_t *attr,
@@ -1325,7 +1335,9 @@ pthread__initmain(pthread_t *newt)
 		    4 * pthread__pagesize / 1024);
 
 	*newt = &pthread__main;
-#ifdef __HAVE___LWP_GETTCB_FAST
+#if defined(_PLATFORM_GETTCB)
+	pthread__main.pt_tls = _PLATFORM_GETTCB();
+#elif defined(__HAVE___LWP_GETTCB_FAST)
 	pthread__main.pt_tls = __lwp_gettcb_fast();
 #else
 	pthread__main.pt_tls = _lwp_getprivate();
