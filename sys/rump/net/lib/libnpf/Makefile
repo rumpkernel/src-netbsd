@@ -1,0 +1,32 @@
+#	$NetBSD: Makefile,v 1.13 2014/04/04 13:57:33 njoly Exp $
+#
+# Public Domain.
+#
+
+NOLINT=		# defined
+
+.PATH:	${.CURDIR}/../../../../net/npf
+
+LIB=	rumpnet_npf
+
+SRCS=	npf.c npf_alg.c npf_conf.c npf_ctl.c npf_handler.c
+SRCS+=	npf_bpf.c npf_if.c npf_inet.c npf_mbuf.c npf_nat.c
+SRCS+=	npf_ruleset.c npf_rproc.c npf_sendpkt.c npf_session.c
+SRCS+=	npf_state.c npf_state_tcp.c npf_tableset.c
+SRCS+=	npf_tableset_ptree.c npf_worker.c if_npflog.c
+
+SRCS+=	npf_alg_icmp.c
+
+SRCS+=	npf_ext_log.c npf_ext_normalize.c npf_ext_rndblock.c
+
+SRCS+=	npf_component.c
+
+.include <bsd.own.mk>
+
+.if ${RUMP_NPF_TESTING:Uyes} == "yes"
+CPPFLAGS+=	-D_NPF_TESTING
+.endif
+CPPFLAGS+=	-I${.CURDIR}/../../../librump/rumpvfs
+
+.include <bsd.lib.mk>
+.include <bsd.klinks.mk>
