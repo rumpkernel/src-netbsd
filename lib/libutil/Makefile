@@ -38,7 +38,7 @@ MAN=	efun.3 \
 YPREFIX=__pd
 .PATH:	${NETBSDSRCDIR}/lib/libc/gen
 
-.include "compat/Makefile.inc"
+#.include "compat/Makefile.inc"
 
 MLINKS+=getlabelsector.3 getlabeloffset.3
 MLINKS+=getlabelsector.3 getlabelusesmbr.3
