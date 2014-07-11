@@ -84,7 +84,7 @@ CPPFLAGS+=	-D__BUILD_LEGACY
 .include "${.CURDIR}/regex/Makefile.inc"
 .endif
 .include "${.CURDIR}/resolv/Makefile.inc"
-# .include "${.CURDIR}/rpc/Makefile.inc"
+.include "${.CURDIR}/rpc/Makefile.inc"
 .include "${.CURDIR}/ssp/Makefile.inc"
 .include "${.CURDIR}/stdio/Makefile.inc"
 .include "${.CURDIR}/stdlib/Makefile.inc"
