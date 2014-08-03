@@ -1,5 +1,5 @@
 #! /usr/bin/env sh
-#	$NetBSD: build.sh,v 1.281 2014/05/05 19:12:19 martin Exp $
+#	$NetBSD: build.sh,v 1.286 2014/08/03 01:03:41 riz Exp $
 #
 # Copyright (c) 2001-2011 The NetBSD Foundation, Inc.
 # All rights reserved.
@@ -278,6 +278,29 @@ ERRORMESSAGE
 	exit 1
 }
 
+# Quote args to make them safe in the shell.
+# Usage: quotedlist="$(shell_quote args...)"
+#
+# After building up a quoted list, use it by evaling it inside
+# double quotes, like this:
+#    eval "set -- $quotedlist"
+# or like this:
+#    eval "\$command $quotedlist \$filename"
+shell_quote()
+{
+	local result=''
+	local arg
+	for arg in "$@" ; do
+		# Append a space if necessary
+		result="${result}${result:+ }"
+		# Convert each embedded ' to '\'',
+		# then insert ' at the beginning of the first line,
+		# and append ' at the end of the last line.
+		result="${result}$(printf "%s\n" "$arg" | \
+			sed -e "s/'/'\\\\''/g" -e "1s/^/'/" -e "\$s/\$/'/")"
+	done
+	printf "%s\n" "$result"
+}
 
 statusmsg()
 {
@@ -579,17 +602,17 @@ MACHINE=arc		MACHINE_ARCH=mips64el	ALIAS=arc64
 MACHINE=arc		MACHINE_ARCH=mipsel	DEFAULT
 MACHINE=atari		MACHINE_ARCH=m68k
 MACHINE=bebox		MACHINE_ARCH=powerpc
-MACHINE=cats		MACHINE_ARCH=arm	DEFAULT
-MACHINE=cats		MACHINE_ARCH=earmv4	ALIAS=ecats
+MACHINE=cats		MACHINE_ARCH=arm	ALIAS=ocats
+MACHINE=cats		MACHINE_ARCH=earmv4	ALIAS=ecats DEFAULT
 MACHINE=cesfic		MACHINE_ARCH=m68k
 MACHINE=cobalt		MACHINE_ARCH=mips64el	ALIAS=cobalt64
 MACHINE=cobalt		MACHINE_ARCH=mipsel	DEFAULT
 MACHINE=dreamcast	MACHINE_ARCH=sh3el
 MACHINE=emips		MACHINE_ARCH=mipseb
 MACHINE=epoc32		MACHINE_ARCH=arm
-MACHINE=evbarm		MACHINE_ARCH=arm	ALIAS=evbarm-el	DEFAULT
-MACHINE=evbarm		MACHINE_ARCH=armeb	ALIAS=evbarm-eb
-MACHINE=evbarm		MACHINE_ARCH=earm	ALIAS=evbearm-el
+MACHINE=evbarm		MACHINE_ARCH=arm	ALIAS=evboarm-el
+MACHINE=evbarm		MACHINE_ARCH=armeb	ALIAS=evboarm-eb
+MACHINE=evbarm		MACHINE_ARCH=earm	ALIAS=evbearm-el DEFAULT
 MACHINE=evbarm		MACHINE_ARCH=earmeb	ALIAS=evbearm-eb
 MACHINE=evbarm		MACHINE_ARCH=earmhf	ALIAS=evbearmhf-el
 MACHINE=evbarm		MACHINE_ARCH=earmhfeb	ALIAS=evbearmhf-eb
@@ -619,15 +642,16 @@ MACHINE=evbsh3		MACHINE_ARCH=sh3el	ALIAS=evbsh3-el
 MACHINE=ews4800mips	MACHINE_ARCH=mipseb
 MACHINE=hp300		MACHINE_ARCH=m68k
 MACHINE=hppa		MACHINE_ARCH=hppa
-MACHINE=hpcarm		MACHINE_ARCH=arm	DEFAULT
+MACHINE=hpcarm		MACHINE_ARCH=arm	ALIAS=hpcoarm
 MACHINE=hpcarm		MACHINE_ARCH=earm	ALIAS=hpcearm
+MACHINE=hpcarm		MACHINE_ARCH=earmv4	ALIAS=hpcearmv4 DEFAULT
 MACHINE=hpcmips		MACHINE_ARCH=mipsel
 MACHINE=hpcsh		MACHINE_ARCH=sh3el
 MACHINE=i386		MACHINE_ARCH=i386
 MACHINE=ia64		MACHINE_ARCH=ia64
 MACHINE=ibmnws		MACHINE_ARCH=powerpc
-MACHINE=iyonix		MACHINE_ARCH=arm	DEFAULT
-MACHINE=iyonix		MACHINE_ARCH=earm	ALIAS=eiyonix
+MACHINE=iyonix		MACHINE_ARCH=arm	ALIAS=oiyonix
+MACHINE=iyonix		MACHINE_ARCH=earm	ALIAS=eiyonix DEFAULT
 MACHINE=landisk		MACHINE_ARCH=sh3el
 MACHINE=luna68k		MACHINE_ARCH=m68k
 MACHINE=mac68k		MACHINE_ARCH=m68k
@@ -637,8 +661,8 @@ MACHINE=mipsco		MACHINE_ARCH=mipseb
 MACHINE=mmeye		MACHINE_ARCH=sh3eb
 MACHINE=mvme68k		MACHINE_ARCH=m68k
 MACHINE=mvmeppc		MACHINE_ARCH=powerpc
-MACHINE=netwinder	MACHINE_ARCH=arm	DEFAULT
-MACHINE=netwinder	MACHINE_ARCH=earmv4	ALIAS=enetwinder
+MACHINE=netwinder	MACHINE_ARCH=arm	ALIAS=onetwinder
+MACHINE=netwinder	MACHINE_ARCH=earmv4	ALIAS=enetwinder DEFAULT
 MACHINE=news68k		MACHINE_ARCH=m68k
 MACHINE=newsmips	MACHINE_ARCH=mipseb
 MACHINE=next68k		MACHINE_ARCH=m68k
@@ -657,16 +681,16 @@ MACHINE=sbmips		MACHINE_ARCH=mipseb	ALIAS=sbmips-eb
 MACHINE=sbmips		MACHINE_ARCH=mipsel	ALIAS=sbmips-el
 MACHINE=sgimips		MACHINE_ARCH=mips64eb	ALIAS=sgimips64
 MACHINE=sgimips		MACHINE_ARCH=mipseb	DEFAULT
-MACHINE=shark		MACHINE_ARCH=arm	DEFAULT
-MACHINE=shark		MACHINE_ARCH=earmv4	ALIAS=eshark
+MACHINE=shark		MACHINE_ARCH=arm	ALIAS=oshark
+MACHINE=shark		MACHINE_ARCH=earmv4	ALIAS=eshark DEFAULT
 MACHINE=sparc		MACHINE_ARCH=sparc
 MACHINE=sparc64		MACHINE_ARCH=sparc64
 MACHINE=sun2		MACHINE_ARCH=m68000
 MACHINE=sun3		MACHINE_ARCH=m68k
 MACHINE=vax		MACHINE_ARCH=vax
 MACHINE=x68k		MACHINE_ARCH=m68k
-MACHINE=zaurus		MACHINE_ARCH=arm	DEFAULT
-MACHINE=zaurus		MACHINE_ARCH=earm	ALIAS=ezaurus
+MACHINE=zaurus		MACHINE_ARCH=arm	ALIAS=ozaurus
+MACHINE=zaurus		MACHINE_ARCH=earm	ALIAS=ezaurus DEFAULT
 '
 
 # getarch -- find the default MACHINE_ARCH for a MACHINE,
@@ -695,7 +719,7 @@ getarch()
 		line="${line%%#*}" # ignore comments
 		line="$( IFS=" ${tab}" ; echo $line )" # normalise white space
 		case "${line} " in
-		"")
+		" ")
 			# skip blank lines or comment lines
 			continue
 			;;
@@ -770,7 +794,7 @@ validatearch()
 		line="${line%%#*}" # ignore comments
 		line="$( IFS=" ${tab}" ; echo $line )" # normalise white space
 		case "${line} " in
-		"")
+		" ")
 			# skip blank lines or comment lines
 			continue
 			;;
@@ -1278,6 +1302,8 @@ parseoptions()
 	MAKEFLAGS="-de -m ${TOP}/share/mk ${MAKEFLAGS}"
 	MAKEFLAGS="${MAKEFLAGS} MKOBJDIRS=${MKOBJDIRS-yes}"
 	export MAKEFLAGS MACHINE MACHINE_ARCH
+	setmakeenv USETOOLS "yes"
+	setmakeenv MAKEWRAPPERMACHINE "${makewrappermachine:-${MACHINE}}"
 }
 
 # sanitycheck --
@@ -1748,29 +1774,30 @@ createmakewrapper()
 	eval cat <<EOF ${makewrapout}
 #! ${HOST_SH}
 # Set proper variables to allow easy "make" building of a NetBSD subtree.
-# Generated from:  \$NetBSD: build.sh,v 1.281 2014/05/05 19:12:19 martin Exp $
+# Generated from:  \$NetBSD: build.sh,v 1.286 2014/08/03 01:03:41 riz Exp $
 # with these arguments: ${_args}
 #
 
 EOF
 	{
-		for f in ${makeenv}; do
-			if eval "[ -z \"\${$f}\" -a \"\${${f}-X}\" = \"X\" ]"; then
-				eval echo "unset ${f}"
+		sorted_vars="$(for var in ${makeenv}; do echo "${var}" ; done \
+			| sort -u )"
+		for var in ${sorted_vars}; do
+			eval val=\"\${${var}}\"
+			eval is_set=\"\${${var}+set}\"
+			if [ -z "${is_set}" ]; then
+				echo "unset ${var}"
 			else
-				eval echo "${f}=\'\$$(echo ${f})\'\;\ export\ ${f}"
+				qval="$(shell_quote "${val}")"
+				echo "${var}=${qval}; export ${var}"
 			fi
 		done
 
-		eval cat <<EOF
-MAKEWRAPPERMACHINE=${makewrappermachine:-${MACHINE}}; export MAKEWRAPPERMACHINE
-USETOOLS=yes; export USETOOLS
-EOF
-	} | eval sort -u "${makewrapout}"
-	eval cat <<EOF "${makewrapout}"
+		cat <<EOF
 
 exec "\${TOOLDIR}/bin/${toolprefix}make" \${1+"\$@"}
 EOF
+	} | eval cat "${makewrapout}"
 	[ "${runcmd}" = "echo" ] && echo EOF
 	${runcmd} chmod +x "${makewrapper}"
 	statusmsg2 "Updated makewrapper:" "${makewrapper}"
@@ -2048,6 +2075,9 @@ main()
 	statusmsg2 "MACHINE_ARCH:"     "${MACHINE_ARCH}"
 	statusmsg2 "Build platform:"   "${uname_s} ${uname_r} ${uname_m}"
 	statusmsg2 "HOST_SH:"          "${HOST_SH}"
+	if [ -n "${BUILDID}" ]; then
+		statusmsg2 "BUILDID:"  "${BUILDID}"
+	fi
 
 	rebuildmake
 	validatemakeparams
