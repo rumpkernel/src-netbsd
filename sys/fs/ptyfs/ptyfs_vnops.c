@@ -1,4 +1,4 @@
-/*	$NetBSD: ptyfs_vnops.c,v 1.46 2014/04/04 18:10:29 christos Exp $	*/
+/*	$NetBSD: ptyfs_vnops.c,v 1.50 2014/08/21 06:40:35 maxv Exp $	*/
 
 /*
  * Copyright (c) 1993, 1995
@@ -76,7 +76,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ptyfs_vnops.c,v 1.46 2014/04/04 18:10:29 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ptyfs_vnops.c,v 1.50 2014/08/21 06:40:35 maxv Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -176,6 +176,8 @@ const struct vnodeopv_entry_desc ptyfs_vnodeop_entries[] = {
 	{ &vop_setattr_desc, ptyfs_setattr },		/* setattr */
 	{ &vop_read_desc, ptyfs_read },			/* read */
 	{ &vop_write_desc, ptyfs_write },		/* write */
+	{ &vop_fallocate_desc, genfs_eopnotsupp },	/* fallocate */
+	{ &vop_fdiscard_desc, genfs_eopnotsupp },	/* fdiscard */
 	{ &vop_ioctl_desc, ptyfs_ioctl },		/* ioctl */
 	{ &vop_fcntl_desc, ptyfs_fcntl },		/* fcntl */
 	{ &vop_poll_desc, ptyfs_poll },			/* poll */
@@ -211,10 +213,7 @@ const struct vnodeopv_desc ptyfs_vnodeop_opv_desc =
 	{ &ptyfs_vnodeop_p, ptyfs_vnodeop_entries };
 
 /*
- * _reclaim is called when getnewvnode()
- * wants to make use of an entry on the vnode
- * free list.  at this time the filesystem needs
- * to free any private data and remove the node
+ * free any private data and remove the node
  * from any private lists.
  */
 int
@@ -223,7 +222,12 @@ ptyfs_reclaim(void *v)
 	struct vop_reclaim_args /* {
 		struct vnode *a_vp;
 	} */ *ap = v;
-	return ptyfs_freevp(ap->a_vp);
+	struct vnode *vp = ap->a_vp;
+	struct ptyfsnode *ptyfs = VTOPTYFS(vp);
+
+	vcache_remove(vp->v_mount, &ptyfs->ptyfs_key, sizeof(ptyfs->ptyfs_key));
+	vp->v_data = NULL;
+	return 0;
 }
 
 int
@@ -236,15 +240,8 @@ ptyfs_inactive(void *v)
 	struct vnode *vp = ap->a_vp;
 	struct ptyfsnode *ptyfs = VTOPTYFS(vp);
 
-	switch (ptyfs->ptyfs_type) {
-	case PTYFSpts:
-	case PTYFSptc:
-		/* Emulate file deletion for call reclaim(). */
-		*ap->a_recycle = true;
-		break;
-	default:
-		break;
-	}
+	if (ptyfs->ptyfs_type == PTYFSptc)
+		ptyfs_clr_active(vp->v_mount, ptyfs->ptyfs_pty);
 	return spec_inactive(v);
 }
 
@@ -582,8 +579,6 @@ ptyfs_access(void *v)
 	    KAUTH_ACCESS_ACTION(ap->a_mode, ap->a_vp->v_type, va.va_mode),
 	    ap->a_vp, NULL, genfs_can_access(va.va_type, va.va_mode, va.va_uid,
 	    va.va_gid, ap->a_mode, ap->a_cred));
-
-	return error;
 }
 
 /*
@@ -638,16 +633,16 @@ ptyfs_lookup(void *v)
 			return EIO;
 
 		pty = atoi(pname, cnp->cn_namelen);
-
-		if (pty < 0 || pty >= npty || pty_isfree(pty, 1) ||
-		    ptyfs_used_get(PTYFSptc, pty, dvp->v_mount, 0) == NULL)
+		if (pty < 0 || ptyfs_next_active(dvp->v_mount, pty) != pty)
 			break;
-
-		error = ptyfs_allocvp(dvp->v_mount, vpp, PTYFSpts, pty,
-		    curlwp);
+		error = ptyfs_allocvp(dvp->v_mount, vpp, PTYFSpts, pty);
 		if (error)
 			return error;
-		VOP_UNLOCK(*vpp);
+		if (ptyfs_next_active(dvp->v_mount, pty) != pty) {
+			vrele(*vpp);
+			*vpp = NULL;
+			return ENOENT;
+		}
 		return 0;
 
 	default:
@@ -688,7 +683,7 @@ ptyfs_readdir(void *v)
 	off_t *cookies = NULL;
 	int ncookies;
 	struct vnode *vp;
-	int nc = 0;
+	int n, nc = 0;
 
 	vp = ap->a_vp;
 	ptyfs = VTOPTYFS(vp);
@@ -733,20 +728,20 @@ ptyfs_readdir(void *v)
 			*cookies++ = i + 1;
 		nc++;
 	}
-	for (; uio->uio_resid >= UIO_MX && i < npty; i++) {
+	while (uio->uio_resid >= UIO_MX) {
 		/* check for used ptys */
-		if (pty_isfree(i - 2, 1) ||
-		    ptyfs_used_get(PTYFSptc, i - 2, vp->v_mount, 0) == NULL)
-			continue;
-
-		dp->d_fileno = PTYFS_FILENO(i - 2, PTYFSpts);
+		n = ptyfs_next_active(vp->v_mount, i - 2);
+		if (n < 0)
+			break;
+		dp->d_fileno = PTYFS_FILENO(n, PTYFSpts);
 		dp->d_namlen = snprintf(dp->d_name, sizeof(dp->d_name),
-		    "%lld", (long long)(i - 2));
+		    "%lld", (long long)(n));
 		dp->d_type = DT_CHR;
 		if ((error = uiomove(dp, UIO_MX, uio)) != 0)
 			goto out;
+		i = n + 3;
 		if (cookies)
-			*cookies++ = i + 1;
+			*cookies++ = i;
 		nc++;
 	}
 

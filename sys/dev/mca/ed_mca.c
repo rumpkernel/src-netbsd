@@ -1,4 +1,4 @@
-/*	$NetBSD: ed_mca.c,v 1.55 2014/03/20 06:48:54 skrll Exp $	*/
+/*	$NetBSD: ed_mca.c,v 1.58 2014/08/10 16:44:35 tls Exp $	*/
 
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ed_mca.c,v 1.55 2014/03/20 06:48:54 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ed_mca.c,v 1.58 2014/08/10 16:44:35 tls Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -102,6 +102,7 @@ const struct bdevsw ed_bdevsw = {
 	.d_ioctl = edmcaioctl,
 	.d_dump = edmcadump,
 	.d_psize = edmcasize,
+	.d_discard = nodiscard,
 	.d_flag = D_DISK
 };
 
@@ -116,6 +117,7 @@ const struct cdevsw ed_cdevsw = {
 	.d_poll = nopoll,
 	.d_mmap = nommap,
 	.d_kqfilter = nokqfilter,
+	.d_discard = nodiscard,
 	.d_flag = D_DISK
 };
 
@@ -187,7 +189,7 @@ ed_mca_attach(device_t parent, device_t self, void *aux)
 	disk_init(&ed->sc_dk, device_xname(ed->sc_dev), &eddkdriver);
 	disk_attach(&ed->sc_dk);
 	rnd_attach_source(&ed->rnd_source, device_xname(ed->sc_dev),
-			  RND_TYPE_DISK, 0);
+			  RND_TYPE_DISK, RND_FLAG_DEFAULT);
 
 	ed->sc_flags |= EDF_INIT;
 

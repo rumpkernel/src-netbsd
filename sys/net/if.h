@@ -1,4 +1,4 @@
-/*	$NetBSD: if.h,v 1.165 2014/05/18 00:33:20 rmind Exp $	*/
+/*	$NetBSD: if.h,v 1.174 2014/07/31 06:35:47 ozaki-r Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -79,8 +79,15 @@
 
 #include <sys/socket.h>
 #include <sys/queue.h>
+#include <sys/mutex.h>
+
 #include <net/dlt.h>
 #include <net/pfil.h>
+#ifdef _KERNEL
+#include <net/pktqueue.h>
+#endif
+
+//#define NET_MPSAFE 1
 
 /*
  * Always include ALTQ glue here -- we use the ALTQ interface queue
@@ -194,17 +201,17 @@ struct if_data {
  * Structure defining a queue for a network interface.
  */
 struct ifqueue {
-	struct	mbuf *ifq_head;
-	struct	mbuf *ifq_tail;
-	int	ifq_len;
-	int	ifq_maxlen;
-	int	ifq_drops;
+	struct		mbuf *ifq_head;
+	struct		mbuf *ifq_tail;
+	int		ifq_len;
+	int		ifq_maxlen;
+	int		ifq_drops;
+	kmutex_t	*ifq_lock;
 };
 
 struct ifnet_lock;
 
 #ifdef _KERNEL
-#include <sys/mutex.h>
 #include <sys/condvar.h>
 #include <sys/percpu.h>
 
@@ -234,6 +241,9 @@ struct ifnet_lock {
  * (Would like to call this struct ``if'', but C isn't PL/1.)
  */
 TAILQ_HEAD(ifnet_head, ifnet);		/* the actual queue head */
+
+struct bridge_softc;
+struct bridge_iflist;
 
 typedef struct ifnet {
 	void	*if_softc;		/* lower-level data for this if */
@@ -282,7 +292,8 @@ typedef struct ifnet {
 	 */
 	struct ifaddr	*if_hwdl;
 	const uint8_t *if_broadcastaddr;/* linklevel broadcast bytestring */
-	void	*if_bridge;		/* bridge glue */
+	struct bridge_softc	*if_bridge;	/* bridge glue */
+	struct bridge_iflist	*if_bridgeif;	/* shortcut to interface list entry */
 	int	if_dlt;			/* data link type (<net/dlt.h>) */
 	pfil_head_t *	if_pfil;	/* filtering point */
 	uint64_t if_capabilities;	/* interface capabilities */
@@ -419,6 +430,9 @@ typedef struct ifnet {
 	"\22UDP6CSUM_Tx"	\
 	"\23TSO6"		\
 	"\24LRO"		\
+
+#define IFQ_LOCK(_ifq)		if ((_ifq)->ifq_lock) mutex_enter((_ifq)->ifq_lock)
+#define IFQ_UNLOCK(_ifq)	if ((_ifq)->ifq_lock) mutex_exit((_ifq)->ifq_lock)
 
 /*
  * Output queues (ifp->if_snd) and internetwork datagram level (pup level 1)
@@ -748,6 +762,7 @@ do {									\
 
 #define IFQ_ENQUEUE(ifq, m, pattr, err)					\
 do {									\
+	IFQ_LOCK((ifq));						\
 	if (ALTQ_IS_ENABLED((ifq)))					\
 		ALTQ_ENQUEUE((ifq), (m), (pattr), (err));		\
 	else {								\
@@ -761,34 +776,41 @@ do {									\
 	}								\
 	if ((err))							\
 		(ifq)->ifq_drops++;					\
+	IFQ_UNLOCK((ifq));						\
 } while (/*CONSTCOND*/ 0)
 
 #define IFQ_DEQUEUE(ifq, m)						\
 do {									\
+	IFQ_LOCK((ifq));						\
 	if (TBR_IS_ENABLED((ifq)))					\
 		(m) = tbr_dequeue((ifq), ALTDQ_REMOVE);			\
 	else if (ALTQ_IS_ENABLED((ifq)))				\
 		ALTQ_DEQUEUE((ifq), (m));				\
 	else								\
 		IF_DEQUEUE((ifq), (m));					\
+	IFQ_UNLOCK((ifq));						\
 } while (/*CONSTCOND*/ 0)
 
 #define	IFQ_POLL(ifq, m)						\
 do {									\
+	IFQ_LOCK((ifq));						\
 	if (TBR_IS_ENABLED((ifq)))					\
 		(m) = tbr_dequeue((ifq), ALTDQ_POLL);			\
 	else if (ALTQ_IS_ENABLED((ifq)))				\
 		ALTQ_POLL((ifq), (m));					\
 	else								\
 		IF_POLL((ifq), (m));					\
+	IFQ_UNLOCK((ifq));						\
 } while (/*CONSTCOND*/ 0)
 
 #define	IFQ_PURGE(ifq)							\
 do {									\
+	IFQ_LOCK((ifq));						\
 	if (ALTQ_IS_ENABLED((ifq)))					\
 		ALTQ_PURGE((ifq));					\
 	else								\
 		IF_PURGE((ifq));					\
+	IFQ_UNLOCK((ifq));						\
 } while (/*CONSTCOND*/ 0)
 
 #define	IFQ_SET_READY(ifq)						\
@@ -798,6 +820,7 @@ do {									\
 
 #define	IFQ_CLASSIFY(ifq, m, af, pattr)					\
 do {									\
+	IFQ_LOCK((ifq));						\
 	if (ALTQ_IS_ENABLED((ifq))) {					\
 		if (ALTQ_NEEDS_CLASSIFY((ifq)))				\
 			(pattr)->pattr_class = (*(ifq)->altq_classify)	\
@@ -805,6 +828,7 @@ do {									\
 		(pattr)->pattr_af = (af);				\
 		(pattr)->pattr_hdr = mtod((m), void *);		\
 	}								\
+	IFQ_UNLOCK((ifq));						\
 } while (/*CONSTCOND*/ 0)
 #else /* ! ALTQ */
 #define	ALTQ_DECL(x)		/* nothing */
@@ -812,6 +836,7 @@ do {									\
 
 #define	IFQ_ENQUEUE(ifq, m, pattr, err)					\
 do {									\
+	IFQ_LOCK((ifq));						\
 	if (IF_QFULL((ifq))) {						\
 		m_freem((m));						\
 		(err) = ENOBUFS;					\
@@ -821,13 +846,29 @@ do {									\
 	}								\
 	if ((err))							\
 		(ifq)->ifq_drops++;					\
+	IFQ_UNLOCK((ifq));						\
 } while (/*CONSTCOND*/ 0)
 
-#define	IFQ_DEQUEUE(ifq, m)	IF_DEQUEUE((ifq), (m))
+#define	IFQ_DEQUEUE(ifq, m)						\
+do {									\
+	IFQ_LOCK((ifq));						\
+	IF_DEQUEUE((ifq), (m));						\
+	IFQ_UNLOCK((ifq));						\
+} while (/*CONSTCOND*/ 0)
 
-#define	IFQ_POLL(ifq, m)	IF_POLL((ifq), (m))
+#define	IFQ_POLL(ifq, m)						\
+do {									\
+	IFQ_LOCK((ifq));						\
+	IF_POLL((ifq), (m));						\
+	IFQ_UNLOCK((ifq));						\
+} while (/*CONSTCOND*/ 0)
 
-#define	IFQ_PURGE(ifq)		IF_PURGE((ifq))
+#define	IFQ_PURGE(ifq)							\
+do {									\
+	IFQ_LOCK((ifq));						\
+	IF_PURGE((ifq));						\
+	IFQ_UNLOCK((ifq));						\
+} while (/*CONSTCOND*/ 0)
 
 #define	IFQ_SET_READY(ifq)	/* nothing */
 
@@ -869,8 +910,7 @@ void	if_up(struct ifnet *);
 int	ifconf(u_long, void *);
 void	ifinit(void);
 void	ifinit1(void);
-int	ifaddrpref_ioctl(struct socket *, u_long, void *, struct ifnet *,
-    lwp_t *);
+int	ifaddrpref_ioctl(struct socket *, u_long, void *, struct ifnet *);
 extern int (*ifioctl)(struct socket *, u_long, void *, struct lwp *);
 int	ifioctl_common(struct ifnet *, u_long, void *);
 int	ifpromisc(struct ifnet *, int);
@@ -941,12 +981,16 @@ __END_DECLS
 #ifdef _KERNEL
 
 #define	IFNET_FIRST()			TAILQ_FIRST(&ifnet_list)
+#define	IFNET_EMPTY()			TAILQ_EMPTY(&ifnet_list)
 #define	IFNET_NEXT(__ifp)		TAILQ_NEXT((__ifp), if_list)
 #define	IFNET_FOREACH(__ifp)		TAILQ_FOREACH(__ifp, &ifnet_list, if_list)
 #define	IFADDR_FIRST(__ifp)		TAILQ_FIRST(&(__ifp)->if_addrlist)
 #define	IFADDR_NEXT(__ifa)		TAILQ_NEXT((__ifa), ifa_list)
 #define	IFADDR_FOREACH(__ifa, __ifp)	TAILQ_FOREACH(__ifa, \
 					    &(__ifp)->if_addrlist, ifa_list)
+#define	IFADDR_FOREACH_SAFE(__ifa, __ifp, __nifa) \
+					    TAILQ_FOREACH_SAFE(__ifa, \
+					    &(__ifp)->if_addrlist, ifa_list, __nifa)
 #define	IFADDR_EMPTY(__ifp)		TAILQ_EMPTY(&(__ifp)->if_addrlist)
 
 extern struct ifnet_head ifnet_list;

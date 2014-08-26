@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.kern.inc,v 1.168 2014/05/05 19:06:29 martin Exp $
+#	$NetBSD: Makefile.kern.inc,v 1.172 2014/08/21 07:57:25 skrll Exp $
 #
 # This file contains common `MI' targets and definitions and it is included
 # at the bottom of each `MD' ${MACHINE}/conf/Makefile.${MACHINE}.
@@ -116,13 +116,6 @@ COPTS.kern_ssp.c+=	-fno-stack-protector -D__SSP__
 COPTS.cpu.c+=		-fno-stack-protector
 .endif
 
-# If we want the bpendtsleep: label in kern_synch.c, we need to use
-# -fno-reorder-blocks.  Don't make this a config(1) defflag without
-# making sure this fragment remains valid.
-.if defined(HAVE_GCC) && !empty(${CFLAGS:M-DKERN_SYNCH_BPENDTSLEEP_LABEL})
-COPTS.kern_synch.c+=	-fno-reorder-blocks
-.endif
-
 # Use the per-source COPTS variables to add -g to just those
 # files that match the shell patterns given in ${DEBUGLIST}
 #
@@ -221,10 +214,8 @@ ${_cfile:T:R}.o: ${_cfile}
 ## depending on the value of DEBUG.
 ##
 # load lines for config "xxx" will be emitted as:
-# xxx: ${SYSTEM_DEP} swapxxx.o
-#	${SYSTEM_LD_HEAD}
-#	${SYSTEM_LD} swapxxx.o
-#	${SYSTEM_LD_TAIL}
+# xxx: ${SYSTEM_DEP} swapxxxx.o vers.o build_kernel
+
 SYSTEM_OBJ?=	${MD_OBJS} ${MI_OBJS} ${OBJS:O} ${SYSLIBCOMPAT} ${LIBKERN}
 SYSTEM_DEP+=	Makefile ${SYSTEM_OBJ:O} .gdbinit
 .if defined(KERNLDSCRIPT)
@@ -241,34 +232,6 @@ SYSTEM_LD?=	@${_MKSHMSG} "   link  ${.CURDIR:T}/${.TARGET}"; \
 		${LD} -Map $@.map --cref ${LINKFLAGS} -o $@ '$${SYSTEM_OBJ}' '$${EXTRA_OBJ}' vers.o; \
 		${LD} -Map $@.map --cref ${LINKFLAGS} -o $@ ${SYSTEM_OBJ} ${EXTRA_OBJ} vers.o
 
-AUTO_SYMTAB_SPACE?=   yes
-
-.if empty(AUTO_SYMTAB_SPACE:M[Yy][Ee][Ss]) || defined(_SYMTAB_SPACE_ADJUSTED)
-SYSTEM_LD_TAIL_DBSYM?=	true
-.else
-SYSTEM_LD_TAIL_DBSYM?=	\
-	if grep '^\#define.*SYMTAB_SPACE' opt_ksyms.h > /dev/null; then \
-		_modify_opt_ksyms_h () {				\
-			${TOOL_SED}					\
-	-e 's/^\(\#define.*SYMTAB_SPACE[ 	]*\)[0-9]*/\1'$$1/	\
-	-e 's/\(.equiv[ 	]*_KERNEL_OPT_SYMTAB_SPACE,0x\)[0-9a-f]*/\1'$$(printf %x $$1)/ \
-			opt_ksyms.h > opt_ksyms.h.ADJ &&		\
-			mv opt_ksyms.h.ADJ opt_ksyms.h &&		\
-			${MAKE} ${MFLAGS} _SYMTAB_SPACE_ADJUSTED=1 $@;	\
-		};							\
-		_adj_symtab_space () {				\
-			set -- $$(${DBSYM} -p $@); 		\
-			echo Symtab size: $$1, space: $$2;	\
-			if [ "$$1" -gt "$$2" ]; then		\
-				echo Adjusting symtab space;	\
-				rm -f $@;			\
-				_modify_opt_ksyms_h $$1;	\
-			fi;					\
-		};						\
-		_adj_symtab_space;				\
-	fi
-.endif
-
 TEXTADDR?=	${LOADADDRESS}			# backwards compatibility
 LINKTEXT?=	${TEXTADDR:C/.+/-Ttext &/}
 LINKDATA?=	${DATAADDR:C/.+/-Tdata &/}
@@ -279,23 +242,13 @@ LINKFLAGS?=	${LINKFORMAT} ${LINKTEXT} ${LINKDATA} ${LINKENTRY} \
 
 LINKFLAGS_DEBUG?=	-X
 
-#
-# If we're relinking due to _SYMTAB_SPACE_ADJUSTED then don't perform
-# SYSTEM_LD_TAIL{,_DEBUG}. They'll be done in the parent invocation.
-#
-.if defined(_SYMTAB_SPACE_ADJUSTED)
-SYSTEM_LD_TAIL?=true
-SYSTEM_LD_TAIL_DEBUG?=true
-.else
-SYSTEM_LD_TAIL?=@${SYSTEM_LD_TAIL_DBSYM} ; \
-		${TOOL_SED} '/const char sccs/!d;s/.*@(.)//;s/\\.*//' vers.c; \
+SYSTEM_LD_TAIL?=@${TOOL_SED} '/const char sccs/!d;s/.*@(.)//;s/\\.*//' vers.c; \
 		${SIZE} $@; chmod 755 $@; \
 		${SYSTEM_CTFMERGE}
 SYSTEM_LD_TAIL_DEBUG?=; \
 		echo mv -f $@ $@.gdb; mv -f $@ $@.gdb; \
 		echo ${STRIP} ${STRIPFLAGS} -o $@ $@.gdb; \
 		${STRIP} ${STRIPFLAGS} -o $@ $@.gdb
-.endif
 LINKFLAGS_NORMAL?=	-S
 STRIPFLAGS?=	-g
 
@@ -305,31 +258,17 @@ SYSTEM_LD_TAIL+=${SYSTEM_LD_TAIL_DEBUG}
 LINKFLAGS+=	${LINKFLAGS_DEBUG}
 EXTRA_KERNELS+= ${KERNELS:@.KERNEL.@${.KERNEL.}.gdb@}
 CTFFLAGS+=	-g
-.if !defined(_SYMTAB_SPACE_ADJUSTED)
-SYSTEM_LD_TAIL+=; \
-	if grep '^\#define.*SYMTAB_SPACE' opt_ksyms.h > /dev/null; then \
-		echo "${DBSYM} $@.gdb"; \
-		${DBSYM} $@.gdb || (rm -f $@ ; exit 1) || exit 1; \
-	fi
-.endif
 .elifndef PROF
 LINKFLAGS+=	${LINKFLAGS_NORMAL}
 .endif
 
-#
-# More steps to skip if we're relinking due to _SYMTAB_SPACE_ADJUSTED (see
-# above)
-#
-.if !defined(_SYMTAB_SPACE_ADJUSTED)
-SYSTEM_LD_TAIL+=; \
-	if grep '^\#define.*SYMTAB_SPACE' opt_ksyms.h > /dev/null; then \
-		echo "${DBSYM} $@"; \
-		${DBSYM} $@ || (rm -f $@ ; exit 1) || exit 1; \
-	fi
-
 SYSTEM_LD_HEAD+=${SYSTEM_LD_HEAD_EXTRA}
-SYSTEM_LD_TAIL+=${SYSTEM_LD_TAIL_EXTRA}
+SYSTEM_LD_TAIL_STAGE1=	${SYSTEM_LD_TAIL}
+SYSTEM_LD_TAIL_STAGE2=	${SYSTEM_LD_TAIL}
+.if defined(COPY_SYMTAB)
+SYSTEM_LD_TAIL_STAGE2+=	; echo ${DBSYM} $@; ${DBSYM} $@
 .endif
+SYSTEM_LD_TAIL_STAGE2+=	${SYSTEM_LD_TAIL_EXTRA}
 
 ##
 ## (6) port independent targets and dependencies: assym.h, vers.o
@@ -590,6 +529,35 @@ AFLAGS+=	${AOPTS.${.IMPSRC:T}}
 CFLAGS+=	${COPTS.${.IMPSRC:T}} ${CPUFLAGS.${.IMPSRC:T}}
 CPPFLAGS+=	${CPPFLAGS.${.IMPSRC:T}}
 CWARNFLAGS+=	${CWARNFLAGS.${.IMPSRC:T}}
+
+locore.o machdep.o kern_ksyms.o: Makefile
+
+.if defined(COPY_SYMTAB)
+CPPFLAGS.locore.S+=		-DCOPY_SYMTAB
+CPPFLAGS.machdep.c+=		-DCOPY_SYMTAB
+CPPFLAGS.kern_ksyms.c+=		-DCOPY_SYMTAB
+CPPFLAGS.kern_ksyms_buf.c+=	-DCOPY_SYMTAB
+.endif
+
+.if !defined(COPY_SYMTAB)
+build_kernel: .USE
+	${SYSTEM_LD_HEAD}
+	${SYSTEM_LD} swap${.TARGET}.o
+	${SYSTEM_LD_TAIL_STAGE2}
+.else
+build_kernel: .USE
+	${CC} ${CFLAGS} ${CPPFLAGS} -DCOPY_SYMTAB \
+	    -c $S/kern/kern_ksyms_buf.c -o kern_ksyms_buf.o
+	${SYSTEM_LD_HEAD}
+	${SYSTEM_LD} swap${.TARGET}.o kern_ksyms_buf.o
+	${SYSTEM_LD_TAIL_STAGE1}
+	${CC} ${CFLAGS} ${CPPFLAGS} -DCOPY_SYMTAB \
+	    -DSYMTAB_SPACE=$$(${DBSYM} -P ${.TARGET}) \
+	    -c $S/kern/kern_ksyms_buf.c -o kern_ksyms_buf_real.o
+	${SYSTEM_LD_HEAD}
+	${SYSTEM_LD} swap${.TARGET}.o kern_ksyms_buf_real.o
+	${SYSTEM_LD_TAIL_STAGE2}
+.endif
 
 .include <bsd.files.mk>
 .include <bsd.clang-analyze.mk>

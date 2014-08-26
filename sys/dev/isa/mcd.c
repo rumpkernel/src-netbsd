@@ -1,4 +1,4 @@
-/*	$NetBSD: mcd.c,v 1.111 2014/03/16 05:20:28 dholland Exp $	*/
+/*	$NetBSD: mcd.c,v 1.113 2014/07/25 08:10:37 dholland Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994, 1995 Charles M. Hannum.  All rights reserved.
@@ -56,7 +56,7 @@
 /*static char COPYRIGHT[] = "mcd-driver (C)1993 by H.Veit & B.Moore";*/
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mcd.c,v 1.111 2014/03/16 05:20:28 dholland Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mcd.c,v 1.113 2014/07/25 08:10:37 dholland Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -214,6 +214,7 @@ const struct bdevsw mcd_bdevsw = {
 	.d_ioctl = mcdioctl,
 	.d_dump = mcddump,
 	.d_psize = mcdsize,
+	.d_discard = nodiscard,
 	.d_flag = D_DISK
 };
 
@@ -228,6 +229,7 @@ const struct cdevsw mcd_cdevsw = {
 	.d_poll = nopoll,
 	.d_mmap = nommap,
 	.d_kqfilter = nokqfilter,
+	.d_discard = nodiscard,
 	.d_flag = D_DISK
 };
 

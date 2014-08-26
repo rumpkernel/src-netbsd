@@ -1,4 +1,4 @@
-/*	$NetBSD: cdefs_elf.h,v 1.44 2014/05/13 19:58:23 christos Exp $	*/
+/*	$NetBSD: cdefs_elf.h,v 1.46 2014/08/26 09:03:17 christos Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -105,6 +105,18 @@
 	  ".popsection");
 
 #endif /* !__STDC__ */
+
+#if __arm__
+#define __ifunc(name, resolver) \
+	__asm(".globl	" _C_LABEL_STRING(#name) "\n" \
+	      ".type	" _C_LABEL_STRING(#name) ", %gnu_indirect_function\n" \
+	       _C_LABEL_STRING(#name) " = " _C_LABEL_STRING(#resolver))
+#else
+#define __ifunc(name, resolver) \
+	__asm(".globl	" _C_LABEL_STRING(#name) "\n" \
+	      ".type	" _C_LABEL_STRING(#name) ", @gnu_indirect_function\n" \
+	      _C_LABEL_STRING(#name) " = " _C_LABEL_STRING(#resolver))
+#endif
 
 #if __STDC__
 #define	__SECTIONSTRING(_sec, _str)					\

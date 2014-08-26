@@ -1,4 +1,4 @@
-/*	$NetBSD: hfs_vnops.c,v 1.29 2014/02/07 15:29:21 hannken Exp $	*/
+/*	$NetBSD: hfs_vnops.c,v 1.31 2014/08/10 08:53:22 hannken Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2007 The NetBSD Foundation, Inc.
@@ -101,7 +101,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hfs_vnops.c,v 1.29 2014/02/07 15:29:21 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hfs_vnops.c,v 1.31 2014/08/10 08:53:22 hannken Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_ipsec.h"
@@ -115,6 +115,7 @@ __KERNEL_RCSID(0, "$NetBSD: hfs_vnops.c,v 1.29 2014/02/07 15:29:21 hannken Exp $
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/malloc.h>
+#include <sys/pool.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/mount.h>
@@ -165,6 +166,8 @@ const struct vnodeopv_entry_desc hfs_vnodeop_entries[] = {
 	{ &vop_setattr_desc, hfs_vop_setattr },		/* setattr */
 	{ &vop_read_desc, hfs_vop_read },		/* read */
 	{ &vop_write_desc, genfs_eopnotsupp },		/* write */
+	{ &vop_fallocate_desc, genfs_eopnotsupp },	/* fallocate */
+	{ &vop_fdiscard_desc, genfs_eopnotsupp },	/* fdiscard */
 	{ &vop_ioctl_desc, genfs_eopnotsupp },		/* ioctl */
 	{ &vop_fcntl_desc, genfs_fcntl },		/* fcntl */
 	{ &vop_poll_desc, genfs_eopnotsupp },		/* poll */
@@ -219,6 +222,8 @@ const struct vnodeopv_entry_desc hfs_specop_entries[] = {
 	{ &vop_setattr_desc, hfs_vop_setattr },		/* setattr */
 	{ &vop_read_desc, spec_read },			/* read */
 	{ &vop_write_desc, spec_write },		/* write */
+	{ &vop_fallocate_desc, spec_fallocate },	/* fallocate */
+	{ &vop_fdiscard_desc, spec_fdiscard },		/* fdiscard */
 	{ &vop_ioctl_desc, spec_ioctl },		/* ioctl */
 	{ &vop_fcntl_desc, genfs_fcntl },		/* fcntl */
 	{ &vop_poll_desc, spec_poll },			/* poll */
@@ -275,6 +280,8 @@ const struct vnodeopv_entry_desc hfs_fifoop_entries[] = {
 	{ &vop_setattr_desc, hfs_vop_setattr },		/* setattr */
 	{ &vop_read_desc, vn_fifo_bypass },		/* read */
 	{ &vop_write_desc, vn_fifo_bypass },		/* write */
+	{ &vop_fallocate_desc, vn_fifo_bypass },	/* fallocate */
+	{ &vop_fdiscard_desc, vn_fifo_bypass },		/* fdiscard */
 	{ &vop_ioctl_desc, vn_fifo_bypass },		/* ioctl */
 	{ &vop_fcntl_desc, genfs_fcntl },		/* fcntl */
 	{ &vop_poll_desc, vn_fifo_bypass },		/* poll */
@@ -329,7 +336,6 @@ hfs_vop_lookup(void *v)
 	struct hfsnode *dp;	/* hfsnode for directory being searched */
 	kauth_cred_t cred;
 	struct vnode **vpp;		/* resultant vnode */
-	struct vnode *pdp;		/* saved dp during symlink work */
 	struct vnode *tdp;		/* returned by VFS_VGET */
 	struct vnode *vdp;		/* vnode for directory being searched */
 	hfs_catalog_key_t key;	/* hfs+ catalog search key for requested child */
@@ -388,12 +394,10 @@ hfs_vop_lookup(void *v)
 	}
 #endif
 	
-	pdp = vdp;
 	if (flags & ISDOTDOT) {
 		DPRINTF(("DOTDOT "));
-		VOP_UNLOCK(pdp);	/* race to get the inode */
-		error = VFS_VGET(vdp->v_mount, dp->h_parent, &tdp);
-		vn_lock(pdp, LK_EXCLUSIVE | LK_RETRY);
+		error = hfs_vget_internal(vdp->v_mount, dp->h_parent,
+		    HFS_RSRCFORK, &tdp);
 		if (error != 0)
 			goto error;
 		*vpp = tdp;
@@ -461,7 +465,8 @@ hfs_vop_lookup(void *v)
 			HFS_RSRCFORK, &tdp);
 		}
 		else
-			error = VFS_VGET(vdp->v_mount, rec.file.cnid, &tdp);
+			error = hfs_vget_internal(vdp->v_mount, rec.file.cnid,
+			    HFS_DATAFORK, &tdp);
 		if (error != 0)
 			goto error;
 		*vpp = tdp;
@@ -475,8 +480,6 @@ hfs_vop_lookup(void *v)
 	cache_enter(vdp, *vpp, cnp);
 #endif
 	
-	if (*vpp != vdp)
-		VOP_UNLOCK(*vpp);
 	error = 0;
 
 	/* FALLTHROUGH */
@@ -1033,8 +1036,8 @@ hfs_vop_reclaim(void *v)
 	vp = ap->a_vp;
 	hp = VTOH(vp);
 
-	/* Remove the hfsnode from its hash chain. */
-	hfs_nhashremove(hp);
+	KASSERT(hp->h_key.hnk_cnid == hp->h_rec.u.cnid);
+	vcache_remove(vp->v_mount, &hp->h_key, sizeof(hp->h_key));
 
 	/* Decrement the reference count to the volume's device. */
 	if (hp->h_devvp) {
@@ -1043,7 +1046,7 @@ hfs_vop_reclaim(void *v)
 	}
 	
 	genfs_node_destroy(vp);
-	free(vp->v_data, M_TEMP);
+	pool_put(&hfs_node_pool, hp);
 	vp->v_data = NULL;
 
 	return 0;

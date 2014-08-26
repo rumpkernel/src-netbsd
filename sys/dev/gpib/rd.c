@@ -1,4 +1,4 @@
-/*	$NetBSD: rd.c,v 1.33 2014/03/23 03:41:10 christos Exp $ */
+/*	$NetBSD: rd.c,v 1.36 2014/08/10 16:44:35 tls Exp $ */
 
 /*-
  * Copyright (c) 1996-2003 The NetBSD Foundation, Inc.
@@ -72,7 +72,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rd.c,v 1.33 2014/03/23 03:41:10 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rd.c,v 1.36 2014/08/10 16:44:35 tls Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -261,6 +261,7 @@ const struct bdevsw rd_bdevsw = {
 	.d_ioctl = rdioctl,
 	.d_dump = rddump,
 	.d_psize = rdsize,
+	.d_discard = nodiscard,
 	.d_flag = D_DISK
 };
 
@@ -275,6 +276,7 @@ const struct cdevsw rd_cdevsw = {
 	.d_poll = nopoll,
 	.d_mmap = nommap,
 	.d_kqfilter = nokqfilter,
+	.d_discard = nodiscard,
 	.d_flag = D_DISK
 };
 
@@ -426,7 +428,7 @@ rdattach(device_t parent, device_t self, void *aux)
 	 * attach the device into the random source list
 	 */
 	rnd_attach_source(&sc->rnd_source, device_xname(sc->sc_dev),
-			  RND_TYPE_DISK, 0);
+			  RND_TYPE_DISK, RND_FLAG_DEFAULT);
 }
 
 /*

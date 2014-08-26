@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.c,v 1.246 2014/05/20 18:32:08 rmind Exp $ */
+/*	$NetBSD: cpu.c,v 1.248 2014/07/25 17:21:32 nakayama Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -52,7 +52,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.246 2014/05/20 18:32:08 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.248 2014/07/25 17:21:32 nakayama Exp $");
 
 #include "opt_multiprocessor.h"
 #include "opt_lockdebug.h"
@@ -437,7 +437,7 @@ cpu_attach(struct cpu_softc *sc, int node, int mid)
 	/* Stuff to only run on the boot CPU */
 	cpu_setup();
 	snprintf(buf, sizeof buf, "%s @ %s MHz, %s FPU",
-		cpi->cpu_longname, clockfreq(cpi->hz / 1000), cpi->fpu_name);
+		cpi->cpu_longname, clockfreq(cpi->hz), cpi->fpu_name);
 	cpu_setmodel("%s (%s)", machine_model, buf);
 	printf(": %s\n", buf);
 	cache_print(sc);

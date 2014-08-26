@@ -1,4 +1,4 @@
-/*	$NetBSD: ccd.c,v 1.148 2014/04/06 00:56:39 joerg Exp $	*/
+/*	$NetBSD: ccd.c,v 1.152 2014/08/16 19:27:27 sborrill Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 1999, 2007, 2009 The NetBSD Foundation, Inc.
@@ -88,7 +88,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ccd.c,v 1.148 2014/04/06 00:56:39 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ccd.c,v 1.152 2014/08/16 19:27:27 sborrill Exp $");
+
+#if defined(_KERNEL_OPT)
+#include "opt_compat_netbsd.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -120,6 +124,8 @@ __KERNEL_RCSID(0, "$NetBSD: ccd.c,v 1.148 2014/04/06 00:56:39 joerg Exp $");
 
 #include <dev/ccdvar.h>
 #include <dev/dkvar.h>
+
+#include <miscfs/specfs/specdev.h> /* for v_rdev */
 
 #if defined(CCDDEBUG) && !defined(DEBUG)
 #define DEBUG
@@ -185,6 +191,7 @@ const struct bdevsw ccd_bdevsw = {
 	.d_ioctl = ccdioctl,
 	.d_dump = nodump,
 	.d_psize = ccdsize,
+	.d_discard = nodiscard,
 	.d_flag = D_DISK | D_MPSAFE
 };
 
@@ -199,6 +206,7 @@ const struct cdevsw ccd_cdevsw = {
 	.d_poll = nopoll,
 	.d_mmap = nommap,
 	.d_kqfilter = nokqfilter,
+	.d_discard = nodiscard,
 	.d_flag = D_DISK | D_MPSAFE
 };
 
@@ -292,7 +300,6 @@ ccdinit(struct ccd_softc *cs, char **cpaths, struct vnode **vpp,
 {
 	struct ccdcinfo *ci = NULL;
 	int ix;
-	struct vattr va;
 	struct ccdgeom *ccg = &cs->sc_geom;
 	char *tmppath;
 	int error, path_alloced;
@@ -344,19 +351,7 @@ ccdinit(struct ccd_softc *cs, char **cpaths, struct vnode **vpp,
 		/*
 		 * XXX: Cache the component's dev_t.
 		 */
-		vn_lock(vpp[ix], LK_SHARED | LK_RETRY);
-		error = VOP_GETATTR(vpp[ix], &va, l->l_cred);
-		VOP_UNLOCK(vpp[ix]);
-		if (error != 0) {
-#ifdef DEBUG
-			if (ccddebug & (CCDB_FOLLOW|CCDB_INIT))
-				printf("%s: %s: getattr failed %s = %d\n",
-				    cs->sc_xname, ci->ci_path,
-				    "error", error);
-#endif
-			goto out;
-		}
-		ci->ci_dev = va.va_rdev;
+		ci->ci_dev = vpp[ix]->v_rdev;
 
 		/*
 		 * Get partition information for the component.
@@ -435,6 +430,22 @@ ccdinit(struct ccd_softc *cs, char **cpaths, struct vnode **vpp,
 	ccg->ccg_ntracks = 1;
 	ccg->ccg_nsectors = 1024 * (1024 / ccg->ccg_secsize);
 	ccg->ccg_ncylinders = cs->sc_size / ccg->ccg_nsectors;
+	
+	if (cs->sc_ileave > 0)
+	        aprint_normal("%s: Interleaving %d component%s "
+	            "(%d block interleave)\n", cs->sc_xname,
+        	    cs->sc_nccdisks, (cs->sc_nccdisks != 0 ? "s" : ""),
+        	    cs->sc_ileave);
+	else
+	        aprint_normal("%s: Concatenating %d component%s\n",
+	            cs->sc_xname,
+        	    cs->sc_nccdisks, (cs->sc_nccdisks != 0 ? "s" : ""));
+	for (ix = 0; ix < cs->sc_nccdisks; ix++) {
+		ci = &cs->sc_cinfo[ix];
+		aprint_normal("%s: %s (%ju blocks)\n", cs->sc_xname,
+		    ci->ci_path, (uintmax_t)ci->ci_size);
+	}
+	aprint_normal("%s: total %ju blocks\n", cs->sc_xname, cs->sc_size);
 
 	/*
 	 * Create thread to handle deferred I/O.
@@ -1062,6 +1073,46 @@ ccdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		return ENOENT;
 	uc = kauth_cred_get();
 
+/*
+ * Compat code must not be called if on a platform where
+ * sizeof (size_t) == sizeof (uint64_t) as CCDIOCSET will
+ * be the same as CCDIOCSET_60
+ */
+#if defined(COMPAT_60) && !defined(_LP64)
+	switch (cmd) {
+	case CCDIOCSET_60: {
+		struct ccd_ioctl ccionew;
+       		struct ccd_ioctl_60 *ccio60 =
+       		    (struct ccd_ioctl_60 *)data;
+		ccionew.ccio_disks = ccio->ccio_disks;
+		ccionew.ccio_ndisks = ccio->ccio_ndisks;
+		ccionew.ccio_ileave = ccio->ccio_ileave;
+		ccionew.ccio_flags = ccio->ccio_flags;
+		ccionew.ccio_unit = ccio->ccio_unit;
+		error = ccdioctl(dev, CCDIOCSET, &ccionew, flag, l);
+		if (!error) {
+			/* Copy data back, adjust types if necessary */
+			ccio60->ccio_disks = ccionew.ccio_disks;
+			ccio60->ccio_ndisks = ccionew.ccio_ndisks;
+			ccio60->ccio_ileave = ccionew.ccio_ileave;
+			ccio60->ccio_flags = ccionew.ccio_flags;
+			ccio60->ccio_unit = ccionew.ccio_unit;
+			ccio60->ccio_size = (size_t)ccionew.ccio_size;
+		}
+		return error;
+		}
+		break;
+
+	case CCDIOCCLR_60:
+		/*
+		 * ccio_size member not used, so existing struct OK
+		 * drop through to existing non-compat version
+		 */
+		cmd = CCDIOCCLR;
+		break;
+	}
+#endif /* COMPAT_60 && !_LP64*/
+
 	/* Must be open for writes for these commands... */
 	switch (cmd) {
 	case CCDIOCSET:
@@ -1129,7 +1180,7 @@ ccdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 
 		/*
 		 * Allocate space for and copy in the array of
-		 * componet pathnames and device numbers.
+		 * component pathnames and device numbers.
 		 */
 		cpp = kmem_alloc(ccio->ccio_ndisks * sizeof(*cpp), KM_SLEEP);
 		vpp = kmem_alloc(ccio->ccio_ndisks * sizeof(*vpp), KM_SLEEP);
@@ -1268,7 +1319,9 @@ ccdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		kmem_free(cs->sc_itable, (cs->sc_nccdisks + 1) *
 		    sizeof(struct ccdiinfo));
 
-		/* Detatch the disk. */
+		aprint_normal("%s: detached\n", cs->sc_xname);
+
+		/* Detach the disk. */
 		disk_detach(&cs->sc_dkdev);
 		bufq_free(cs->sc_bufq);
 		ccdput(cs);
@@ -1498,15 +1551,16 @@ ccdgetdisklabel(dev_t dev)
 		 */
 		if (lp->d_secperunit != cs->sc_size)
 			printf("WARNING: %s: "
-			    "total sector size in disklabel (%d) != "
-			    "the size of ccd (%lu)\n", cs->sc_xname,
-			    lp->d_secperunit, (u_long)cs->sc_size);
+			    "total sector size in disklabel (%ju) != "
+			    "the size of ccd (%ju)\n", cs->sc_xname,
+			    (uintmax_t)lp->d_secperunit,
+			    (uintmax_t)cs->sc_size);
 		for (i = 0; i < lp->d_npartitions; i++) {
 			pp = &lp->d_partitions[i];
 			if (pp->p_offset + pp->p_size > cs->sc_size)
 				printf("WARNING: %s: end of partition `%c' "
-				    "exceeds the size of ccd (%lu)\n",
-				    cs->sc_xname, 'a' + i, (u_long)cs->sc_size);
+				    "exceeds the size of ccd (%ju)\n",
+				    cs->sc_xname, 'a' + i, (uintmax_t)cs->sc_size);
 		}
 	}
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: kernfs_vnops.c,v 1.151 2014/04/08 17:56:10 christos Exp $	*/
+/*	$NetBSD: kernfs_vnops.c,v 1.154 2014/07/25 08:20:52 dholland Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kernfs_vnops.c,v 1.151 2014/04/08 17:56:10 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kernfs_vnops.c,v 1.154 2014/07/25 08:20:52 dholland Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -191,6 +191,8 @@ const struct vnodeopv_entry_desc kernfs_vnodeop_entries[] = {
 	{ &vop_setattr_desc, kernfs_setattr },		/* setattr */
 	{ &vop_read_desc, kernfs_read },		/* read */
 	{ &vop_write_desc, kernfs_write },		/* write */
+	{ &vop_fallocate_desc, genfs_eopnotsupp },	/* fallocate */
+	{ &vop_fdiscard_desc, genfs_eopnotsupp },	/* fdiscard */
 	{ &vop_fcntl_desc, kernfs_fcntl },		/* fcntl */
 	{ &vop_ioctl_desc, kernfs_ioctl },		/* ioctl */
 	{ &vop_poll_desc, kernfs_poll },		/* poll */
@@ -520,11 +522,8 @@ kernfs_lookup(void *v)
 		break;
 
 	found:
-		error = kernfs_allocvp(dvp->v_mount, vpp, kt->kt_tag, kt, 0);
-		if (error)
-			return error;
-		VOP_UNLOCK(*vpp);
-		return 0;
+		error = vcache_get(dvp->v_mount, &kt, sizeof(kt), vpp);
+		return error;
 
 	case KFSsubdir:
 		ks = (struct kernfs_subdir *)kfs->kfs_kt->kt_data;
@@ -828,18 +827,17 @@ kernfs_ioctl(void *v)
 
 static int
 kernfs_setdirentfileno_kt(struct dirent *d, const struct kern_target *kt,
-    u_int32_t value, struct vop_readdir_args *ap)
+    struct vop_readdir_args *ap)
 {
 	struct kernfs_node *kfs;
 	struct vnode *vp;
 	int error;
 
-	if ((error = kernfs_allocvp(ap->a_vp->v_mount, &vp, kt->kt_tag, kt,
-	    value)) != 0)
+	if ((error = vcache_get(ap->a_vp->v_mount, &kt, sizeof(kt), &vp)) != 0)
 		return error;
 	kfs = VTOKERN(vp);
 	d->d_fileno = kfs->kfs_fileno;
-	vput(vp);
+	vrele(vp);
 	return 0;
 }
 
@@ -863,7 +861,7 @@ kernfs_setdirentfileno(struct dirent *d, off_t entry,
 		break;
 	}
 	if (ikt != thisdir_kfs->kfs_kt) {
-		if ((error = kernfs_setdirentfileno_kt(d, ikt, 0, ap)) != 0)
+		if ((error = kernfs_setdirentfileno_kt(d, ikt, ap)) != 0)
 			return error;
 	} else
 		d->d_fileno = thisdir_kfs->kfs_fileno;
@@ -1080,8 +1078,17 @@ kernfs_reclaim(void *v)
 	struct vop_reclaim_args /* {
 		struct vnode *a_vp;
 	} */ *ap = v;
+	struct vnode *vp = ap->a_vp;
+	struct kernfs_node *kfs = VTOKERN(vp);
 
-	return (kernfs_freevp(ap->a_vp));
+	vp->v_data = NULL;
+	vcache_remove(vp->v_mount, &kfs->kfs_kt, sizeof(kfs->kfs_kt));
+	mutex_enter(&kfs_lock);
+	TAILQ_REMOVE(&VFSTOKERNFS(vp->v_mount)->nodelist, kfs, kfs_list);
+	mutex_exit(&kfs_lock);
+	kmem_free(kfs, sizeof(struct kernfs_node));
+
+	return 0;
 }
 
 /*
