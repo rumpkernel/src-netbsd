@@ -1,4 +1,4 @@
-/*	$NetBSD: pci_subr.c,v 1.119 2014/05/25 14:56:46 njoly Exp $	*/
+/*	$NetBSD: pci_subr.c,v 1.124 2014/06/09 11:08:05 msaitoh Exp $	*/
 
 /*
  * Copyright (c) 1997 Zubin D. Dittia.  All rights reserved.
@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pci_subr.c,v 1.119 2014/05/25 14:56:46 njoly Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pci_subr.c,v 1.124 2014/06/09 11:08:05 msaitoh Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_pci.h"
@@ -317,6 +317,8 @@ static const struct pci_class pci_subclass_system[] = {
 	{ "RTC",		PCI_SUBCLASS_SYSTEM_RTC,   pci_interface_rtc,},
 	{ "PCI Hot-Plug",	PCI_SUBCLASS_SYSTEM_PCIHOTPLUG, NULL,	},
 	{ "SD Host Controller",	PCI_SUBCLASS_SYSTEM_SDHC,	NULL,	},
+	{ "IOMMU",		PCI_SUBCLASS_SYSTEM_IOMMU,	NULL,	},
+	{ "Root Complex Event Collector", PCI_SUBCLASS_SYSTEM_RCEC, NULL, },
 	{ "miscellaneous",	PCI_SUBCLASS_SYSTEM_MISC,	NULL,	},
 	{ NULL,			0,				NULL,	},
 };
@@ -1117,9 +1119,110 @@ pci_conf_print_msi_cap(const pcireg_t *regs, int capoff)
 }
 
 /* XXX pci_conf_print_cpci_hostwap_cap */
-/* XXX pci_conf_print_pcix_cap */
+
+/*
+ * For both command register and status register.
+ * The argument "idx" is index number (0 to 7).
+ */
+static int
+pcix_split_trans(unsigned int idx)
+{
+	static int table[8] = {
+		1, 2, 3, 4, 8, 12, 16, 32
+	};
+
+	if (idx >= __arraycount(table))
+		return -1;
+	return table[idx];
+}
+
+static void
+pci_conf_print_pcix_cap(const pcireg_t *regs, int capoff)
+{
+	pcireg_t reg;
+	int isbridge;
+	int i;
+
+	isbridge = (PCI_HDRTYPE_TYPE(regs[o2i(PCI_BHLC_REG)])
+	    & PCI_HDRTYPE_PPB) != 0 ? 1 : 0;
+	printf("\n  PCI-X %s Capabilities Register\n",
+	    isbridge ? "Bridge" : "Non-bridge");
+
+	reg = regs[o2i(capoff)];
+	if (isbridge != 0) {
+		printf("    Secondary status register: 0x%04x\n",
+		    (reg & 0xffff0000) >> 16);
+		onoff("64bit device", reg, PCIX_STATUS_64BIT);
+		onoff("133MHz capable", reg, PCIX_STATUS_133);
+		onoff("Split completion discarded", reg, PCIX_STATUS_SPLDISC);
+		onoff("Unexpected split completion", reg, PCIX_STATUS_SPLUNEX);
+		onoff("Split completion overrun", reg, PCIX_BRIDGE_ST_SPLOVRN);
+		onoff("Split request delayed", reg, PCIX_BRIDGE_ST_SPLRQDL);
+		printf("      Secondary clock frequency: 0x%x\n",
+		    (reg & PCIX_BRIDGE_2NDST_CLKF)
+		    >> PCIX_BRIDGE_2NDST_CLKF_SHIFT);
+		printf("      Version: 0x%x\n",
+		    (reg & PCIX_BRIDGE_2NDST_VER_MASK)
+		    >> PCIX_BRIDGE_2NDST_VER_SHIFT);
+		onoff("266MHz capable", reg, PCIX_BRIDGE_ST_266);
+		onoff("533MHz capable", reg, PCIX_BRIDGE_ST_533);
+	} else {
+		printf("    Command register: 0x%04x\n",
+		    (reg & 0xffff0000) >> 16);
+		onoff("Data Parity Error Recovery", reg,
+		    PCIX_CMD_PERR_RECOVER);
+		onoff("Enable Relaxed Ordering", reg, PCIX_CMD_RELAXED_ORDER);
+		printf("      Maximum Burst Read Count: %u\n",
+		    PCIX_CMD_BYTECNT(reg));
+		printf("      Maximum Split Transactions: %d\n",
+		    pcix_split_trans((reg & PCIX_CMD_SPLTRANS_MASK)
+			>> PCIX_CMD_SPLTRANS_SHIFT));
+	}
+	reg = regs[o2i(capoff+PCIX_STATUS)]; /* Or PCIX_BRIDGE_PRI_STATUS */
+	printf("    %sStatus register: 0x%08x\n",
+	    isbridge ? "Bridge " : "", reg);
+	printf("      Function: %d\n", PCIX_STATUS_FN(reg));
+	printf("      Device: %d\n", PCIX_STATUS_DEV(reg));
+	printf("      Bus: %d\n", PCIX_STATUS_BUS(reg));
+	onoff("64bit device", reg, PCIX_STATUS_64BIT);
+	onoff("133MHz capable", reg, PCIX_STATUS_133);
+	onoff("Split completion discarded", reg, PCIX_STATUS_SPLDISC);
+	onoff("Unexpected split completion", reg, PCIX_STATUS_SPLUNEX);
+	if (isbridge != 0) {
+		onoff("Split completion overrun", reg, PCIX_BRIDGE_ST_SPLOVRN);
+		onoff("Split request delayed", reg, PCIX_BRIDGE_ST_SPLRQDL);
+	} else {
+		onoff2("Device Complexity", reg, PCIX_STATUS_DEVCPLX,
+		    "bridge device", "simple device");
+		printf("      Designed max memory read byte count: %d\n",
+		    512 << ((reg & PCIX_STATUS_MAXB_MASK)
+			>> PCIX_STATUS_MAXB_SHIFT));
+		printf("      Designed max outstanding split transaction: %d\n",
+		    pcix_split_trans((reg & PCIX_STATUS_MAXST_MASK)
+			>> PCIX_STATUS_MAXST_SHIFT));
+		printf("      MAX cumulative Read Size: %u\n",
+		    8 << ((reg & 0x1c000000) >> PCIX_STATUS_MAXRS_SHIFT));
+		onoff("Received split completion error", reg,
+		    PCIX_STATUS_SCERR);
+	}
+	onoff("266MHz capable", reg, PCIX_STATUS_266);
+	onoff("533MHz capable", reg, PCIX_STATUS_533);
+
+	if (isbridge == 0)
+		return;
+
+	/* Only for bridge */
+	for (i = 0; i < 2; i++) {
+		reg = regs[o2i(capoff+PCIX_BRIDGE_UP_STCR + (4 * i))];
+		printf("    %s split transaction control register: 0x%08x\n",
+		    (i == 0) ? "Upstream" : "Downstream", reg);
+		printf("      Capacity: %d\n", reg & PCIX_BRIDGE_STCAP);
+		printf("      Commitment Limit: %d\n",
+		    (reg & PCIX_BRIDGE_STCLIM) >> PCIX_BRIDGE_STCLIM_SHIFT);
+	}
+}
+
 /* XXX pci_conf_print_ldt_cap */
-/* XXX pci_conf_print_vendspec_cap */
 
 static void
 pci_conf_print_vendspec_cap(const pcireg_t *regs, int capoff)
@@ -1329,8 +1432,8 @@ pci_conf_print_pcie_cap(const pcireg_t *regs, int capoff)
 	pci_print_pcie_L0s_latency((reg & PCIE_DCAP_L0S_LATENCY) >> 6);
 	printf("      Endpoint L1 Acceptable Latency: ");
 	pci_print_pcie_L1_latency((reg & PCIE_DCAP_L1_LATENCY) >> 9);
-	onoff("Attention Button Present:", reg, PCIE_DCAP_ATTN_BUTTON);
-	onoff("Attention Indicator Present:", reg, PCIE_DCAP_ATTN_IND);
+	onoff("Attention Button Present", reg, PCIE_DCAP_ATTN_BUTTON);
+	onoff("Attention Indicator Present", reg, PCIE_DCAP_ATTN_IND);
 	onoff("Power Indicator Present", reg, PCIE_DCAP_PWR_IND);
 	onoff("Role-Based Error Report", reg, PCIE_DCAP_ROLE_ERR_RPT);
 	printf("      Captured Slot Power Limit Value: %d\n",
@@ -1450,7 +1553,7 @@ pci_conf_print_pcie_cap(const pcireg_t *regs, int capoff)
 			    (unsigned int)(reg & PCIE_LCSR_LINKSPEED) >> 16);
 		} else {
 			printf("%sGT/s\n",
-			    linkspeeds[((reg & PCIE_LCSR_LINKSPEED) >> 16) - 1]);
+			    linkspeeds[((reg & PCIE_LCSR_LINKSPEED) >> 16)-1]);
 		}
 		printf("      Negotiated Link Width: x%u lanes\n",
 		    (reg >> 20) & 0x003f);
@@ -1690,7 +1793,30 @@ pci_conf_print_pcie_cap(const pcireg_t *regs, int capoff)
 	/* Slot Status 2 */
 }
 
-/* XXX pci_conf_print_msix_cap */
+static void
+pci_conf_print_msix_cap(const pcireg_t *regs, int capoff)
+{
+	pcireg_t reg;
+
+	printf("\n  MSI-X Capability Register\n");
+
+	reg = regs[o2i(capoff + PCI_MSIX_CTL)];
+	printf("    Message Control register: 0x%04x\n",
+	    (reg >> 16) & 0xff);
+	printf("      Table Size: %d\n",PCI_MSIX_CTL_TBLSIZE(reg));
+	onoff("Function Mask", reg, PCI_MSIX_CTL_FUNCMASK);
+	onoff("MSI-X Enable", reg, PCI_MSIX_CTL_ENABLE);
+	reg = regs[o2i(capoff + PCI_MSIX_TBLOFFSET)];
+	printf("    Table offset register: 0x%08x\n", reg);
+	printf("      Table offset: %08x\n", reg & PCI_MSIX_TBLOFFSET_MASK);
+	printf("      BIR: 0x%x\n", reg & PCI_MSIX_TBLBIR_MASK);
+	reg = regs[o2i(capoff + PCI_MSIX_PBAOFFSET)];
+	printf("    Pending bit array register: 0x%08x\n", reg);
+	printf("      Pending bit array offset: %08x\n",
+	    reg & PCI_MSIX_PBAOFFSET_MASK);
+	printf("      BIR: 0x%x\n", reg & PCI_MSIX_PBABIR_MASK);
+}
+
 /* XXX pci_conf_print_sata_cap */
 static void
 pci_conf_print_pciaf_cap(const pcireg_t *regs, int capoff)
@@ -1722,7 +1848,8 @@ pci_conf_print_caplist(
 {
 	int off;
 	pcireg_t rval;
-	int pcie_off = -1, pcipm_off = -1, msi_off = -1, vendspec_off = -1;
+	int pcie_off = -1, pcipm_off = -1, msi_off = -1, pcix_off = -1;
+	int vendspec_off = -1, msix_off = -1;
 	int debugport_off = -1, subsystem_off = -1, pciaf_off = -1;
 
 	for (off = PCI_CAPLIST_PTR(regs[o2i(capoff)]);
@@ -1738,7 +1865,8 @@ pci_conf_print_caplist(
 			break;
 		case PCI_CAP_PWRMGMT:
 			printf("Power Management, rev. %s",
-			    pci_conf_print_pcipm_cap_pmrev((rval >> 0) & 0x07));
+			    pci_conf_print_pcipm_cap_pmrev(
+				    (rval >> 0) & 0x07));
 			pcipm_off = off;
 			break;
 		case PCI_CAP_AGP:
@@ -1760,6 +1888,7 @@ pci_conf_print_caplist(
 			printf("CompactPCI Hot-swapping");
 			break;
 		case PCI_CAP_PCIX:
+			pcix_off = off;
 			printf("PCI-X");
 			break;
 		case PCI_CAP_LDT:
@@ -1795,6 +1924,7 @@ pci_conf_print_caplist(
 			break;
 		case PCI_CAP_MSIX:
 			printf("MSI-X");
+			msix_off = off;
 			break;
 		case PCI_CAP_SATA:
 			printf("SATA");
@@ -1816,7 +1946,8 @@ pci_conf_print_caplist(
 	if (msi_off != -1)
 		pci_conf_print_msi_cap(regs, msi_off);
 	/* XXX CPCI_HOTSWAP */
-	/* XXX PCIX */
+	if (pcix_off != -1)
+		pci_conf_print_pcix_cap(regs, pcix_off);
 	/* XXX LDT */
 	if (vendspec_off != -1)
 		pci_conf_print_vendspec_cap(regs, vendspec_off);
@@ -1830,7 +1961,8 @@ pci_conf_print_caplist(
 	/* XXX SECURE */
 	if (pcie_off != -1)
 		pci_conf_print_pcie_cap(regs, pcie_off);
-	/* XXX MSIX */
+	if (msix_off != -1)
+		pci_conf_print_msix_cap(regs, msix_off);
 	/* XXX SATA */
 	if (pciaf_off != -1)
 		pci_conf_print_pciaf_cap(regs, pciaf_off);
@@ -1959,9 +2091,6 @@ pci_conf_print_type1(
 	int use_upper;
 
 	/*
-	 * XXX these need to be printed in more detail, need to be
-	 * XXX checked against specs/docs, etc.
-	 *
 	 * This layout was cribbed from the TI PCI2030 PCI-to-PCI
 	 * Bridge chip documentation, and may not be correct with
 	 * respect to various standards. (XXX)
@@ -2017,7 +2146,8 @@ pci_conf_print_type1(
 			printf("      range:  0x%08x-0x%08x\n", base, limit);
 		else
 			printf("      range:  0x%04x-0x%04x\n", base, limit);
-	}
+	} else
+		printf("      range:  not set\n");
 
 	/* Non-prefetchable memory region */
 	rval = regs[o2i(PCI_BRIDGE_MEMORY_REG)];
@@ -2032,6 +2162,8 @@ pci_conf_print_type1(
 		& PCI_BRIDGE_MEMORY_LIMIT_MASK) << 20) | 0x000fffff;
 	if (base < limit)
 		printf("      range:  0x%08x-0x%08x\n", base, limit);
+	else
+		printf("      range:  not set\n");
 
 	/* Prefetchable memory region */
 	rval = regs[o2i(PCI_BRIDGE_PREFETCHMEM_REG)];
@@ -2066,7 +2198,8 @@ pci_conf_print_type1(
 		else
 			printf("      range:  0x%08x-0x%08x\n",
 			    (uint32_t)pbase, (uint32_t)plimit);
-	}
+	} else
+		printf("      range:  not set\n");
 
 	if (regs[o2i(PCI_COMMAND_STATUS_REG)] & PCI_STATUS_CAPLIST_SUPPORT)
 		printf("    Capability list pointer: 0x%02x\n",
@@ -2244,7 +2377,8 @@ pci_conf_print(
 	int off, capoff, endoff, hdrtype;
 	const char *typename;
 #ifdef _KERNEL
-	void (*typeprintfn)(pci_chipset_tag_t, pcitag_t, const pcireg_t *, int);
+	void (*typeprintfn)(pci_chipset_tag_t, pcitag_t, const pcireg_t *,
+	    int);
 	int sizebars;
 #else
 	void (*typeprintfn)(const pcireg_t *);

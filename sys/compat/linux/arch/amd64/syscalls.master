@@ -1,4 +1,4 @@
-	$NetBSD: syscalls.master,v 1.50 2014/05/20 17:24:49 njoly Exp $
+	$NetBSD: syscalls.master,v 1.52 2014/05/31 08:51:19 njoly Exp $
 
 ;	@(#)syscalls.master	8.1 (Berkeley) 7/19/93
 
@@ -85,7 +85,7 @@
 			    linux_off_t offset); }
 10	STD		{ int|linux_sys||mprotect(const void *start, \
 			    unsigned long len, int prot); }
-11	NOARGS		{ int|sys||munmap(void *addr, int len); }
+11	NOARGS		{ int|sys||munmap(void *addr, size_t len); }
 12	STD		{ int|linux_sys||brk(char *nsize); }
 13	STD		{ int|linux_sys||rt_sigaction(int signum, \
 			    const struct linux_sigaction *nsa, \
@@ -441,7 +441,8 @@
 232	UNIMPL		epoll_wait
 233	UNIMPL		epoll_ctl
 234	STD		{ int|linux_sys||tgkill(int tgid, int tid, int sig); }
-235	STD		{ int|linux_sys||utimes(const char *path, struct linux_timeval *times); }
+235	NOARGS		{ int|compat_50_sys||utimes(const char *path, \
+			    const struct timeval50 *tptr); }
 236	UNIMPL		vserver
 237	UNIMPL		mbind
 238	UNIMPL		set_mempolicy

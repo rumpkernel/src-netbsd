@@ -1,4 +1,4 @@
-/*	$NetBSD: rump.c,v 1.307 2014/06/29 11:36:52 justin Exp $	*/
+/*	$NetBSD: rump.c,v 1.312 2014/08/25 18:44:02 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007-2011 Antti Kantee.  All Rights Reserved.
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rump.c,v 1.307 2014/06/29 11:36:52 justin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rump.c,v 1.312 2014/08/25 18:44:02 pooka Exp $");
 
 #include <sys/systm.h>
 #define ELFSIZE ARCH_ELFSIZE
@@ -302,6 +302,7 @@ rump_init(void)
 	cprng_init();
 	kern_cprng = cprng_strong_create("kernel", IPL_VM,
 	    CPRNG_INIT_ANY|CPRNG_REKEY_ANY);
+
 	rump_hyperentropy_init();
 
 	procinit();
@@ -360,6 +361,9 @@ rump_init(void)
 
 		aprint_verbose("cpu%d at thinair0: rump virtual cpu\n", i);
 	}
+
+	/* Once all CPUs are detected, initialize the per-CPU cprng_fast.  */
+	cprng_fast_init();
 
 	/* CPUs are up.  allow kernel threads to run */
 	rump_thread_allow(NULL);
@@ -652,16 +656,34 @@ rump_hyp_rfork(void *priv, int flags, const char *comm)
 {
 	struct vmspace *newspace;
 	struct proc *p;
+	struct lwp *l;
 	int error;
+	bool initfds;
+
+	/*
+	 * If we are forking off of pid 1, initialize file descriptors.
+	 */
+	l = curlwp;
+	if (l->l_proc->p_pid == 1) {
+		KASSERT(flags == RUMP_RFFD_CLEAR);
+		initfds = true;
+	} else {
+		initfds = false;
+	}
 
 	if ((error = rump_lwproc_rfork(flags)) != 0)
 		return error;
 
 	/*
+	 * We forked in this routine, so cannot use curlwp (const)
+	 */
+	l = rump_lwproc_curlwp();
+	p = l->l_proc;
+
+	/*
 	 * Since it's a proxy proc, adjust the vmspace.
 	 * Refcount will eternally be 1.
 	 */
-	p = curproc;
 	newspace = kmem_zalloc(sizeof(*newspace), KM_SLEEP);
 	newspace->vm_refcnt = 1;
 	newspace->vm_map.pmap = priv;
@@ -669,6 +691,8 @@ rump_hyp_rfork(void *priv, int flags, const char *comm)
 	p->p_vmspace = newspace;
 	if (comm)
 		strlcpy(p->p_comm, comm, sizeof(p->p_comm));
+	if (initfds)
+		rump_consdev_init();
 
 	return 0;
 }
@@ -900,17 +924,4 @@ rump_boot_etfs_register(struct rump_boot_etfs *eb)
 	eb->_eb_next = ebstart;
 	eb->eb_status = -1;
 	ebstart = eb;
-}
-
-/*
- * Temporary notification that rumpkern_time is obsolete.  This is to
- * be removed along with obsoleting rumpkern_time in a few months.
- */
-#define RUMPKERN_TIME_WARN "rumpkern_time is obsolete, functionality in librump"
-__warn_references(rumpkern_time_is_obsolete,RUMPKERN_TIME_WARN)
-void rumpkern_time_is_obsolete(void);
-void
-rumpkern_time_is_obsolete(void)
-{
-	printf("WARNING: %s\n", RUMPKERN_TIME_WARN);
 }

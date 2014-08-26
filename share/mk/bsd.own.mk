@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.own.mk,v 1.809 2014/05/23 18:51:31 matt Exp $
+#	$NetBSD: bsd.own.mk,v 1.833 2014/08/23 02:26:36 matt Exp $
 
 # This needs to be before bsd.init.mk
 .if defined(BSD_MK_COMPAT_FILE)
@@ -14,7 +14,7 @@ MAKECONF?=	/etc/mk.conf
 #
 # CPU model, derived from MACHINE_ARCH
 #
-MACHINE_CPU=	${MACHINE_ARCH:C/mipse[bl]/mips/:C/mips64e[bl]/mips/:C/sh3e[bl]/sh3/:S/coldfire/m68k/:S/m68000/m68k/:C/arm.*/arm/:C/earm.*/arm/:S/earm/arm/:S/powerpc64/powerpc/}
+MACHINE_CPU=	${MACHINE_ARCH:C/mipse[bl]/mips/:C/mips64e[bl]/mips/:C/sh3e[bl]/sh3/:S/coldfire/m68k/:S/m68000/m68k/:C/arm.*/arm/:C/earm.*/arm/:S/earm/arm/:S/powerpc64/powerpc/:S/aarch64eb/aarch64/}
 
 #
 # Subdirectory used below ${RELEASEDIR} when building a release
@@ -44,27 +44,31 @@ NEED_OWN_INSTALL_TARGET?=	yes
 # If some future port is not supported by the in-tree toolchain, this should
 # be set to "yes" for that port only.
 #
+.if ${MACHINE} == "playstation2"
+TOOLCHAIN_MISSING?=	yes
+.endif
+
 TOOLCHAIN_MISSING?=	no
+
+.if ${MACHINE_CPU} == "aarch64" && !defined(EXTERNAL_TOOLCHAIN) && ${MKLLVM:Uyes} != "no"
+MKLLVM?=	yes
+HAVE_LLVM?=	yes
+MKGCC?=		no
+.endif
 
 #
 # GCC Using platforms.
 #
 .if ${MKGCC:Uyes} != "no"
 
-#
-# Platforms still using GCC 4.1
-#
-.if ${MACHINE_CPU}  == "vax"
-HAVE_GCC?=    4
-
 # Platforms still using GCC 4.5
-.elif \
-      ${MACHINE_CPU} == "ia64" || \
+.if \
       ${MACHINE_CPU} == "m68k" || \
-      ${MACHINE_CPU} == "sh3" || \
       ${MACHINE_ARCH} == "powerpc"
 HAVE_GCC?=    45
 
+.elif ${MACHINE} == "playstation2" || ${MACHINE_CPU} == "aarch64"
+HAVE_GCC?=    0
 .else
 # Otherwise, default to GCC4.8
 HAVE_GCC?=    48
@@ -86,10 +90,12 @@ EXTERNAL_GCC_SUBDIR=	/does/not/exist
 
 .if !empty(MACHINE_ARCH:Mearm*)
 _LIBC_COMPILER_RT.${MACHINE_ARCH}=	yes
-_LIBC_UNWIND_SUPPORT.${MACHINE_ARCH}=	yes
 .endif
 
+_LIBC_COMPILER_RT.aarch64=	yes
 _LIBC_COMPILER_RT.i386=		yes
+_LIBC_COMPILER_RT.powerpc=	yes
+_LIBC_COMPILER_RT.powerpc64=	yes
 _LIBC_COMPILER_RT.x86_64=	yes
 
 .if ${MKLLVM:Uno} == "yes" && ${_LIBC_COMPILER_RT.${MACHINE_ARCH}:Uno} == "yes"
@@ -98,22 +104,9 @@ HAVE_LIBGCC?=	no
 HAVE_LIBGCC?=	yes
 .endif
 
-_LIBC_UNWIND_SUPPORT.alpha=	yes
-_LIBC_UNWIND_SUPPORT.hppa=	yes
-_LIBC_UNWIND_SUPPORT.i386=	yes
-_LIBC_UNWIND_SUPPORT.m68k=	yes
-_LIBC_UNWIND_SUPPORT.mipseb=	yes
-_LIBC_UNWIND_SUPPORT.mipsel=	yes
-_LIBC_UNWIND_SUPPORT.mips64eb=	yes
-_LIBC_UNWIND_SUPPORT.mips64el=	yes
-_LIBC_UNWIND_SUPPORT.powerpc=	yes
-_LIBC_UNWIND_SUPPORT.sh3el=	yes
-_LIBC_UNWIND_SUPPORT.sh3eb=	yes
-_LIBC_UNWIND_SUPPORT.sparc=	yes
-_LIBC_UNWIND_SUPPORT.sparc64=	yes
-_LIBC_UNWIND_SUPPORT.vax=	yes
-_LIBC_UNWIND_SUPPORT.x86_64=	yes
-.if ${MKLLVM:Uno} == "yes" && ${_LIBC_UNWIND_SUPPORT.${MACHINE_ARCH}:Uno} == "yes"
+
+# ia64 is not support
+.if ${MKLLVM:Uno} == "yes" || !empty(MACHINE_ARCH:Mearm*)
 HAVE_LIBGCC_EH?=	no
 .else
 HAVE_LIBGCC_EH?=	yes
@@ -278,6 +271,7 @@ TOOL_OBJC.clang=	${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-clang
 # PCC supports C and Fortran
 TOOL_CC.pcc=		${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-pcc
 TOOL_CPP.pcc=		${TOOLDIR}/libexec/${MACHINE_GNU_PLATFORM}-cpp
+TOOL_CXX.pcc=		${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-p++
 
 #
 # Make sure DESTDIR is set, so that builds with these tools always
@@ -375,6 +369,8 @@ TOOL_POWERPCMKBOOTIMAGE=${TOOLDIR}/bin/${_TOOL_PREFIX}powerpc-mkbootimage
 TOOL_PWD_MKDB=		${TOOLDIR}/bin/${_TOOL_PREFIX}pwd_mkdb
 TOOL_REFER=		${TOOLDIR}/bin/${_TOOL_PREFIX}refer
 TOOL_ROFF_ASCII=	PATH=${TOOLDIR}/lib/groff:$${PATH} ${TOOLDIR}/bin/${_TOOL_PREFIX}nroff
+TOOL_ROFF_DOCASCII=	${TOOL_GROFF} -Tascii
+TOOL_ROFF_DOCHTML=	${TOOL_GROFF} -Thtml
 TOOL_ROFF_DVI=		${TOOL_GROFF} -Tdvi
 TOOL_ROFF_HTML=		${TOOL_GROFF} -Tlatin1 -mdoc2html
 TOOL_ROFF_PS=		${TOOL_GROFF} -Tps
@@ -391,6 +387,7 @@ TOOL_TBL=		${TOOLDIR}/bin/${_TOOL_PREFIX}tbl
 TOOL_TIC=		${TOOLDIR}/bin/${_TOOL_PREFIX}tic
 TOOL_UUDECODE=		${TOOLDIR}/bin/${_TOOL_PREFIX}uudecode
 TOOL_VGRIND=		${TOOLDIR}/bin/${_TOOL_PREFIX}vgrind -f
+TOOL_VFONTEDPR=		${TOOLDIR}/libexec/${_TOOL_PREFIX}vfontedpr
 TOOL_ZIC=		${TOOLDIR}/bin/${_TOOL_PREFIX}zic
 
 .else	# USETOOLS != yes						# } {
@@ -411,6 +408,7 @@ TOOL_OBJC.gcc=	gcc
 # PCC supports C and Fortran
 TOOL_CC.pcc=		pcc
 TOOL_CPP.pcc=		/usr/libexec/pcpp
+TOOL_CXX.pcc=		p++
 
 TOOL_AMIGAAOUT2BB=	amiga-aout2bb
 TOOL_AMIGAELF2BB=	amiga-elf2bb
@@ -477,6 +475,8 @@ TOOL_POWERPCMKBOOTIMAGE=	powerpc-mkbootimage
 TOOL_PWD_MKDB=		pwd_mkdb
 TOOL_REFER=		refer
 TOOL_ROFF_ASCII=	nroff
+TOOL_ROFF_DOCASCII=	${TOOL_GROFF} -Tascii
+TOOL_ROFF_DOCHTML=	${TOOL_GROFF} -Thtml
 TOOL_ROFF_DVI=		${TOOL_GROFF} -Tdvi
 TOOL_ROFF_HTML=		${TOOL_GROFF} -Tlatin1 -mdoc2html
 TOOL_ROFF_PS=		${TOOL_GROFF} -Tps
@@ -492,6 +492,7 @@ TOOL_TBL=		tbl
 TOOL_TIC=		tic
 TOOL_UUDECODE=		uudecode
 TOOL_VGRIND=		vgrind -f
+TOOL_VFONTEDPR=		/usr/libexec/vfontedpr
 TOOL_ZIC=		zic
 
 .endif	# USETOOLS != yes						# }
@@ -503,7 +504,7 @@ TOOL_CXX.false=		false
 TOOL_FC.false=		false
 TOOL_OBJC.false=	false
 
-AVAILABLE_COMPILER?=	${HAVE_PCC:Dpcc} ${HAVE_LLVM:Dclang} ${HAVE_GCC:Dgcc} false
+AVAILABLE_COMPILER?=	${HAVE_PCC:Dpcc} ${HAVE_LLVM:Dclang} ${HAVE_GCC:Dgcc} ${EXTERNAL_TOOLCHAIN:Dgcc} false
 
 .for _t in CC CPP CXX FC OBJC
 ACTIVE_${_t}=	${AVAILABLE_COMPILER:@.c.@ ${ !defined(UNSUPPORTED_COMPILER.${.c.}) && defined(TOOL_${_t}.${.c.}) :? ${.c.} : }@:[1]}
@@ -523,6 +524,7 @@ CTFMERGE=	${TOOL_CTFMERGE}
 .endif
 
 # For each ${MACHINE_CPU}, list the ports that use it.
+MACHINES.aarch64=	evbarm64
 MACHINES.alpha=		alpha
 MACHINES.arm=		acorn26 acorn32 cats epoc32 evbarm hpcarm \
 			iyonix netwinder shark zaurus
@@ -650,7 +652,6 @@ LIBOWN?=	${BINOWN}
 LIBMODE?=	${NONBINMODE}
 
 DOCDIR?=	/usr/share/doc
-HTMLDOCDIR?=	/usr/share/doc/html
 DOCGRP?=	wheel
 DOCOWN?=	root
 DOCMODE?=	${NONBINMODE}
@@ -708,6 +709,9 @@ MKGCC:= no
 MKGCC:= no
 .endif
 
+# No GDB support for aarch64
+MKGDB.aarch64=	no
+
 #
 # The m68000 port is incomplete.
 #
@@ -724,10 +728,8 @@ NOPROFILE=	# defined
 #
 # The ia64 port is incomplete.
 #
-.if ${MACHINE_ARCH} == "ia64"
-MKLINT=		no
-MKGDB=		no
-.endif
+MKLINT.ia64=	no
+MKGDB.ia64=	no
 
 #
 # On the MIPS, all libs are compiled with ABIcalls (and are thus PIC),
@@ -742,9 +744,7 @@ MKPICLIB:=	no
 # On VAX using ELF, all objects are PIC, not just shared libraries,
 # so don't build the _pic version.
 #
-.if ${MACHINE_ARCH} == "vax"
-MKPICLIB=	no
-.endif
+MKPICLIB.vax=	no
 
 #
 # Location of the file that contains the major and minor numbers of the
@@ -756,6 +756,7 @@ SHLIB_VERSION_FILE?= ${.CURDIR}/shlib_version
 #
 # GNU sources and packages sometimes see architecture names differently.
 #
+GNU_ARCH.aarch64eb=aarch64_be
 GNU_ARCH.coldfire=m5407
 GNU_ARCH.earm=arm
 GNU_ARCH.earmhf=arm
@@ -879,7 +880,7 @@ MK${var}:=	yes
 #
 .if ${MACHINE_ARCH} == "x86_64" || ${MACHINE_ARCH} == "sparc64" \
     || ${MACHINE_ARCH} == "mips64eb" || ${MACHINE_ARCH} == "mips64el" \
-    || ${MACHINE_ARCH} == "powerpc64"
+    || ${MACHINE_ARCH} == "powerpc64" || ${MACHINE_CPU} == "aarch64"
 MKCOMPAT?=	yes
 .elif !empty(MACHINE_ARCH:Mearm*)
 MKCOMPAT?=	no
@@ -888,9 +889,8 @@ MKCOMPAT?=	no
 MKCOMPAT:=	no
 .endif
 
-#.if ${MACHINE_ARCH} == "x86_64" || ${MACHINE_ARCH} == "i386" || \
-
-.if ${MACHINE} == "evbppc" && ${MACHINE_ARCH} == "powerpc"
+.if ${MACHINE_ARCH} == "x86_64" || ${MACHINE_ARCH} == "i386" || \
+    (${MACHINE} == "evbppc" && ${MACHINE_ARCH} == "powerpc")
 MKCOMPATMODULES?=	yes
 .else
 MKCOMPATMODULES:=	no
@@ -962,7 +962,7 @@ _MKVARS.yes= \
 	MKX11FONTS \
 	MKYP
 .for var in ${_MKVARS.yes}
-${var}?=	yes
+${var}?=	${${var}.${MACHINE_ARCH}:Uyes}
 .endfor
 
 #
@@ -985,7 +985,7 @@ MKGCCCMDS?=	${MKGCC}
 _MKVARS.no= \
 	MKBSDGREP MKBSDTAR \
 	MKCATPAGES MKCRYPTO_RC5 MKCTF MKDEBUG \
-	MKDEBUGLIB MKDTRACE MKEXTSRC \
+	MKDEBUGLIB MKDTRACE MKEXTSRC MKGROFFHTMLDOC \
 	MKKYUA MKLLD MKLLDB MKLINT \
 	MKMANZ MKMCLINKER MKOBJDIRS \
 	MKLIBCXX MKLLVM MKPCC \
@@ -994,7 +994,7 @@ _MKVARS.no= \
 	MKSOFTFLOAT MKSTRIPIDENT MKTPM \
 	MKUNPRIVED MKUPDATE MKX11 MKX11MOTIF MKZFS
 .for var in ${_MKVARS.no}
-${var}?=no
+${var}?=	${${var}.${MACHINE_ARCH}:Uno}
 .endfor
 
 #
@@ -1098,6 +1098,19 @@ MKMAN:=		no
 MKNLS:=		no
 .endif
 
+.if !empty(MACHINE_ARCH:Mearm*)
+_NEEDS_LIBCXX.${MACHINE_ARCH}=	yes
+.endif
+_NEEDS_LIBCXX.i386=		yes
+_NEEDS_LIBCXX.powerpc=		yes
+_NEEDS_LIBCXX.powerpc64=	yes
+_NEEDS_LIBCXX.x86_64=		yes
+_NEEDS_LIBCXX.aarch64=		yes
+
+.if ${MKLLVM} == "yes" && ${_NEEDS_LIBCXX.${MACHINE_ARCH}:Uno} == "yes"
+MKLIBCXX:=	yes
+.endif
+
 #
 # install(1) parameters.
 #
@@ -1173,11 +1186,17 @@ ${var}?= yes
 ${var}?= no
 .endfor
 
+#
+# TOOL_GZIP and friends.  These might refer to TOOL_PIGZ or to the host gzip.
+#
 .if ${USE_PIGZGZIP} != "no"
 TOOL_GZIP=		${TOOL_PIGZ}
+GZIP_N_FLAG?=		-nT
 .else
 TOOL_GZIP=		gzip
+GZIP_N_FLAG?=		-n
 .endif
+TOOL_GZIP_N=		${TOOL_GZIP} ${GZIP_N_FLAG}
 
 #
 # Where X11 sources are and where it is installed to.

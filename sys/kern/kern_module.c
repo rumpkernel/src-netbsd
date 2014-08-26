@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_module.c,v 1.95 2014/02/25 18:30:11 pooka Exp $	*/
+/*	$NetBSD: kern_module.c,v 1.99 2014/08/24 11:36:11 nonaka Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_module.c,v 1.95 2014/02/25 18:30:11 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_module.c,v 1.99 2014/08/24 11:36:11 nonaka Exp $");
 
 #define _MODULE_INTERNAL
 
@@ -67,7 +67,11 @@ static struct modlist module_bootlist = TAILQ_HEAD_INITIALIZER(module_bootlist);
 
 static module_t	*module_active;
 static bool	module_verbose_on;
+#ifdef MODULAR_DEFAULT_AUTOLOAD
 static bool	module_autoload_on = true;
+#else
+static bool	module_autoload_on = false;
+#endif
 u_int		module_count;
 u_int		module_builtinlist;
 u_int		module_autotime = 10;
@@ -369,6 +373,7 @@ module_init(void)
 	}
 
 	sysctl_module_setup();
+	aprint_normal("kern.module.path=%s\n", module_base);
 }
 
 /*
@@ -454,6 +459,12 @@ sysctl_module_setup(void)
 		CTLTYPE_BOOL, "verbose",
 		SYSCTL_DESCR("Enable verbose output"),
 		NULL, 0, &module_verbose_on, 0,
+		CTL_CREATE, CTL_EOL);
+	sysctl_createv(&module_sysctllog, 0, &node, NULL,
+		CTLFLAG_PERMANENT | CTLFLAG_READONLY,
+		CTLTYPE_STRING, "path",
+		SYSCTL_DESCR("Default module load path"),
+		NULL, 0, module_base, 0,
 		CTL_CREATE, CTL_EOL);
 	sysctl_createv(&module_sysctllog, 0, &node, NULL,
 		CTLFLAG_PERMANENT | CTLFLAG_READWRITE,
@@ -1081,8 +1092,9 @@ module_do_load(const char *name, bool isdep, int flags,
 			error = module_do_load(buf, true, flags, NULL,
 			    &mod2, MODULE_CLASS_ANY, true);
 			if (error != 0) {
-				module_error("recursive load failed for `%s', "
-				    "error %d", mi->mi_name, error);
+				module_error("recursive load failed for `%s' "
+				    "(`%s' required), error %d", mi->mi_name,
+				    buf, error);
 				goto fail;
 			}
 			mod->mod_required[mod->mod_nrequired++] = mod2;

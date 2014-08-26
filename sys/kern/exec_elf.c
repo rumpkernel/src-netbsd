@@ -1,4 +1,4 @@
-/*	$NetBSD: exec_elf.c,v 1.66 2014/05/15 19:37:22 christos Exp $	*/
+/*	$NetBSD: exec_elf.c,v 1.70 2014/08/17 23:03:58 chs Exp $	*/
 
 /*-
  * Copyright (c) 1994, 2000, 2005 The NetBSD Foundation, Inc.
@@ -57,7 +57,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(1, "$NetBSD: exec_elf.c,v 1.66 2014/05/15 19:37:22 christos Exp $");
+__KERNEL_RCSID(1, "$NetBSD: exec_elf.c,v 1.70 2014/08/17 23:03:58 chs Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_pax.h"
@@ -114,13 +114,6 @@ static void	elf_free_emul_arg(void *);
 /* round up and down to page boundaries. */
 #define	ELF_ROUND(a, b)		(((a) + (b) - 1) & ~((b) - 1))
 #define	ELF_TRUNC(a, b)		((a) & ~((b) - 1))
-
-/*
- * Arbitrary limits to avoid DoS for excessive memory allocation.
- */
-#define MAXPHNUM	128
-#define MAXSHNUM	32768
-#define MAXNOTESIZE	1024
 
 static void
 elf_placedynexec(struct lwp *l, struct exec_package *epp, Elf_Ehdr *eh,
@@ -304,7 +297,7 @@ elf_check_header(Elf_Ehdr *eh)
 	if (ELF_EHDR_FLAGS_OK(eh) == 0)
 		return ENOEXEC;
 
-	if (eh->e_shnum > MAXSHNUM || eh->e_phnum > MAXPHNUM)
+	if (eh->e_shnum > ELF_MAXSHNUM || eh->e_phnum > ELF_MAXPHNUM)
 		return ENOEXEC;
 
 	return 0;
@@ -789,7 +782,7 @@ exec_elf_makecmds(struct lwp *l, struct exec_package *epp)
 		}
 	}
 
-	if (epp->ep_vmcmds.evs_cmds == NULL) {
+	if (epp->ep_vmcmds.evs_used == 0) {
 		/* No VMCMD; there was no PT_LOAD section, or those
 		 * sections were empty */
 		error = ENOEXEC;
@@ -870,6 +863,7 @@ netbsd_elf_signature(struct lwp *l, struct exec_package *epp,
 	int error;
 	int isnetbsd = 0;
 	char *ndata, *ndesc;
+	
 #ifdef DIAGNOSTIC
 	const char *badnote;
 #define BADNOTE(n) badnote = (n)
@@ -878,7 +872,7 @@ netbsd_elf_signature(struct lwp *l, struct exec_package *epp,
 #endif
 
 	epp->ep_pax_flags = 0;
-	if (eh->e_shnum > MAXSHNUM || eh->e_shnum == 0)
+	if (eh->e_shnum > ELF_MAXSHNUM || eh->e_shnum == 0)
 		return ENOEXEC;
 
 	shsize = eh->e_shnum * sizeof(Elf_Shdr);
@@ -887,12 +881,12 @@ netbsd_elf_signature(struct lwp *l, struct exec_package *epp,
 	if (error)
 		goto out;
 
-	np = kmem_alloc(MAXNOTESIZE, KM_SLEEP);
+	np = kmem_alloc(ELF_MAXNOTESIZE, KM_SLEEP);
 	for (i = 0; i < eh->e_shnum; i++) {
 		Elf_Shdr *shp = &sh[i];
 
 		if (shp->sh_type != SHT_NOTE ||
-		    shp->sh_size > MAXNOTESIZE ||
+		    shp->sh_size > ELF_MAXNOTESIZE ||
 		    shp->sh_size < sizeof(Elf_Nhdr) + ELF_NOTE_NETBSD_NAMESZ)
 			continue;
 
@@ -910,6 +904,12 @@ netbsd_elf_signature(struct lwp *l, struct exec_package *epp,
 		 *    header size + 4-byte aligned name + 4-byte aligned desc
 		 * Ensure this size is consistent with what is indicated
 		 * in sh_size. The first check avoids integer overflows.
+		 *
+		 * Binaries from before NetBSD 1.6 have two notes in the same
+		 * note section.  The second note was never used, so as long as
+		 * the section is at least as big as it should be, it's ok.
+		 * These binaries also have a second note section with a note of
+		 * type ELF_NOTE_TYPE_NETBSD_TAG, which can be ignored as well.
 		 */
 		if (np->n_namesz > shp->sh_size || np->n_descsz > shp->sh_size) {
 			BADNOTE("note size limit");
@@ -917,7 +917,7 @@ netbsd_elf_signature(struct lwp *l, struct exec_package *epp,
 		}
 		nsize = sizeof(*np) + roundup(np->n_namesz, 4) +
 		    roundup(np->n_descsz, 4);
-		if (nsize != shp->sh_size) {
+		if (nsize > shp->sh_size) {
 			BADNOTE("note size");
 			goto bad;
 		}
@@ -1021,7 +1021,7 @@ bad:
 			break;
 		}
 	}
-	kmem_free(np, MAXNOTESIZE);
+	kmem_free(np, ELF_MAXNOTESIZE);
 
 	error = isnetbsd ? 0 : ENOEXEC;
 out:

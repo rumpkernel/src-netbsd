@@ -1,4 +1,4 @@
-/*	$NetBSD: ip_var.h,v 1.103 2014/05/23 19:35:24 rmind Exp $	*/
+/*	$NetBSD: ip_var.h,v 1.106 2014/06/05 23:48:16 rmind Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -166,13 +166,19 @@ struct ip_moptions {
 #include "opt_mbuftrace.h"
 #endif
 
-/* flags passed to ip_output as last parameter */
-#define	IP_FORWARDING		0x1		/* most of ip header exists */
-#define	IP_RAWOUTPUT		0x2		/* raw ip header exists */
-#define	IP_RETURNMTU		0x4		/* pass back mtu on EMSGSIZE */
-#define	IP_NOIPNEWID		0x8		/* don't fill in ip_id */
+/*
+ * The following flags can be passed to ip_output() as last parameter
+ */
+#define	IP_FORWARDING		0x0001		/* most of ip header exists */
+#define	IP_RAWOUTPUT		0x0002		/* raw ip header exists */
+#define	IP_RETURNMTU		0x0004		/* pass back mtu on EMSGSIZE */
+#define	IP_NOIPNEWID		0x0008		/* don't fill in ip_id */
+__CTASSERT(SO_DONTROUTE ==	0x0010);
+__CTASSERT(SO_BROADCAST ==	0x0020);
 #define	IP_ROUTETOIF		SO_DONTROUTE	/* bypass routing tables */
 #define	IP_ALLOWBROADCAST	SO_BROADCAST	/* can send broadcast packets */
+
+#define	IP_IGMP_MCAST		0x0040		/* IGMP for mcast join/leave */
 #define	IP_MTUDISC		0x0400		/* Path MTU Discovery; set DF */
 
 extern struct domain inetdomain;
@@ -220,7 +226,6 @@ struct mbuf *
 	 ip_srcroute(void);
 int	 ip_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 void	 ip_statinc(u_int);
-void	 ipintr(void);
 void *	 rip_ctlinput(int, const struct sockaddr *, void *);
 int	 rip_ctloutput(int, struct socket *, struct sockopt *);
 void	 rip_init(void);

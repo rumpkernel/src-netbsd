@@ -1,4 +1,4 @@
-/*	$NetBSD: protosw.h,v 1.47 2014/05/20 19:04:00 rmind Exp $	*/
+/*	$NetBSD: protosw.h,v 1.60 2014/08/09 05:33:01 rtr Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1993
@@ -58,9 +58,11 @@
  */
 
 struct mbuf;
+struct ifnet;
 struct sockaddr;
 struct socket;
 struct sockopt;
+struct stat;
 struct domain;
 struct proc;
 struct lwp;
@@ -108,14 +110,14 @@ struct protosw {
 #define	PR_ATOMIC	0x01		/* exchange atomic messages only */
 #define	PR_ADDR		0x02		/* addresses given with messages */
 #define	PR_CONNREQUIRED	0x04		/* connection required by protocol */
-#define	PR_WANTRCVD	0x08		/* want PRU_RCVD calls */
+#define	PR_WANTRCVD	0x08		/* want pr_rcvd() calls */
 #define	PR_RIGHTS	0x10		/* passes capabilities */
 #define	PR_LISTEN	0x20		/* supports listen(2) and accept(2) */
 #define	PR_LASTHDR	0x40		/* enforce ipsec policy; last header */
 #define	PR_ABRTACPTDIS	0x80		/* abort on accept(2) to disconnected
 					   socket */
 #define PR_PURGEIF	0x100		/* might store struct ifnet pointer;
-					   PRU_PURGEIF must be called on ifnet
+					   pr_purgeif() must be called on ifnet
 					   deletion */
 
 /*
@@ -236,6 +238,24 @@ static const char * const prcorequests[] = {
 struct pr_usrreqs {
 	int	(*pr_attach)(struct socket *, int);
 	void	(*pr_detach)(struct socket *);
+	int	(*pr_accept)(struct socket *, struct mbuf *);
+	int	(*pr_connect)(struct socket *, struct mbuf *, struct lwp *);
+	int	(*pr_connect2)(struct socket *, struct socket *);
+	int	(*pr_bind)(struct socket *, struct mbuf *, struct lwp *);
+	int	(*pr_listen)(struct socket *, struct lwp *);
+	int	(*pr_disconnect)(struct socket *);
+	int	(*pr_shutdown)(struct socket *);
+	int	(*pr_abort)(struct socket *);
+	int	(*pr_ioctl)(struct socket *, u_long, void *, struct ifnet *);
+	int	(*pr_stat)(struct socket *, struct stat *);
+	int	(*pr_peeraddr)(struct socket *, struct mbuf *);
+	int	(*pr_sockaddr)(struct socket *, struct mbuf *);
+	int	(*pr_rcvd)(struct socket *, int, struct lwp *);
+	int	(*pr_recvoob)(struct socket *, struct mbuf *, int);
+	int	(*pr_send)(struct socket *, struct mbuf *, struct mbuf *,
+	    struct mbuf *, struct lwp *);
+	int	(*pr_sendoob)(struct socket *, struct mbuf *, struct mbuf *);
+	int	(*pr_purgeif)(struct socket *, struct ifnet *);
 	int	(*pr_generic)(struct socket *, int, struct mbuf *,
 	    struct mbuf *, struct mbuf *, struct lwp *);
 };
@@ -286,6 +306,168 @@ name##_detach_wrapper(struct socket *a)			\
 	KERNEL_LOCK(1, NULL);				\
 	name##_detach(a);				\
 	KERNEL_UNLOCK_ONE(NULL);			\
+}							\
+static int						\
+name##_accept_wrapper(struct socket *a, struct mbuf *b)	\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_accept(a, b);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_bind_wrapper(struct socket *a, struct mbuf *b,	\
+    struct lwp *c)					\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_bind(a, b, c);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_connect_wrapper(struct socket *a,		\
+    struct mbuf *b, struct lwp *c)			\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_connect(a, b, c);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_connect2_wrapper(struct socket *a,		\
+    struct socket *b)					\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_connect2(a, b);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_listen_wrapper(struct socket *a, struct lwp *b)	\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_listen(a, b);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_disconnect_wrapper(struct socket *a)		\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_disconnect(a);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_shutdown_wrapper(struct socket *a)		\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_shutdown(a);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_abort_wrapper(struct socket *a)			\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_abort(a);				\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_ioctl_wrapper(struct socket *a, u_long b,	\
+    void *c, struct ifnet *d)				\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_ioctl(a, b, c, d);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_stat_wrapper(struct socket *a, struct stat *b)	\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_stat(a, b);				\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_peeraddr_wrapper(struct socket *a, struct mbuf *b)	\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_peeraddr(a, b);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_sockaddr_wrapper(struct socket *a, struct mbuf *b)	\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_sockaddr(a, b);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_rcvd_wrapper(struct socket *a, int b,		\
+    struct lwp *c)					\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_rcvd(a, b, c);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_recvoob_wrapper(struct socket *a,		\
+    struct mbuf *b, int c)				\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_recvoob(a, b, c);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_send_wrapper(struct socket *a, struct mbuf *b,	\
+    struct mbuf *c, struct mbuf *d, struct lwp *e)	\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_send(a, b, c, d, e);		\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_sendoob_wrapper(struct socket *a,		\
+    struct mbuf *b, struct mbuf *c)			\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_sendoob(a, b, c);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
+}							\
+static int						\
+name##_purgeif_wrapper(struct socket *a,		\
+    struct ifnet *b)					\
+{							\
+	int rv;						\
+	KERNEL_LOCK(1, NULL);				\
+	rv = name##_purgeif(a, b);			\
+	KERNEL_UNLOCK_ONE(NULL);			\
+	return rv;					\
 }							\
 static int						\
 name##_usrreq_wrapper(struct socket *a, int b,		\

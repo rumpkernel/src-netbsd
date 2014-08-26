@@ -1,4 +1,4 @@
-/*	$NetBSD: xhci.c,v 1.16 2014/03/10 13:21:22 skrll Exp $	*/
+/*	$NetBSD: xhci.c,v 1.26 2014/08/12 13:50:42 skrll Exp $	*/
 
 /*
  * Copyright (c) 2013 Jonathan A. Kollasch
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xhci.c,v 1.16 2014/03/10 13:21:22 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xhci.c,v 1.26 2014/08/12 13:50:42 skrll Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -853,9 +853,15 @@ int
 xhci_intr(void *v)
 {
 	struct xhci_softc * const sc = v;
+	int ret = 0;
 
-	if (sc == NULL || sc->sc_dying || !device_has_power(sc->sc_dev))
+	if (sc == NULL)
 		return 0;
+
+	mutex_spin_enter(&sc->sc_intr_lock);
+
+	if (sc->sc_dying || !device_has_power(sc->sc_dev))
+		goto done;
 
 	DPRINTF(("%s: %s\n", __func__, device_xname(sc->sc_dev)));
 
@@ -864,10 +870,13 @@ xhci_intr(void *v)
 #ifdef DIAGNOSTIC
 		DPRINTFN(16, ("xhci_intr: ignored interrupt while polling\n"));
 #endif
-		return 0;
+		goto done;
 	}
 
-	return xhci_intr1(sc);
+	ret = xhci_intr1(sc);
+done:
+	mutex_spin_exit(&sc->sc_intr_lock);
+	return ret;
 }
 
 int
@@ -1314,7 +1323,9 @@ xhci_poll(struct usbd_bus *bus)
 
 	DPRINTF(("%s: %s\n", __func__, device_xname(sc->sc_dev)));
 
+	mutex_spin_enter(&sc->sc_intr_lock);
 	xhci_intr1(sc);
+	mutex_spin_exit(&sc->sc_intr_lock);
 
 	return;
 }
@@ -1434,7 +1445,10 @@ xhci_new_device(device_t parent, usbd_bus_handle bus, int depth,
 	dev->def_ep_desc.bEndpointAddress = USB_CONTROL_ENDPOINT;
 	dev->def_ep_desc.bmAttributes = UE_CONTROL;
 	/* XXX */
-	USETW(dev->def_ep_desc.wMaxPacketSize, 64);
+	if (speed == USB_SPEED_LOW)
+		USETW(dev->def_ep_desc.wMaxPacketSize, USB_MAX_IPACKET);
+	else
+		USETW(dev->def_ep_desc.wMaxPacketSize, 64);
 	dev->def_ep_desc.bInterval = 0;
 
 	/* doesn't matter, just don't let it uninitialized */
@@ -1524,10 +1538,17 @@ xhci_new_device(device_t parent, usbd_bus_handle bus, int depth,
 		err = usbd_get_initial_ddesc(dev, dd);
 		if (err)
 			return err;
-		USETW(dev->def_ep_desc.wMaxPacketSize, dd->bMaxPacketSize);
+		/* 4.8.2.1 */
+		if (speed == USB_SPEED_SUPER)
+			USETW(dev->def_ep_desc.wMaxPacketSize,
+			    (1 << dd->bMaxPacketSize));
+		else
+	 		USETW(dev->def_ep_desc.wMaxPacketSize,
+			    dd->bMaxPacketSize);
 		device_printf(sc->sc_dev, "%s bMaxPacketSize %u\n", __func__,
 		    dd->bMaxPacketSize);
-		xhci_update_ep0_mps(sc, xs, dd->bMaxPacketSize);
+		xhci_update_ep0_mps(sc, xs,
+		    UGETW(dev->def_ep_desc.wMaxPacketSize));
 		err = usbd_reload_device_desc(dev);
 		if (err)
 			return err;
@@ -2452,15 +2473,15 @@ xhci_root_intr_start(usbd_xfer_handle xfer)
 static void
 xhci_root_intr_abort(usbd_xfer_handle xfer)
 {
-#ifdef DIAGNOSTIC
 	struct xhci_softc * const sc = xfer->pipe->device->bus->hci_private;
-#endif
 
 	KASSERT(mutex_owned(&sc->sc_lock));
-	if (xfer->pipe->intrxfer == xfer) {
-		DPRINTF(("%s: remove\n", __func__));
-		xfer->pipe->intrxfer = NULL;
-	}
+	KASSERT(xfer->pipe->intrxfer == xfer);
+
+	DPRINTF(("%s: remove\n", __func__));
+
+	sc->sc_intrxfer = NULL;
+
 	xfer->status = USBD_CANCELLED;
 	usb_transfer_complete(xfer);
 }
@@ -2809,7 +2830,9 @@ xhci_device_intr_start(usbd_xfer_handle xfer)
 	xhci_db_write_4(sc, XHCI_DOORBELL(xs->xs_idx), dci);
 
 	if (sc->sc_bus.use_polling) {
+#ifdef XHCI_DEBUG
 		device_printf(sc->sc_dev, "%s polling\n", __func__);
+#endif
 		//xhci_waitintr(sc, xfer);
 	}
 
@@ -2819,15 +2842,20 @@ xhci_device_intr_start(usbd_xfer_handle xfer)
 static void
 xhci_device_intr_done(usbd_xfer_handle xfer)
 {
-	struct xhci_softc * const sc = xfer->pipe->device->bus->hci_private;
+	struct xhci_softc * const sc __diagused =
+		xfer->pipe->device->bus->hci_private;
+#ifdef XHCI_DEBUG
 	struct xhci_slot * const xs = xfer->pipe->device->hci_private;
 	const u_int dci = xhci_ep_get_dci(xfer->pipe->endpoint->edesc);
+#endif
 	const u_int endpt = xfer->pipe->endpoint->edesc->bEndpointAddress;
 	const bool isread = UE_GET_DIR(endpt) == UE_DIR_IN;
 	DPRINTF(("%s\n", __func__));
 
+#ifdef XHCI_DEBUG
 	device_printf(sc->sc_dev, "%s %p slot %u dci %u\n", __func__, xfer,
 	    xs->xs_idx, dci);
+#endif
 
 	KASSERT(sc->sc_bus.use_polling || mutex_owned(&sc->sc_lock));
 
@@ -2858,10 +2886,7 @@ xhci_device_intr_abort(usbd_xfer_handle xfer)
 
 	KASSERT(mutex_owned(&sc->sc_lock));
 	device_printf(sc->sc_dev, "%s %p\n", __func__, xfer);
-	/* XXX */
-	if (xfer->pipe->intrxfer == xfer) {
-		xfer->pipe->intrxfer = NULL;
-	}
+	KASSERT(xfer->pipe->intrxfer == xfer);
 	xfer->status = USBD_CANCELLED;
 	usb_transfer_complete(xfer);
 }

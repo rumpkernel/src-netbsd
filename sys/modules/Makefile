@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.136 2014/05/18 11:46:23 kardel Exp $
+#	$NetBSD: Makefile,v 1.140 2014/08/10 11:50:15 bad Exp $
 
 .include <bsd.own.mk>
 
@@ -105,7 +105,6 @@ SUBDIR+=	zlib
 SUBDIR+=	tprof
 .if (defined(NOTYET))
 SUBDIR+=	hifn		# Builds on architectures with PCI bus
-SUBDIR+=	ubsec		# Builds on architectures with PCI bus
 SUBDIR+=	unionfs
 .endif
 .if ${MKBINUTILS} != "no"
@@ -118,11 +117,12 @@ SUBDIR+=	xldscripts
 SUBDIR+=	exec_aout
 .endif
 
-.if ${MACHINE_ARCH} != "alpha"
+.if ${MACHINE_ARCH} != "alpha" && ${MACHINE_CPU} != "aarch64"
 SUBDIR+=	exec_elf32
 .endif
 
-.if ${MACHINE_ARCH} == "alpha" || \
+.if ${MACHINE_CPU} == "aarch64" || \
+    ${MACHINE_ARCH} == "alpha" || \
     ${MACHINE_ARCH} == "sparc64" || \
     ${MACHINE_ARCH} == "x86_64"
 SUBDIR+=	exec_elf64
@@ -141,6 +141,11 @@ SUBDIR+=	powernow
 SUBDIR+=	tprof_pmi
 SUBDIR+=	tprof_amdpmi
 SUBDIR+=	vmt
+.endif
+
+.if ${MACHINE_ARCH} == "i386" || \
+    ${MACHINE_ARCH} == "x86_64"
+SUBDIR+=	ubsec		# Builds on architectures with PCI bus
 .endif
 
 .if ${MKSLJIT} != "no"

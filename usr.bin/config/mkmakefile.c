@@ -1,4 +1,4 @@
-/*	$NetBSD: mkmakefile.c,v 1.15 2012/06/08 08:56:45 martin Exp $	*/
+/*	$NetBSD: mkmakefile.c,v 1.17 2014/08/18 08:07:02 joerg Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -507,7 +507,6 @@ static void
 emitload(FILE *fp)
 {
 	struct config *cf;
-	const char *nm, *swname;
 
 	fputs(".MAIN: all\nall:", fp);
 	TAILQ_FOREACH(cf, &allcf, cf_next) {
@@ -522,19 +521,13 @@ emitload(FILE *fp)
 	}
 	fputs("\n\n", fp);
 	TAILQ_FOREACH(cf, &allcf, cf_next) {
-		nm = cf->cf_name;
-		swname =
-		    cf->cf_root != NULL ? cf->cf_name : "generic";
-		fprintf(fp, "KERNELS+=%s\n", nm);
-		fprintf(fp, "%s: ${SYSTEM_DEP} swap${.TARGET}.o vers.o", nm);
-		fprintf(fp, "\n"
-			    "\t${SYSTEM_LD_HEAD}\n"
-			    "\t${SYSTEM_LD} swap${.TARGET}.o\n"
-			    "\t${SYSTEM_LD_TAIL}\n"
-			    "\n"
-			    "swap%s.o: swap%s.c\n"
-			    "\t${NORMAL_C}\n\n", swname, swname);
+		fprintf(fp, "KERNELS+=%s\n", cf->cf_name);
+		fprintf(fp, "%s: ${SYSTEM_DEP} swap%s.o vers.o build_kernel\n",
+			cf->cf_name, cf->cf_name);
+		fprintf(fp, "swap%s.o: swap%s.c\n"
+			"\t${NORMAL_C}\n\n", cf->cf_name, cf->cf_name);
 	}
+	fputs("\n", fp);
 }
 
 /*

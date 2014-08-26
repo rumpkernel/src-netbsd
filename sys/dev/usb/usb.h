@@ -1,4 +1,4 @@
-/*	$NetBSD: usb.h,v 1.106 2013/11/01 14:32:54 skrll Exp $	*/
+/*	$NetBSD: usb.h,v 1.109 2014/08/12 14:22:51 skrll Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb.h,v 1.14 1999/11/17 22:33:46 n_hibma Exp $	*/
 
 /*
@@ -60,6 +60,7 @@ MALLOC_DECLARE(M_USBHC);
 #define AUE_DEBUG 1
 #define AUVITEK_I2C_DEBUG 1
 #define AXE_DEBUG 1
+#define AXEN_DEBUG 1
 #define CUE_DEBUG 1
 #define DWC2_DEBUG 1
 #define EHCI_DEBUG 1
@@ -125,6 +126,7 @@ MALLOC_DECLARE(M_USBHC);
 #define UVSCOM_DEBUG 1
 #define UYUREX_DEBUG 1
 #define UZCOM_DEBUG 1
+#define XHCI_DEBUG 1
 #define ZYD_DEBUG 1
 #define Static
 #else
@@ -497,6 +499,7 @@ typedef struct {
 #define UPS_FULL_SPEED			0x0000	/* for completeness */
 #define UPS_LOW_SPEED			0x0200
 #define UPS_HIGH_SPEED			0x0400
+#define UPS_SUPER_SPEED			0x0600
 #define UPS_PORT_TEST			0x0800
 #define UPS_PORT_INDICATOR		0x1000
 	uWord		wPortChange;

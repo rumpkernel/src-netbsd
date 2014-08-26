@@ -1,4 +1,4 @@
-/*	$NetBSD: rfcomm.h,v 1.12 2014/05/20 18:25:54 rmind Exp $	*/
+/*	$NetBSD: rfcomm.h,v 1.18 2014/08/08 03:05:45 rtr Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -55,7 +55,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $Id: rfcomm.h,v 1.12 2014/05/20 18:25:54 rmind Exp $
+ * $Id: rfcomm.h,v 1.18 2014/08/08 03:05:45 rtr Exp $
  * $FreeBSD: src/sys/netgraph/bluetooth/include/ng_btsocket_rfcomm.h,v 1.4 2005/01/11 01:39:53 emax Exp $
  */
 
@@ -408,15 +408,15 @@ int rfcomm_ctloutput(int, struct socket *, struct sockopt *);
 
 /* rfcomm_upper.c */
 int rfcomm_attach_pcb(struct rfcomm_dlc **, const struct btproto *, void *);
-int rfcomm_bind(struct rfcomm_dlc *, struct sockaddr_bt *);
-int rfcomm_sockaddr(struct rfcomm_dlc *, struct sockaddr_bt *);
-int rfcomm_connect(struct rfcomm_dlc *, struct sockaddr_bt *);
-int rfcomm_peeraddr(struct rfcomm_dlc *, struct sockaddr_bt *);
-int rfcomm_disconnect(struct rfcomm_dlc *, int);
+int rfcomm_bind_pcb(struct rfcomm_dlc *, struct sockaddr_bt *);
+int rfcomm_sockaddr_pcb(struct rfcomm_dlc *, struct sockaddr_bt *);
+int rfcomm_connect_pcb(struct rfcomm_dlc *, struct sockaddr_bt *);
+int rfcomm_peeraddr_pcb(struct rfcomm_dlc *, struct sockaddr_bt *);
+int rfcomm_disconnect_pcb(struct rfcomm_dlc *, int);
 void rfcomm_detach_pcb(struct rfcomm_dlc **);
-int rfcomm_listen(struct rfcomm_dlc *);
-int rfcomm_send(struct rfcomm_dlc *, struct mbuf *);
-int rfcomm_rcvd(struct rfcomm_dlc *, size_t);
+int rfcomm_listen_pcb(struct rfcomm_dlc *);
+int rfcomm_send_pcb(struct rfcomm_dlc *, struct mbuf *);
+int rfcomm_rcvd_pcb(struct rfcomm_dlc *, size_t);
 int rfcomm_setopt(struct rfcomm_dlc *, const struct sockopt *);
 int rfcomm_getopt(struct rfcomm_dlc *, struct sockopt *);
 

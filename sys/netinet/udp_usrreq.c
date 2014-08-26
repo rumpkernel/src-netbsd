@@ -1,4 +1,4 @@
-/*	$NetBSD: udp_usrreq.c,v 1.198 2014/05/22 22:56:53 rmind Exp $	*/
+/*	$NetBSD: udp_usrreq.c,v 1.217 2014/08/09 05:33:01 rtr Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -66,7 +66,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: udp_usrreq.c,v 1.198 2014/05/22 22:56:53 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: udp_usrreq.c,v 1.217 2014/08/09 05:33:01 rtr Exp $");
 
 #include "opt_inet.h"
 #include "opt_compat_netbsd.h"
@@ -475,7 +475,7 @@ udp4_sendup(struct mbuf *m, int off /* offset of data portion */,
 
 #if defined(IPSEC)
 	/* check AH/ESP integrity. */
-	if (so != NULL && ipsec4_in_reject_so(m, so)) {
+	if (ipsec_used && so != NULL && ipsec4_in_reject_so(m, so)) {
 		IPSEC_STATINC(IPSEC_STAT_IN_POLVIO);
 		if ((n = m_copypacket(m, M_DONTWAIT)) != NULL)
 			icmp_error(n, ICMP_UNREACH, ICMP_UNREACH_ADMIN_PROHIBIT,
@@ -895,149 +895,286 @@ udp_detach(struct socket *so)
 }
 
 static int
-udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
-    struct mbuf *control, struct lwp *l)
+udp_accept(struct socket *so, struct mbuf *nam)
 {
-	struct inpcb *inp;
-	int s, error = 0;
+	KASSERT(solocked(so));
 
-	KASSERT(req != PRU_ATTACH);
-	KASSERT(req != PRU_DETACH);
+	panic("udp_accept");
 
-	if (req == PRU_CONTROL) {
-		return in_control(so, (long)m, (void *)nam,
-		    (struct ifnet *)control, l);
-	}
-	s = splsoftnet();
-	if (req == PRU_PURGEIF) {
-		mutex_enter(softnet_lock);
-		in_pcbpurgeif0(&udbtable, (struct ifnet *)control);
-		in_purgeif((struct ifnet *)control);
-		in_pcbpurgeif(&udbtable, (struct ifnet *)control);
-		mutex_exit(softnet_lock);
-		splx(s);
-		return 0;
-	}
+	return EOPNOTSUPP;
+}
+
+static int
+udp_bind(struct socket *so, struct mbuf *nam, struct lwp *l)
+{
+	struct inpcb *inp = sotoinpcb(so);
+	int error = 0;
+	int s;
 
 	KASSERT(solocked(so));
-	inp = sotoinpcb(so);
+	KASSERT(inp != NULL);
+	KASSERT(nam != NULL);
 
-	KASSERT(!control || (req == PRU_SEND || req == PRU_SENDOOB));
-	if (inp == NULL) {
-		splx(s);
-		return EINVAL;
-	}
-
-	/*
-	 * Note: need to block udp_input while changing
-	 * the udp pcb queue and/or pcb addresses.
-	 */
-	switch (req) {
-	case PRU_BIND:
-		error = in_pcbbind(inp, nam, l);
-		break;
-
-	case PRU_LISTEN:
-		error = EOPNOTSUPP;
-		break;
-
-	case PRU_CONNECT:
-		error = in_pcbconnect(inp, nam, l);
-		if (error)
-			break;
-		soisconnected(so);
-		break;
-
-	case PRU_CONNECT2:
-		error = EOPNOTSUPP;
-		break;
-
-	case PRU_DISCONNECT:
-		/*soisdisconnected(so);*/
-		so->so_state &= ~SS_ISCONNECTED;	/* XXX */
-		in_pcbdisconnect(inp);
-		inp->inp_laddr = zeroin_addr;		/* XXX */
-		in_pcbstate(inp, INP_BOUND);		/* XXX */
-		break;
-
-	case PRU_SHUTDOWN:
-		socantsendmore(so);
-		break;
-
-	case PRU_RCVD:
-		error = EOPNOTSUPP;
-		break;
-
-	case PRU_SEND:
-		if (control && control->m_len) {
-			m_freem(control);
-			m_freem(m);
-			error = EINVAL;
-			break;
-		}
-	{
-		struct in_addr laddr;			/* XXX */
-
-		memset(&laddr, 0, sizeof laddr);
-		if (nam) {
-			laddr = inp->inp_laddr;		/* XXX */
-			if ((so->so_state & SS_ISCONNECTED) != 0) {
-				error = EISCONN;
-				goto die;
-			}
-			error = in_pcbconnect(inp, nam, l);
-			if (error)
-				goto die;
-		} else {
-			if ((so->so_state & SS_ISCONNECTED) == 0) {
-				error = ENOTCONN;
-				goto die;
-			}
-		}
-		error = udp_output(m, inp);
-		m = NULL;
-		if (nam) {
-			in_pcbdisconnect(inp);
-			inp->inp_laddr = laddr;		/* XXX */
-			in_pcbstate(inp, INP_BOUND);	/* XXX */
-		}
-	  die:
-		if (m)
-			m_freem(m);
-	}
-		break;
-
-	case PRU_SENSE:
-		/*
-		 * stat: don't bother with a blocksize.
-		 */
-		splx(s);
-		return (0);
-
-	case PRU_RCVOOB:
-		error =  EOPNOTSUPP;
-		break;
-
-	case PRU_SENDOOB:
-		m_freem(control);
-		m_freem(m);
-		error =  EOPNOTSUPP;
-		break;
-
-	case PRU_SOCKADDR:
-		in_setsockaddr(inp, nam);
-		break;
-
-	case PRU_PEERADDR:
-		in_setpeeraddr(inp, nam);
-		break;
-
-	default:
-		panic("udp_usrreq");
-	}
+	s = splsoftnet();
+	error = in_pcbbind(inp, nam, l);
 	splx(s);
 
 	return error;
+}
+
+static int
+udp_listen(struct socket *so, struct lwp *l)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+udp_connect(struct socket *so, struct mbuf *nam, struct lwp *l)
+{
+	struct inpcb *inp = sotoinpcb(so);
+	int error = 0;
+	int s;
+
+	KASSERT(solocked(so));
+	KASSERT(inp != NULL);
+	KASSERT(nam != NULL);
+
+	s = splsoftnet();
+	error = in_pcbconnect(inp, nam, l);
+	if (! error)
+		soisconnected(so);
+	splx(s);
+	return error;
+}
+
+static int
+udp_connect2(struct socket *so, struct socket *so2)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+udp_disconnect(struct socket *so)
+{
+	struct inpcb *inp = sotoinpcb(so);
+	int s;
+
+	KASSERT(solocked(so));
+	KASSERT(inp != NULL);
+
+	s = splsoftnet();
+	/*soisdisconnected(so);*/
+	so->so_state &= ~SS_ISCONNECTED;	/* XXX */
+	in_pcbdisconnect(inp);
+	inp->inp_laddr = zeroin_addr;		/* XXX */
+	in_pcbstate(inp, INP_BOUND);		/* XXX */
+	splx(s);
+
+	return 0;
+}
+
+static int
+udp_shutdown(struct socket *so)
+{
+	int s;
+
+	KASSERT(solocked(so));
+
+	s = splsoftnet();
+	socantsendmore(so);
+	splx(s);
+
+	return 0;
+}
+
+static int
+udp_abort(struct socket *so)
+{
+	KASSERT(solocked(so));
+
+	panic("udp_abort");
+
+	return EOPNOTSUPP;
+}
+
+static int
+udp_ioctl(struct socket *so, u_long cmd, void *nam, struct ifnet *ifp)
+{
+	return in_control(so, cmd, nam, ifp);
+}
+
+static int
+udp_stat(struct socket *so, struct stat *ub)
+{
+	KASSERT(solocked(so));
+
+	/* stat: don't bother with a blocksize. */
+	return 0;
+}
+
+static int
+udp_peeraddr(struct socket *so, struct mbuf *nam)
+{
+	int s;
+
+	KASSERT(solocked(so));
+	KASSERT(sotoinpcb(so) != NULL);
+	KASSERT(nam != NULL);
+
+	s = splsoftnet();
+	in_setpeeraddr(sotoinpcb(so), nam);
+	splx(s);
+
+	return 0;
+}
+
+static int
+udp_sockaddr(struct socket *so, struct mbuf *nam)
+{
+	int s;
+
+	KASSERT(solocked(so));
+	KASSERT(sotoinpcb(so) != NULL);
+	KASSERT(nam != NULL);
+
+	s = splsoftnet();
+	in_setsockaddr(sotoinpcb(so), nam);
+	splx(s);
+
+	return 0;
+}
+
+static int
+udp_rcvd(struct socket *so, int flags, struct lwp *l)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+udp_recvoob(struct socket *so, struct mbuf *m, int flags)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+udp_send(struct socket *so, struct mbuf *m, struct mbuf *nam,
+    struct mbuf *control, struct lwp *l)
+{
+	struct inpcb *inp = sotoinpcb(so);
+	int error = 0;
+	struct in_addr laddr;			/* XXX */
+	int s;
+
+	KASSERT(solocked(so));
+	KASSERT(inp != NULL);
+	KASSERT(m != NULL);
+
+	if (control && control->m_len) {
+		m_freem(control);
+		m_freem(m);
+		return EINVAL;
+	}
+
+	memset(&laddr, 0, sizeof laddr);
+
+	s = splsoftnet();
+	if (nam) {
+		laddr = inp->inp_laddr;		/* XXX */
+		if ((so->so_state & SS_ISCONNECTED) != 0) {
+			error = EISCONN;
+			goto die;
+		}
+		error = in_pcbconnect(inp, nam, l);
+		if (error)
+			goto die;
+	} else {
+		if ((so->so_state & SS_ISCONNECTED) == 0) {
+			error = ENOTCONN;
+			goto die;
+		}
+	}
+	error = udp_output(m, inp);
+	m = NULL;
+	if (nam) {
+		in_pcbdisconnect(inp);
+		inp->inp_laddr = laddr;		/* XXX */
+		in_pcbstate(inp, INP_BOUND);	/* XXX */
+	}
+  die:
+	if (m)
+		m_freem(m);
+
+	splx(s);
+	return error;
+}
+
+static int
+udp_sendoob(struct socket *so, struct mbuf *m, struct mbuf *control)
+{
+	KASSERT(solocked(so));
+
+	m_freem(m);
+	m_freem(control);
+
+	return EOPNOTSUPP;
+}
+
+static int
+udp_purgeif(struct socket *so, struct ifnet *ifp)
+{
+	int s;
+
+	s = splsoftnet();
+	mutex_enter(softnet_lock);
+	in_pcbpurgeif0(&udbtable, ifp);
+	in_purgeif(ifp);
+	in_pcbpurgeif(&udbtable, ifp);
+	mutex_exit(softnet_lock);
+	splx(s);
+
+	return 0;
+}
+
+static int
+udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
+    struct mbuf *control, struct lwp *l)
+{
+	KASSERT(req != PRU_ATTACH);
+	KASSERT(req != PRU_DETACH);
+	KASSERT(req != PRU_ACCEPT);
+	KASSERT(req != PRU_BIND);
+	KASSERT(req != PRU_LISTEN);
+	KASSERT(req != PRU_CONNECT);
+	KASSERT(req != PRU_CONNECT2);
+	KASSERT(req != PRU_DISCONNECT);
+	KASSERT(req != PRU_SHUTDOWN);
+	KASSERT(req != PRU_ABORT);
+	KASSERT(req != PRU_CONTROL);
+	KASSERT(req != PRU_SENSE);
+	KASSERT(req != PRU_PEERADDR);
+	KASSERT(req != PRU_SOCKADDR);
+	KASSERT(req != PRU_RCVD);
+	KASSERT(req != PRU_RCVOOB);
+	KASSERT(req != PRU_SEND);
+	KASSERT(req != PRU_SENDOOB);
+	KASSERT(req != PRU_PURGEIF);
+
+	KASSERT(solocked(so));
+
+	if (sotoinpcb(so) == NULL)
+		return EINVAL;
+
+	panic("udp_usrreq");
+
+	return 0;
 }
 
 static int
@@ -1244,7 +1381,9 @@ udp4_espinudp(struct mbuf **mp, int off, struct sockaddr *src,
 	m_tag_prepend(m, tag);
 
 #ifdef IPSEC
-	ipsec4_common_input(m, iphdrlen, IPPROTO_ESP);
+	if (ipsec_used)
+		ipsec4_common_input(m, iphdrlen, IPPROTO_ESP);
+	/* XXX: else */
 #else
 	esp4_input(m, iphdrlen);
 #endif
@@ -1258,10 +1397,44 @@ udp4_espinudp(struct mbuf **mp, int off, struct sockaddr *src,
 PR_WRAP_USRREQS(udp)
 #define	udp_attach	udp_attach_wrapper
 #define	udp_detach	udp_detach_wrapper
+#define	udp_accept	udp_accept_wrapper
+#define	udp_bind	udp_bind_wrapper
+#define	udp_listen	udp_listen_wrapper
+#define	udp_connect	udp_connect_wrapper
+#define	udp_connect2	udp_connect2_wrapper
+#define	udp_disconnect	udp_disconnect_wrapper
+#define	udp_shutdown	udp_shutdown_wrapper
+#define	udp_abort	udp_abort_wrapper
+#define	udp_ioctl	udp_ioctl_wrapper
+#define	udp_stat	udp_stat_wrapper
+#define	udp_peeraddr	udp_peeraddr_wrapper
+#define	udp_sockaddr	udp_sockaddr_wrapper
+#define	udp_rcvd	udp_rcvd_wrapper
+#define	udp_recvoob	udp_recvoob_wrapper
+#define	udp_send	udp_send_wrapper
+#define	udp_sendoob	udp_sendoob_wrapper
+#define	udp_purgeif	udp_purgeif_wrapper
 #define	udp_usrreq	udp_usrreq_wrapper
 
 const struct pr_usrreqs udp_usrreqs = {
 	.pr_attach	= udp_attach,
 	.pr_detach	= udp_detach,
+	.pr_accept	= udp_accept,
+	.pr_bind	= udp_bind,
+	.pr_listen	= udp_listen,
+	.pr_connect	= udp_connect,
+	.pr_connect2	= udp_connect2,
+	.pr_disconnect	= udp_disconnect,
+	.pr_shutdown	= udp_shutdown,
+	.pr_abort	= udp_abort,
+	.pr_ioctl	= udp_ioctl,
+	.pr_stat	= udp_stat,
+	.pr_peeraddr	= udp_peeraddr,
+	.pr_sockaddr	= udp_sockaddr,
+	.pr_rcvd	= udp_rcvd,
+	.pr_recvoob	= udp_recvoob,
+	.pr_send	= udp_send,
+	.pr_sendoob	= udp_sendoob,
+	.pr_purgeif	= udp_purgeif,
 	.pr_generic	= udp_usrreq,
 };
