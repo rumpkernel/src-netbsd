@@ -1,7 +1,7 @@
-#	$NetBSD: files,v 1.1091 2014/05/19 22:47:54 rmind Exp $
+#	$NetBSD: files,v 1.1102 2014/08/24 20:23:38 joerg Exp $
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
 
-version 	20100430
+version 	20140824
 
 #
 # device classes
@@ -23,7 +23,8 @@ defflag				KTRACE
 defflag				MBUFTRACE
 defflag				PTRACE
 defflag				COREDUMP
-defflag				MODULAR
+defflag	opt_modular.h		MODULAR
+defflag	opt_modular.h		MODULAR_DEFAULT_AUTOLOAD
 defflag				KEYLOCK
 
 defparam			DEFCORENAME
@@ -116,10 +117,14 @@ defflag	opt_gre.h		GRE_DEBUG
 defflag opt_wapbl.h		WAPBL WAPBL_DEBUG
 defparam opt_wapbl.h		WAPBL_DEBUG_PRINT
 
+# printf entropy source
+defflag opt_rnd_printf.h	RND_PRINTF
+
 # compatibility options
 #
 defflag opt_compat_netbsd.h	COMPAT_NETBSD
-defflag	opt_compat_netbsd.h	COMPAT_60: COMPAT_NETBSD
+defflag	opt_compat_netbsd.h	COMPAT_70: COMPAT_NETBSD
+defflag	opt_compat_netbsd.h	COMPAT_60: COMPAT_70, COMPAT_NETBSD
 defflag	opt_compat_netbsd.h	COMPAT_50: COMPAT_60, COMPAT_NETBSD
 defflag	opt_compat_netbsd.h	COMPAT_40: COMPAT_50, COMPAT_NETBSD
 defflag	opt_compat_netbsd.h	COMPAT_30: COMPAT_40, COMPAT_NETBSD
@@ -165,6 +170,9 @@ include "opencrypto/files.opencrypto"
 
 # NIST SP800.90 CTR DRBG
 include "crypto/nist_ctr_drbg/files.nist_ctr_drbg"
+
+# ChaCha-based fast PRNG
+include "crypto/cprng_fast/files.cprng_fast"
 
 #
 # Kernel history/tracing. Old UVMHIST depends upon this.
@@ -905,6 +913,10 @@ file	dev/ic/ad1848.c			ad1848
 define	am7930
 file	dev/ic/am7930.c			am7930
 
+# Siemens PSB2160 audio codec, as found in HP systems
+device	arcofi: audiobus, auconv, mulaw
+file	dev/ic/arcofi.c			arcofi
+
 # SPARC `SUNW,audiocs'
 #
 device	audiocs: audiobus, auconv, ad1848
@@ -1228,6 +1240,10 @@ file	dev/usb/ehci.c			ehci			needs-flag
 device	xhci: usbus, usbroothub, usb_dma
 file	dev/usb/xhci.c			xhci			needs-flag
 
+# Mentor graphics OTG IP
+device	motg: usbus, usbroothub, usb_dma
+file	dev/usb/motg.c			motg			needs-flag
+
 # SL811HS/T USB controller
 defflag	opt_slhci.h	SLHCI_DEBUG SLHCI_TRY_LSVH SLHCI_PROFILE_TRANSFER
 device	slhci: usbus, usbroothub
@@ -1344,7 +1360,6 @@ defpseudodev fss:	disk
 defpseudo pty:		tty
 defpseudo rnd
 defpseudo ksyms
-defparam opt_ksyms.h	SYMTAB_SPACE
 defpseudo nullcons
 defpseudo lockstat
 defpseudo bio:		sysmon_envsys
@@ -1704,7 +1719,7 @@ file	net/bridgestp.c			bridge
 file	net/if_ecosubr.c		eco
 file	net/if_etherip.c		etherip			needs-flag
 file	net/if_ethersubr.c		ether | fddi | netatalk | token |
-					    wlan
+					    wlan		needs-flag
 file	net/if_faith.c			faith & (inet | inet6)	needs-flag
 file	net/if_fddisubr.c		fddi			needs-flag
 file	net/if_gif.c			gif			needs-flag
@@ -1716,7 +1731,7 @@ file	net/if_media.c
 file	net/if_mpls.c			ifmpls			needs-flag
 file	net/if_ppp.c			ppp			needs-flag
 file	net/if_srt.c			srt
-file	net/if_stf.c			stf & (inet | inet6)	needs-flag
+file	net/if_stf.c			stf & inet & inet6	needs-flag
 file	net/if_sl.c			sl			needs-flag
 file	net/if_spppsubr.c		sppp
 file	net/if_strip.c			strip			needs-flag
@@ -1728,6 +1743,7 @@ file	net/if_pppoe.c			pppoe			needs-flag
 file	net/pfil.c
 file	net/ppp-deflate.c		ppp & ppp_deflate
 file	net/ppp_tty.c			ppp
+file	net/pktqueue.c
 file	net/net_stats.c
 file	net/radix.c
 file	net/raw_cb.c

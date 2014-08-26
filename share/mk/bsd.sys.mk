@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.sys.mk,v 1.237 2014/01/28 19:41:52 martin Exp $
+#	$NetBSD: bsd.sys.mk,v 1.244 2014/08/14 18:39:38 joerg Exp $
 #
 # Build definitions used for NetBSD source tree builds.
 
@@ -20,12 +20,10 @@ CPPFLAGS+=	-Wp,-iremap,${DESTDIR}/:/
 CPPFLAGS+=	-Wp,-iremap,${X11SRCDIR}:/usr/xsrc
 .endif
 
-# Enable c99 mode by default.
-# This has the side effect of complaining for missing prototypes
-# implicit type declarations and missing return statements.
-.if defined(HAVE_GCC) || defined(HAVE_LLVM)
-CFLAGS+=	-std=gnu99
-.endif
+# NetBSD sources use C99 style, with some GCC extensions.
+CFLAGS+=	${${ACTIVE_CC} == "clang":? -std=gnu99 :}
+CFLAGS+=	${${ACTIVE_CC} == "gcc":? -std=gnu99 :}
+CFLAGS+=	${${ACTIVE_CC} == "pcc":? -std=gnu99 :}
 
 .if defined(WARNS)
 CFLAGS+=	${${ACTIVE_CC} == "clang":? -Wno-sign-compare -Wno-pointer-sign :}
@@ -39,7 +37,7 @@ CFLAGS+=	-Wall -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith
 # differently in traditional and ansi environments' which is the warning
 # we wanted, and now we don't get anymore.
 CFLAGS+=	-Wno-sign-compare
-CFLAGS+=	${${ACTIVE_CC} != "clang":? -Wno-traditional :}
+CFLAGS+=	${${ACTIVE_CC} == "gcc" :? -Wno-traditional :}
 .if !defined(NOGCCERROR)
 # Set assembler warnings to be fatal
 CFLAGS+=	-Wa,--fatal-warnings
@@ -82,7 +80,7 @@ CFLAGS+=	${${ACTIVE_CC} == "gcc":? -Wno-format-zero-length :}
 .if ${WARNS} > 3 && defined(HAVE_LLVM)
 CFLAGS+=	${${ACTIVE_CC} == "clang":? -Wpointer-sign -Wmissing-noreturn :}
 .endif
-.if (defined(HAVE_GCC) && ${HAVE_GCC} >= 45 \
+.if (defined(HAVE_GCC) \
      && (${MACHINE_ARCH} == "coldfire" || \
 	 ${MACHINE_ARCH} == "sh3eb" || \
 	 ${MACHINE_ARCH} == "sh3el" || \
@@ -127,7 +125,7 @@ COPTS+=	${${ACTIVE_CC} == "gcc":? --param ssp-buffer-size=1 :}
 .endif
 
 .if ${MKSOFTFLOAT:Uno} != "no"
-COPTS+=		-msoft-float
+COPTS+=		${${ACTIVE_CC} == "gcc":? -msoft-float :}
 FOPTS+=		-msoft-float
 .elif ${MACHINE_ARCH} == "coldfire"
 COPTS+=		-mhard-float
@@ -261,8 +259,13 @@ YFLAGS+=	${YPREFIX:D-p${YPREFIX}} ${YHEADER:D-d}
 .endif
 
 # Objcopy
+.if ${MACHINE_ARCH} == aarch64eb
+# AARCH64 big endian needs to preserve $x/$d symbols for the linker.
+OBJCOPYLIBFLAGS_EXTRA=-w -K '[$$][dx]' -K '[$$][dx]\.*'
+.elif !empty(MACHINE_ARCH:M*arm*eb)
 # ARM big endian needs to preserve $a/$d/$t symbols for the linker.
-OBJCOPYLIBFLAGS?=${"${.TARGET:M*.po}" != "":?-X:-x} \
-	${"${MACHINE_ARCH:M*arm*eb}" != "":?-K '\$a' -K '\$d' -K '\$t':}
+OBJCOPYLIBFLAGS_EXTRA=-w -K '[$$][adt]' -K '[$$][adt]\.*'
+.endif
+OBJCOPYLIBFLAGS?=${"${.TARGET:M*.po}" != "":?-X:-x} ${OBJCOPYLIBFLAGS_EXTRA}
 
 .endif	# !defined(_BSD_SYS_MK_)

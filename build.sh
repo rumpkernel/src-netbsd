@@ -1,5 +1,5 @@
 #! /usr/bin/env sh
-#	$NetBSD: build.sh,v 1.286 2014/08/03 01:03:41 riz Exp $
+#	$NetBSD: build.sh,v 1.295 2014/08/15 18:34:19 apb Exp $
 #
 # Copyright (c) 2001-2011 The NetBSD Foundation, Inc.
 # All rights reserved.
@@ -286,21 +286,43 @@ ERRORMESSAGE
 #    eval "set -- $quotedlist"
 # or like this:
 #    eval "\$command $quotedlist \$filename"
+#
 shell_quote()
-{
+{(
 	local result=''
-	local arg
+	local arg qarg
+	LC_COLLATE=C ; export LC_COLLATE # so [a-zA-Z0-9] works in ASCII
 	for arg in "$@" ; do
-		# Append a space if necessary
-		result="${result}${result:+ }"
-		# Convert each embedded ' to '\'',
-		# then insert ' at the beginning of the first line,
-		# and append ' at the end of the last line.
-		result="${result}$(printf "%s\n" "$arg" | \
-			sed -e "s/'/'\\\\''/g" -e "1s/^/'/" -e "\$s/\$/'/")"
+		case "${arg}" in
+		'')
+			qarg="''"
+			;;
+		*[!-./a-zA-Z0-9]*)
+			# Convert each embedded ' to '\'',
+			# then insert ' at the beginning of the first line,
+			# and append ' at the end of the last line.
+			# Finally, elide unnecessary '' pairs at the
+			# beginning and end of the result and as part of
+			# '\'''\'' sequences that result from multiple
+			# adjacent quotes in he input.
+			qarg="$(printf "%s\n" "$arg" | \
+			    ${SED:-sed} -e "s/'/'\\\\''/g" \
+				-e "1s/^/'/" -e "\$s/\$/'/" \
+				-e "1s/^''//" -e "\$s/''\$//" \
+				-e "s/'''/'/g"
+				)"
+			;;
+		*)
+			# Arg is not the empty string, and does not contain
+			# any unsafe characters.  Leave it unchanged for
+			# readability.
+			qarg="${arg}"
+			;;
+		esac
+		result="${result}${result:+ }${qarg}"
 	done
 	printf "%s\n" "$result"
-}
+)}
 
 statusmsg()
 {
@@ -628,6 +650,8 @@ MACHINE=evbarm		MACHINE_ARCH=earmv7	ALIAS=evbearmv7-el
 MACHINE=evbarm		MACHINE_ARCH=earmv7eb	ALIAS=evbearmv7-eb
 MACHINE=evbarm		MACHINE_ARCH=earmv7hf	ALIAS=evbearmv7hf-el
 MACHINE=evbarm		MACHINE_ARCH=earmv7hfeb	ALIAS=evbearmv7hf-eb
+MACHINE=evbarm64	MACHINE_ARCH=aarch64	ALIAS=evbarm64-el
+MACHINE=evbarm64	MACHINE_ARCH=aarch64eb	ALIAS=evbarm64-eb
 MACHINE=evbcf		MACHINE_ARCH=coldfire
 MACHINE=evbmips		MACHINE_ARCH=		NO_DEFAULT
 MACHINE=evbmips		MACHINE_ARCH=mips64eb	ALIAS=evbmips64-eb
@@ -643,8 +667,7 @@ MACHINE=ews4800mips	MACHINE_ARCH=mipseb
 MACHINE=hp300		MACHINE_ARCH=m68k
 MACHINE=hppa		MACHINE_ARCH=hppa
 MACHINE=hpcarm		MACHINE_ARCH=arm	ALIAS=hpcoarm
-MACHINE=hpcarm		MACHINE_ARCH=earm	ALIAS=hpcearm
-MACHINE=hpcarm		MACHINE_ARCH=earmv4	ALIAS=hpcearmv4 DEFAULT
+MACHINE=hpcarm		MACHINE_ARCH=earmv4	ALIAS=hpcearm DEFAULT
 MACHINE=hpcmips		MACHINE_ARCH=mipsel
 MACHINE=hpcsh		MACHINE_ARCH=sh3el
 MACHINE=i386		MACHINE_ARCH=i386
@@ -696,7 +719,8 @@ MACHINE=zaurus		MACHINE_ARCH=earm	ALIAS=ezaurus DEFAULT
 # getarch -- find the default MACHINE_ARCH for a MACHINE,
 # or convert an alias to a MACHINE/MACHINE_ARCH pair.
 #
-# Saves MACHINE in makewrappermachine before possibly modifying MACHINE.
+# Saves the original value of MACHINE in makewrappermachine before
+# alias processing.
 #
 # Sets MACHINE and MACHINE_ARCH if the input MACHINE value is
 # recognised as an alias, or recognised as a machine that has a default
@@ -745,7 +769,7 @@ getarch()
 			# remember that there was more than one match.
 			case "$found" in
 			'')	found="$line" ;;
-			*)	found="MULTIPLE_MATCHES" ; break ;;
+			*)	found="MULTIPLE_MATCHES" ;;
 			esac
 			;;
 		esac
@@ -824,6 +848,57 @@ validatearch()
 		bomb "MACHINE_ARCH '${MACHINE_ARCH}' does not support MACHINE '${MACHINE}'"
 		;;
 	esac
+}
+
+# listarch -- list valid MACHINE/MACHINE_ARCH/ALIAS values,
+# optionally restricted to those where the MACHINE and/or MACHINE_ARCH
+# match specifed glob patterns.
+#
+listarch()
+{
+	local machglob="$1" archglob="$2"
+	local IFS
+	local wildcard="*"
+	local line xline frag
+	local line_matches_machine line_matches_arch
+	local found=false
+
+	# Empty machglob or archglob should match anything
+	: "${machglob:=${wildcard}}"
+	: "${archglob:=${wildcard}}"
+
+	IFS="${nl}"
+	for line in ${valid_MACHINE_ARCH}; do
+		line="${line%%#*}" # ignore comments
+		xline="$( IFS=" ${tab}" ; echo $line )" # normalise white space
+		[ -z "${xline}" ] && continue # skip blank or comment lines
+
+		line_matches_machine=false
+		line_matches_arch=false
+
+		IFS=" "
+		for frag in ${xline}; do
+			case "${frag}" in
+			MACHINE=${machglob})
+				line_matches_machine=true ;;
+			ALIAS=${machglob})
+				line_matches_machine=true ;;
+			MACHINE_ARCH=${archglob})
+				line_matches_arch=true ;;
+			esac
+		done
+
+		if $line_matches_machine && $line_matches_arch; then
+			found=true
+			echo "$line"
+		fi
+	done
+	if ! $found; then
+		echo >&2 "No match for" \
+		    "MACHINE=${machglob} MACHINE_ARCH=${archglob}"
+		return 1
+	fi
+	return 0
 }
 
 # nobomb_getmakevar --
@@ -968,6 +1043,9 @@ Usage: ${progname} [-EhnorUuxy] [-a arch] [-B buildid] [-C cdextras]
     disk-image=target	Creae bootable disk image in
 			RELEASEDIR/RELEASEMACHINEDIR/binary/gzimg/target.img.gz.
     params              Display various make(1) parameters.
+    list-arch           Display a list of valid MACHINE/MACHINE_ARCH values,
+                        and exit.  The list may be narrowed by passing glob
+                        patterns or exact values in MACHINE or MACHINE_ARCH.
 
  Options:
     -a arch        Set MACHINE_ARCH to arch.  [Default: deduced from MACHINE]
@@ -980,7 +1058,10 @@ Usage: ${progname} [-EhnorUuxy] [-a arch] [-B buildid] [-C cdextras]
     -j njob        Run up to njob jobs in parallel; see make(1) -j.
     -M obj         Set obj root directory to obj; sets MAKEOBJDIRPREFIX.
                    Unsets MAKEOBJDIR.
-    -m mach        Set MACHINE to mach; not required if NetBSD native.
+    -m mach        Set MACHINE to mach.  Some mach values are actually
+                   aliases that set MACHINE/MACHINE_ARCH pairs.
+                   [Default: deduced from the host system if the host
+                   OS is NetBSD]
     -N noisy       Set the noisyness (MAKEVERBOSE) level of the build:
                        0   Minimal output ("quiet")
                        1   Describe what is occurring
@@ -1018,7 +1099,8 @@ _usage_
 parseoptions()
 {
 	opts='a:B:C:D:Ehj:M:m:N:nO:oR:rS:T:UuV:w:X:xY:yZ:'
-	opt_a=no
+	opt_a=false
+	opt_m=false
 
 	if type getopts >/dev/null 2>&1; then
 		# Use POSIX getopts.
@@ -1049,7 +1131,7 @@ parseoptions()
 		-a)
 			eval ${optargcmd}
 			MACHINE_ARCH=${OPTARG}
-			opt_a=yes
+			opt_a=true
 			;;
 
 		-B)
@@ -1096,7 +1178,7 @@ parseoptions()
 		-m)
 			eval ${optargcmd}
 			MACHINE="${OPTARG}"
-			[ "${opt_a}" != "yes" ] && getarch
+			opt_m=true
 			;;
 
 		-N)
@@ -1227,6 +1309,11 @@ parseoptions()
 			usage
 			;;
 
+		list-arch)
+			listarch "${MACHINE}" "${MACHINE_ARCH}"
+			exit $?
+			;;
+
 		makewrapper|cleandir|obj|tools|build|distribution|release|sets|sourcesets|syspkgs|params)
 			;;
 
@@ -1292,6 +1379,11 @@ parseoptions()
 		    bomb "MACHINE must be set, or -m must be used, for cross builds."
 		MACHINE=${uname_m}
 	fi
+	if $opt_m && ! $opt_a; then
+		# Settings implied by the command line -m option
+		# override MACHINE_ARCH from the environment (if any).
+		getarch
+	fi
 	[ -n "${MACHINE_ARCH}" ] || getarch
 	validatearch
 
@@ -1299,6 +1391,7 @@ parseoptions()
 	#
 	makeenv="${makeenv} TOOLDIR MACHINE MACHINE_ARCH MAKEFLAGS"
 	[ -z "${BUILDID}" ] || makeenv="${makeenv} BUILDID"
+	[ -z "${BUILDINFO}" ] || makeenv="${makeenv} BUILDINFO"
 	MAKEFLAGS="-de -m ${TOP}/share/mk ${MAKEFLAGS}"
 	MAKEFLAGS="${MAKEFLAGS} MKOBJDIRS=${MKOBJDIRS-yes}"
 	export MAKEFLAGS MACHINE MACHINE_ARCH
@@ -1774,7 +1867,7 @@ createmakewrapper()
 	eval cat <<EOF ${makewrapout}
 #! ${HOST_SH}
 # Set proper variables to allow easy "make" building of a NetBSD subtree.
-# Generated from:  \$NetBSD: build.sh,v 1.286 2014/08/03 01:03:41 riz Exp $
+# Generated from:  \$NetBSD: build.sh,v 1.295 2014/08/15 18:34:19 apb Exp $
 # with these arguments: ${_args}
 #
 
@@ -2077,6 +2170,13 @@ main()
 	statusmsg2 "HOST_SH:"          "${HOST_SH}"
 	if [ -n "${BUILDID}" ]; then
 		statusmsg2 "BUILDID:"  "${BUILDID}"
+	fi
+	if [ -n "${BUILDINFO}" ]; then
+		printf "%b\n" "${BUILDINFO}" | \
+		while read -r line ; do
+			[ -s "${line}" ] && continue
+			statusmsg2 "BUILDINFO:"  "${line}"
+		done
 	fi
 
 	rebuildmake

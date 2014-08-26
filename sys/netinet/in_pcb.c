@@ -1,4 +1,4 @@
-/*	$NetBSD: in_pcb.c,v 1.147 2014/05/22 22:01:12 rmind Exp $	*/
+/*	$NetBSD: in_pcb.c,v 1.151 2014/08/05 05:24:26 rtr Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -93,7 +93,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: in_pcb.c,v 1.147 2014/05/22 22:01:12 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: in_pcb.c,v 1.151 2014/08/05 05:24:26 rtr Exp $");
 
 #include "opt_inet.h"
 #include "opt_ipsec.h"
@@ -191,9 +191,6 @@ in_pcballoc(struct socket *so, void *v)
 	struct inpcbtable *table = v;
 	struct inpcb *inp;
 	int s;
-#if defined(IPSEC)
-	int error;
-#endif
 
 	s = splnet();
 	inp = pool_get(&inpcb_pool, PR_NOWAIT);
@@ -208,12 +205,14 @@ in_pcballoc(struct socket *so, void *v)
 	inp->inp_portalgo = PORTALGO_DEFAULT;
 	inp->inp_bindportonsend = false;
 #if defined(IPSEC)
-	error = ipsec_init_pcbpolicy(so, &inp->inp_sp);
-	if (error != 0) {
-		s = splnet();
-		pool_put(&inpcb_pool, inp);
-		splx(s);
-		return error;
+	if (ipsec_enabled) {
+		int error = ipsec_init_pcbpolicy(so, &inp->inp_sp);
+		if (error != 0) {
+			s = splnet();
+			pool_put(&inpcb_pool, inp);
+			splx(s);
+			return error;
+		}
 	}
 #endif
 	so->so_pcb = inp;
@@ -556,7 +555,7 @@ in_pcbconnect(void *v, struct mbuf *nam, struct lwp *l)
 
 	in_pcbstate(inp, INP_CONNECTED);
 #if defined(IPSEC)
-	if (inp->inp_socket->so_type == SOCK_STREAM)
+	if (ipsec_enabled && inp->inp_socket->so_type == SOCK_STREAM)
 		ipsec_pcbconn(inp->inp_sp);
 #endif
 	return (0);
@@ -574,7 +573,8 @@ in_pcbdisconnect(void *v)
 	inp->inp_fport = 0;
 	in_pcbstate(inp, INP_BOUND);
 #if defined(IPSEC)
-	ipsec_pcbdisconn(inp->inp_sp);
+	if (ipsec_enabled)
+		ipsec_pcbdisconn(inp->inp_sp);
 #endif
 	if (inp->inp_socket->so_state & SS_NOFDREF)
 		in_pcbdetach(inp);
@@ -591,20 +591,25 @@ in_pcbdetach(void *v)
 		return;
 
 #if defined(IPSEC)
-	ipsec4_delete_pcbpolicy(inp);
-#endif /*IPSEC*/
-	so->so_pcb = 0;
-	if (inp->inp_options)
-		(void)m_free(inp->inp_options);
-	rtcache_free(&inp->inp_route);
-	ip_freemoptions(inp->inp_moptions);
+	if (ipsec_enabled)
+		ipsec4_delete_pcbpolicy(inp);
+#endif
+	so->so_pcb = NULL;
+
 	s = splnet();
 	in_pcbstate(inp, INP_ATTACHED);
 	LIST_REMOVE(&inp->inp_head, inph_lhash);
 	TAILQ_REMOVE(&inp->inp_table->inpt_queue, &inp->inp_head, inph_queue);
-	pool_put(&inpcb_pool, inp);
 	splx(s);
+
+	if (inp->inp_options) {
+		m_free(inp->inp_options);
+	}
+	rtcache_free(&inp->inp_route);
 	sofree(so);			/* drops the socket's lock */
+
+	ip_freemoptions(inp->inp_moptions);
+	pool_put(&inpcb_pool, inp);
 	mutex_enter(softnet_lock);	/* reacquire the softnet_lock */
 }
 

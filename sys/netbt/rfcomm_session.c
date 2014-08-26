@@ -1,4 +1,4 @@
-/*	$NetBSD: rfcomm_session.c,v 1.19 2014/05/20 18:25:54 rmind Exp $	*/
+/*	$NetBSD: rfcomm_session.c,v 1.23 2014/08/05 07:55:32 rtr Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rfcomm_session.c,v 1.19 2014/05/20 18:25:54 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rfcomm_session.c,v 1.23 2014/08/05 07:55:32 rtr Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -199,7 +199,7 @@ rfcomm_session_alloc(struct rfcomm_session_list *list,
 	if (laddr->bt_psm == L2CAP_PSM_ANY)
 		laddr->bt_psm = L2CAP_PSM_RFCOMM;
 
-	(void)l2cap_bind(rs->rs_l2cap, laddr);
+	(void)l2cap_bind_pcb(rs->rs_l2cap, laddr);
 
 	LIST_INSERT_HEAD(list, rs, rs_next);
 
@@ -271,13 +271,13 @@ rfcomm_session_lookup(struct sockaddr_bt *src, struct sockaddr_bt *dest)
 		if (rs->rs_state == RFCOMM_SESSION_CLOSED)
 			continue;
 
-		l2cap_sockaddr(rs->rs_l2cap, &addr);
+		l2cap_sockaddr_pcb(rs->rs_l2cap, &addr);
 
 		if (bdaddr_same(&src->bt_bdaddr, &addr.bt_bdaddr) == 0)
 			if (bdaddr_any(&src->bt_bdaddr) == 0)
 				continue;
 
-		l2cap_peeraddr(rs->rs_l2cap, &addr);
+		l2cap_peeraddr_pcb(rs->rs_l2cap, &addr);
 
 		if (addr.bt_psm != dest->bt_psm)
 			continue;
@@ -499,7 +499,7 @@ rfcomm_session_complete(void *arg, int count)
 	 */
 	if (rs->rs_state == RFCOMM_SESSION_CLOSED) {
 		if (SIMPLEQ_EMPTY(&rs->rs_credits))
-			l2cap_disconnect(rs->rs_l2cap, 0);
+			l2cap_disconnect_pcb(rs->rs_l2cap, 0);
 	}
 }
 
@@ -853,7 +853,7 @@ rfcomm_session_recv_ua(struct rfcomm_session *rs, int dlci)
 		case RFCOMM_SESSION_WAIT_DISCONNECT:	/* We sent DISC */
 			callout_stop(&rs->rs_timeout);
 			rs->rs_state = RFCOMM_SESSION_CLOSED;
-			l2cap_disconnect(rs->rs_l2cap, 0);
+			l2cap_disconnect_pcb(rs->rs_l2cap, 0);
 			break;
 
 		default:
@@ -1510,7 +1510,7 @@ rfcomm_session_send_frame(struct rfcomm_session *rs, int type, int dlci)
 	DPRINTFN(5, "dlci %d type %2.2x (%d bytes, fcs=%#2.2x)\n",
 		dlci, type, m->m_pkthdr.len, fcs);
 
-	return l2cap_send(rs->rs_l2cap, m);
+	return l2cap_send_pcb(rs->rs_l2cap, m);
 }
 
 /*
@@ -1610,7 +1610,7 @@ rfcomm_session_send_uih(struct rfcomm_session *rs, struct rfcomm_dlc *dlc,
 	/*
 	 * UIH frame ready to go..
 	 */
-	err = l2cap_send(rs->rs_l2cap, m0);
+	err = l2cap_send_pcb(rs->rs_l2cap, m0);
 	if (err)
 		goto fail;
 

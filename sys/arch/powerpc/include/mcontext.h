@@ -1,4 +1,4 @@
-/*	$NetBSD: mcontext.h,v 1.15 2014/02/28 05:27:05 matt Exp $	*/
+/*	$NetBSD: mcontext.h,v 1.17 2014/08/12 20:27:10 joerg Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -86,7 +86,11 @@ typedef	__greg_t	__gregset_t[_NGREG];
 #define	_REG_MQ		38		/* MQ Register (POWER only) */
 
 typedef struct {
+#ifdef _KERNEL
+	unsigned long long	__fpu_regs[32];	/* FP0-31 */
+#else
 	double		__fpu_regs[32];	/* FP0-31 */
+#endif
 	unsigned int	__fpu_fpscr;	/* FP Status and Control Register */
 	unsigned int	__fpu_valid;	/* Set together with _UC_FPU */
 } __fpregset_t;
@@ -152,7 +156,7 @@ __lwp_gettcb_fast(void)
 	void *__tcb;
 
 	__asm __volatile(
-		"addi %[__tcb],%%r2,%[__offset]@l"
+		"addi %[__tcb],%%r2,%[__offset]"
 	    :	[__tcb] "=r" (__tcb)
 	    :	[__offset] "n" (-(TLS_TP_OFFSET + sizeof(struct tls_tcb))));
 
@@ -163,7 +167,7 @@ static __inline void
 __lwp_settcb(void *__tcb)
 {
 	__asm __volatile(
-		"addi %%r2,%[__tcb],%[__offset]@l"
+		"addi %%r2,%[__tcb],%[__offset]"
 	    :
 	    :	[__tcb] "r" (__tcb),
 		[__offset] "n" (TLS_TP_OFFSET + sizeof(struct tls_tcb)));

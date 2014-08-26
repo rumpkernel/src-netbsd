@@ -1,4 +1,4 @@
-/*	$NetBSD: x86_machdep.c,v 1.64 2014/04/01 07:16:18 dsl Exp $	*/
+/*	$NetBSD: x86_machdep.c,v 1.67 2014/08/11 03:43:25 jnemeth Exp $	*/
 
 /*-
  * Copyright (c) 2002, 2006, 2007 YAMAMOTO Takashi,
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: x86_machdep.c,v 1.64 2014/04/01 07:16:18 dsl Exp $");
+__KERNEL_RCSID(0, "$NetBSD: x86_machdep.c,v 1.67 2014/08/11 03:43:25 jnemeth Exp $");
 
 #include "opt_modular.h"
 #include "opt_physmem.h"
@@ -81,6 +81,13 @@ __KERNEL_RCSID(0, "$NetBSD: x86_machdep.c,v 1.64 2014/04/01 07:16:18 dsl Exp $")
 void (*x86_cpu_idle)(void);
 static bool x86_cpu_idle_ipi;
 static char x86_cpu_idle_text[16];
+
+#ifdef XEN
+char module_machine_amd64_xen[] = "amd64-xen";
+char module_machine_i386_xen[] = "i386-xen";
+char module_machine_i386pae_xen[] = "i386pae-xen";
+#endif
+
 
 /* --------------------------------------------------------------------- */
 
@@ -151,6 +158,19 @@ module_init_md(void)
 {
 	struct btinfo_modulelist *biml;
 	struct bi_modulelist_entry *bi, *bimax;
+
+	/* setup module path for XEN kernels */
+#ifdef XEN
+#if defined(amd64)
+	module_machine = module_machine_amd64_xen;
+#elif defined(i386)
+#ifdef PAE
+	module_machine = module_machine_i386pae_xen;
+#else
+	module_machine = module_machine_i386_xen;
+#endif
+#endif
+#endif
 
 	biml = lookup_bootinfo(BTINFO_MODULELIST);
 	if (biml == NULL) {
@@ -686,44 +706,57 @@ extern vaddr_t kern_end;
 extern vaddr_t module_start, module_end;
 #endif
 
+static struct {
+	int freelist;
+	uint64_t limit;
+} x86_freelists[VM_NFREELIST] = {
+	{ VM_FREELIST_DEFAULT, 0 },
+#ifdef VM_FREELIST_FIRST1T
+	/* 40-bit addresses needed for modern graphics.  */
+	{ VM_FREELIST_FIRST1T,	1ULL * 1024 * 1024 * 1024 * 1024 },
+#endif
+#ifdef VM_FREELIST_FIRST64G
+	/* 36-bit addresses needed for oldish graphics.  */
+	{ VM_FREELIST_FIRST64G,	64ULL * 1024 * 1024 * 1024 },
+#endif
+#ifdef VM_FREELIST_FIRST4G
+	/* 32-bit addresses needed for PCI 32-bit DMA and old graphics.  */
+	{ VM_FREELIST_FIRST4G,	4ULL * 1024 * 1024 * 1024 },
+#endif
+	/* 30-bit addresses needed for ancient graphics.  */
+	{ VM_FREELIST_FIRST1G,	1ULL * 1024 * 1024 * 1024 },
+	/* 24-bit addresses needed for ISA DMA.  */
+	{ VM_FREELIST_FIRST16,	16 * 1024 * 1024 },
+};
+
+int
+x86_select_freelist(uint64_t maxaddr)
+{
+	unsigned int i;
+
+	if (avail_end <= maxaddr)
+		return VM_NFREELIST;
+
+	for (i = 0; i < __arraycount(x86_freelists); i++) {
+		if ((x86_freelists[i].limit - 1) <= maxaddr)
+			return x86_freelists[i].freelist;
+	}
+
+	panic("no freelist for maximum address %"PRIx64, maxaddr);
+}
+
 int
 initx86_load_memmap(paddr_t first_avail)
 {
 	uint64_t seg_start, seg_end;
 	uint64_t seg_start1, seg_end1;
-	int first16q, x;
-#ifdef VM_FREELIST_FIRST4G
-	int first4gq;
-#endif
+	int x;
+	unsigned i;
 
-	/*
-	 * If we have 16M of RAM or less, just put it all on
-	 * the default free list.  Otherwise, put the first
-	 * 16M of RAM on a lower priority free list (so that
-	 * all of the ISA DMA'able memory won't be eaten up
-	 * first-off).
-	 */
-#define ADDR_16M (16 * 1024 * 1024)
-
-	if (avail_end <= ADDR_16M)
-		first16q = VM_FREELIST_DEFAULT;
-	else
-		first16q = VM_FREELIST_FIRST16;
-
-#ifdef VM_FREELIST_FIRST4G
-	/*
-	 * If we have 4G of RAM or less, just put it all on
-	 * the default free list.  Otherwise, put the first
-	 * 4G of RAM on a lower priority free list (so that
-	 * all of the 32bit PCI DMA'able memory won't be eaten up
-	 * first-off).
-	 */
-#define ADDR_4G (4ULL * 1024 * 1024 * 1024)
-	if (avail_end <= ADDR_4G)
-		first4gq = VM_FREELIST_DEFAULT;
-	else
-		first4gq = VM_FREELIST_FIRST4G;
-#endif /* defined(VM_FREELIST_FIRST4G) */
+	for (i = 0; i < __arraycount(x86_freelists); i++) {
+		if (avail_end < x86_freelists[i].limit)
+			x86_freelists[i].freelist = VM_FREELIST_DEFAULT;
+	}
 
 	/* Make sure the end of the space used by the kernel is rounded. */
 	first_avail = round_page(first_avail);
@@ -776,57 +809,31 @@ initx86_load_memmap(paddr_t first_avail)
 
 		/* First hunk */
 		if (seg_start != seg_end) {
-			if (seg_start < ADDR_16M &&
-			    first16q != VM_FREELIST_DEFAULT) {
+			i = __arraycount(x86_freelists);
+			while (i--) {
 				uint64_t tmp;
 
-				if (seg_end > ADDR_16M)
-					tmp = ADDR_16M;
-				else
-					tmp = seg_end;
-
-				if (tmp != seg_start) {
+				if (x86_freelists[i].limit <= seg_start)
+					continue;
+				if (x86_freelists[i].freelist ==
+				    VM_FREELIST_DEFAULT)
+					continue;
+				tmp = MIN(x86_freelists[i].limit, seg_end);
+				if (tmp == seg_start)
+					continue;
 #ifdef DEBUG_MEMLOAD
-					printf("loading first16q 0x%"PRIx64
-					    "-0x%"PRIx64
-					    " (0x%"PRIx64"-0x%"PRIx64")\n",
-					    seg_start, tmp,
-					    (uint64_t)atop(seg_start),
-					    (uint64_t)atop(tmp));
+				printf("loading freelist %d"
+				    " 0x%"PRIx64"-0x%"PRIx64
+				    " (0x%"PRIx64"-0x%"PRIx64")\n",
+				    x86_freelists[i].freelist, seg_start, tmp,
+				    (uint64_t)atop(seg_start),
+				    (uint64_t)atop(tmp));
 #endif
-					uvm_page_physload(atop(seg_start),
-					    atop(tmp), atop(seg_start),
-					    atop(tmp), first16q);
-				}
+				uvm_page_physload(atop(seg_start), atop(tmp),
+				    atop(seg_start), atop(tmp),
+				    x86_freelists[i].freelist);
 				seg_start = tmp;
 			}
-
-#ifdef VM_FREELIST_FIRST4G
-			if (seg_start < ADDR_4G &&
-			    first4gq != VM_FREELIST_DEFAULT) {
-				uint64_t tmp;
-
-				if (seg_end > ADDR_4G)
-					tmp = ADDR_4G;
-				else
-					tmp = seg_end;
-
-				if (tmp != seg_start) {
-#ifdef DEBUG_MEMLOAD
-					printf("loading first4gq 0x%"PRIx64
-					    "-0x%"PRIx64
-					    " (0x%"PRIx64"-0x%"PRIx64")\n",
-					    seg_start, tmp,
-					    (uint64_t)atop(seg_start),
-					    (uint64_t)atop(tmp));
-#endif
-					uvm_page_physload(atop(seg_start),
-					    atop(tmp), atop(seg_start),
-					    atop(tmp), first4gq);
-				}
-				seg_start = tmp;
-			}
-#endif /* defined(VM_FREELIST_FIRST4G) */
 
 			if (seg_start != seg_end) {
 #ifdef DEBUG_MEMLOAD
@@ -844,57 +851,31 @@ initx86_load_memmap(paddr_t first_avail)
 
 		/* Second hunk */
 		if (seg_start1 != seg_end1) {
-			if (seg_start1 < ADDR_16M &&
-			    first16q != VM_FREELIST_DEFAULT) {
+			i = __arraycount(x86_freelists);
+			while (i--) {
 				uint64_t tmp;
 
-				if (seg_end1 > ADDR_16M)
-					tmp = ADDR_16M;
-				else
-					tmp = seg_end1;
-
-				if (tmp != seg_start1) {
+				if (x86_freelists[i].limit <= seg_start1)
+					continue;
+				if (x86_freelists[i].freelist ==
+				    VM_FREELIST_DEFAULT)
+					continue;
+				tmp = MIN(x86_freelists[i].limit, seg_end1);
+				if (tmp == seg_start1)
+					continue;
 #ifdef DEBUG_MEMLOAD
-					printf("loading first16q 0x%"PRIx64
-					    "-0x%"PRIx64
-					    " (0x%"PRIx64"-0x%"PRIx64")\n",
-					    seg_start1, tmp,
-					    (uint64_t)atop(seg_start1),
-					    (uint64_t)atop(tmp));
+				printf("loading freelist %u"
+				    " 0x%"PRIx64"-0x%"PRIx64
+				    " (0x%"PRIx64"-0x%"PRIx64")\n",
+				    x86_freelists[i].freelist, seg_start1, tmp,
+				    (uint64_t)atop(seg_start1),
+				    (uint64_t)atop(tmp));
 #endif
-					uvm_page_physload(atop(seg_start1),
-					    atop(tmp), atop(seg_start1),
-					    atop(tmp), first16q);
-				}
+				uvm_page_physload(atop(seg_start1), atop(tmp),
+				    atop(seg_start1), atop(tmp),
+				    x86_freelists[i].freelist);
 				seg_start1 = tmp;
 			}
-
-#ifdef VM_FREELIST_FIRST4G
-			if (seg_start1 < ADDR_4G &&
-			    first4gq != VM_FREELIST_DEFAULT) {
-				uint64_t tmp;
-
-				if (seg_end1 > ADDR_4G)
-					tmp = ADDR_4G;
-				else
-					tmp = seg_end1;
-
-				if (tmp != seg_start1) {
-#ifdef DEBUG_MEMLOAD
-					printf("loading first4gq 0x%"PRIx64
-					    "-0x%"PRIx64
-					    " (0x%"PRIx64"-0x%"PRIx64")\n",
-					    seg_start1, tmp,
-					    (uint64_t)atop(seg_start1),
-					    (uint64_t)atop(tmp));
-#endif
-					uvm_page_physload(atop(seg_start1),
-					    atop(tmp), atop(seg_start1),
-					    atop(tmp), first4gq);
-				}
-				seg_start1 = tmp;
-			}
-#endif /* defined(VM_FREELIST_FIRST4G) */
 
 			if (seg_start1 != seg_end1) {
 #ifdef DEBUG_MEMLOAD

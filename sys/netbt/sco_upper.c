@@ -1,4 +1,4 @@
-/*	$NetBSD: sco_upper.c,v 1.11 2014/05/20 18:25:54 rmind Exp $	*/
+/*	$NetBSD: sco_upper.c,v 1.16 2014/08/05 07:55:32 rtr Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sco_upper.c,v 1.11 2014/05/20 18:25:54 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sco_upper.c,v 1.16 2014/08/05 07:55:32 rtr Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -82,12 +82,12 @@ sco_attach_pcb(struct sco_pcb **handle,
 }
 
 /*
- * sco_bind(pcb, sockaddr)
+ * sco_bind_pcb(pcb, sockaddr)
  *
  *	Bind SCO pcb to local address
  */
 int
-sco_bind(struct sco_pcb *pcb, struct sockaddr_bt *addr)
+sco_bind_pcb(struct sco_pcb *pcb, struct sockaddr_bt *addr)
 {
 
 	if (pcb->sp_link != NULL || pcb->sp_flags & SP_LISTENING)
@@ -98,12 +98,12 @@ sco_bind(struct sco_pcb *pcb, struct sockaddr_bt *addr)
 }
 
 /*
- * sco_sockaddr(pcb, sockaddr)
+ * sco_sockaddr_pcb(pcb, sockaddr)
  *
  *	Copy local address of PCB to sockaddr
  */
 int
-sco_sockaddr(struct sco_pcb *pcb, struct sockaddr_bt *addr)
+sco_sockaddr_pcb(struct sco_pcb *pcb, struct sockaddr_bt *addr)
 {
 
 	memset(addr, 0, sizeof(struct sockaddr_bt));
@@ -114,12 +114,12 @@ sco_sockaddr(struct sco_pcb *pcb, struct sockaddr_bt *addr)
 }
 
 /*
- * sco_connect(pcb, sockaddr)
+ * sco_connect_pcb(pcb, sockaddr)
  *
  *	Initiate a SCO connection to the destination address.
  */
 int
-sco_connect(struct sco_pcb *pcb, struct sockaddr_bt *dest)
+sco_connect_pcb(struct sco_pcb *pcb, struct sockaddr_bt *dest)
 {
 	hci_add_sco_con_cp cp;
 	struct hci_unit *unit;
@@ -177,12 +177,12 @@ sco_connect(struct sco_pcb *pcb, struct sockaddr_bt *dest)
 }
 
 /*
- * sco_peeraddr(pcb, sockaddr)
+ * sco_peeraddr_pcb(pcb, sockaddr)
  *
  *	Copy remote address of SCO pcb to sockaddr
  */
 int
-sco_peeraddr(struct sco_pcb *pcb, struct sockaddr_bt *addr)
+sco_peeraddr_pcb(struct sco_pcb *pcb, struct sockaddr_bt *addr)
 {
 
 	memset(addr, 0, sizeof(struct sockaddr_bt));
@@ -193,12 +193,12 @@ sco_peeraddr(struct sco_pcb *pcb, struct sockaddr_bt *addr)
 }
 
 /*
- * sco_disconnect(pcb, linger)
+ * sco_disconnect_pcb(pcb, linger)
  *
  *	Initiate disconnection of connected SCO pcb
  */
 int
-sco_disconnect(struct sco_pcb *pcb, int linger)
+sco_disconnect_pcb(struct sco_pcb *pcb, int linger)
 {
 	hci_discon_cp cp;
 	struct hci_link *sco;
@@ -236,7 +236,7 @@ sco_detach_pcb(struct sco_pcb **handle)
 	*handle = NULL;
 
 	if (pcb->sp_link != NULL) {
-		sco_disconnect(pcb, 0);
+		sco_disconnect_pcb(pcb, 0);
 		pcb->sp_link = NULL;
 	}
 
@@ -245,12 +245,12 @@ sco_detach_pcb(struct sco_pcb **handle)
 }
 
 /*
- * sco_listen(pcb)
+ * sco_listen_pcb(pcb)
  *
  *	Mark pcb as a listener.
  */
 int
-sco_listen(struct sco_pcb *pcb)
+sco_listen_pcb(struct sco_pcb *pcb)
 {
 
 	if (pcb->sp_link != NULL)
@@ -261,7 +261,7 @@ sco_listen(struct sco_pcb *pcb)
 }
 
 /*
- * sco_send(pcb, mbuf)
+ * sco_send_pcb(pcb, mbuf)
  *
  *	Send data on SCO pcb.
  *
@@ -271,7 +271,7 @@ sco_listen(struct sco_pcb *pcb)
  * we can drop a record from the socket buffer.
  */
 int
-sco_send(struct sco_pcb *pcb, struct mbuf *m)
+sco_send_pcb(struct sco_pcb *pcb, struct mbuf *m)
 {
 	hci_scodata_hdr_t *hdr;
 	int plen;

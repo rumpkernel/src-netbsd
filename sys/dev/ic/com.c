@@ -1,4 +1,4 @@
-/* $NetBSD: com.c,v 1.325 2014/04/08 00:09:15 christos Exp $ */
+/* $NetBSD: com.c,v 1.327 2014/08/10 16:44:35 tls Exp $ */
 
 /*-
  * Copyright (c) 1998, 1999, 2004, 2008 The NetBSD Foundation, Inc.
@@ -66,7 +66,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: com.c,v 1.325 2014/04/08 00:09:15 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: com.c,v 1.327 2014/08/10 16:44:35 tls Exp $");
 
 #include "opt_com.h"
 #include "opt_ddb.h"
@@ -225,6 +225,7 @@ const struct cdevsw com_cdevsw = {
 	.d_poll = compoll,
 	.d_mmap = nommap,
 	.d_kqfilter = ttykqfilter,
+	.d_discard = nodiscard,
 	.d_flag = D_TTY
 };
 
@@ -625,7 +626,7 @@ fifodone:
 
 #ifdef RND_COM
 	rnd_attach_source(&sc->rnd_source, device_xname(sc->sc_dev),
-			  RND_TYPE_TTY, 0);
+			  RND_TYPE_TTY, RND_FLAG_DEFAULT);
 #endif
 
 	/* if there are no enable/disable functions, assume the device

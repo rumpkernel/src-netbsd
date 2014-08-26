@@ -1,4 +1,4 @@
-/*	$NetBSD: ip_output.c,v 1.227 2014/05/23 00:02:14 rmind Exp $	*/
+/*	$NetBSD: ip_output.c,v 1.230 2014/06/06 00:11:19 rmind Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -91,7 +91,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ip_output.c,v 1.227 2014/05/23 00:02:14 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ip_output.c,v 1.230 2014/06/06 00:11:19 rmind Exp $");
 
 #include "opt_inet.h"
 #include "opt_ipsec.h"
@@ -161,7 +161,6 @@ ip_output(struct mbuf *m0, ...)
 	struct route iproute;
 	const struct sockaddr_in *dst;
 	struct in_ifaddr *ia;
-	struct ifaddr *xifa;
 	struct mbuf *opt;
 	struct route *ro;
 	int flags, sw_csum;
@@ -169,9 +168,11 @@ ip_output(struct mbuf *m0, ...)
 	struct ip_moptions *imo;
 	struct socket *so;
 	va_list ap;
+#ifdef IPSEC
 	struct secpolicy *sp = NULL;
+#endif
 	bool natt_frag = false;
-	bool __unused done = false;
+	bool rtmtu_nolock;
 	union {
 		struct sockaddr		dst;
 		struct sockaddr_in	dst4;
@@ -219,9 +220,10 @@ ip_output(struct mbuf *m0, ...)
 	/*
 	 * Route packet.
 	 */
-	memset(&iproute, 0, sizeof(iproute));
-	if (ro == NULL)
+	if (ro == NULL) {
+		memset(&iproute, 0, sizeof(iproute));
 		ro = &iproute;
+	}
 	sockaddr_in_init(&u.dst4, &ip->ip_dst, 0);
 	dst = satocsin(rtcache_getdst(ro));
 
@@ -275,10 +277,11 @@ ip_output(struct mbuf *m0, ...)
 		if (rt->rt_flags & RTF_GATEWAY)
 			dst = satosin(rt->rt_gateway);
 	}
+	rtmtu_nolock = rt && (rt->rt_rmx.rmx_locks & RTV_MTU) == 0;
 
 	if (IN_MULTICAST(ip->ip_dst.s_addr) ||
 	    (ip->ip_dst.s_addr == INADDR_BROADCAST)) {
-		struct in_multi *inm;
+		bool inmgroup;
 
 		m->m_flags |= (ip->ip_dst.s_addr == INADDR_BROADCAST) ?
 			M_BCAST : M_MCAST;
@@ -318,6 +321,7 @@ ip_output(struct mbuf *m0, ...)
 		 */
 		if (in_nullhost(ip->ip_src)) {
 			struct in_ifaddr *xia;
+			struct ifaddr *xifa;
 
 			IFP_TO_IA(ifp, xia);
 			if (!xia) {
@@ -331,9 +335,8 @@ ip_output(struct mbuf *m0, ...)
 			ip->ip_src = xia->ia_addr.sin_addr;
 		}
 
-		IN_LOOKUP_MULTI(ip->ip_dst, ifp, inm);
-		if (inm != NULL &&
-		   (imo == NULL || imo->imo_multicast_loop)) {
+		inmgroup = in_multi_group(ip->ip_dst, ifp, flags);
+		if (inmgroup && (imo == NULL || imo->imo_multicast_loop)) {
 			/*
 			 * If we belong to the destination multicast group
 			 * on the outgoing interface, and the caller did not
@@ -377,14 +380,16 @@ ip_output(struct mbuf *m0, ...)
 			m_freem(m);
 			goto done;
 		}
-
 		goto sendit;
 	}
+
 	/*
 	 * If source address not specified yet, use address
 	 * of outgoing interface.
 	 */
 	if (in_nullhost(ip->ip_src)) {
+		struct ifaddr *xifa;
+
 		xifa = &ia->ia_ifa;
 		if (xifa->ifa_getifa != NULL)
 			ia = ifatoia((*xifa->ifa_getifa)(xifa, rdst));
@@ -402,9 +407,8 @@ ip_output(struct mbuf *m0, ...)
 	}
 
 	/*
-	 * Look for broadcast address and
-	 * and verify user is allowed to send
-	 * such a packet.
+	 * Look for broadcast address and and verify user is allowed to
+	 * send such a packet.
 	 */
 	if (in_broadcast(dst->sin_addr, ifp)) {
 		if ((ifp->if_flags & IFF_BROADCAST) == 0) {
@@ -449,26 +453,32 @@ sendit:
 			ip->ip_id = ip_newid_range(ia, num);
 		}
 	}
+
 	/*
 	 * If we're doing Path MTU Discovery, we need to set DF unless
 	 * the route's MTU is locked.
 	 */
-	if ((flags & IP_MTUDISC) != 0 && rt != NULL &&
-	    (rt->rt_rmx.rmx_locks & RTV_MTU) == 0)
+	if ((flags & IP_MTUDISC) != 0 && rtmtu_nolock) {
 		ip->ip_off |= htons(IP_DF);
+	}
 
 #ifdef IPSEC
-	/* Perform IPsec processing, if any. */
-	error = ipsec4_output(m, so, flags, &sp, &mtu, &natt_frag, &done);
-	if (error || done) {
-		goto done;
+	if (ipsec_used) {
+		bool ipsec_done = false;
+
+		/* Perform IPsec processing, if any. */
+		error = ipsec4_output(m, so, flags, &sp, &mtu, &natt_frag,
+		    &ipsec_done);
+		if (error || ipsec_done)
+			goto done;
 	}
 #endif
 
 	/*
 	 * Run through list of hooks for output packets.
 	 */
-	if ((error = pfil_run_hooks(inet_pfil_hook, &m, ifp, PFIL_OUT)) != 0)
+	error = pfil_run_hooks(inet_pfil_hook, &m, ifp, PFIL_OUT);
+	if (error)
 		goto done;
 	if (m == NULL)
 		goto done;
@@ -497,6 +507,8 @@ sendit:
 	 */
 	if (ntohs(ip->ip_len) <= mtu ||
 	    (m->m_pkthdr.csum_flags & M_CSUM_TSOv4) != 0) {
+		const struct sockaddr *sa;
+
 #if IFA_STATS
 		if (ia)
 			ia->ia_ifa.ifa_data.ifad_outbytes += ntohs(ip->ip_len);
@@ -530,22 +542,15 @@ sendit:
 			}
 		}
 
+		sa = (m->m_flags & M_MCAST) ? sintocsa(rdst) : sintocsa(dst);
 		if (__predict_true(
 		    (m->m_pkthdr.csum_flags & M_CSUM_TSOv4) == 0 ||
 		    (ifp->if_capenable & IFCAP_TSOv4) != 0)) {
 			KERNEL_LOCK(1, NULL);
-			error =
-			    (*ifp->if_output)(ifp, m,
-				(m->m_flags & M_MCAST) ?
-				    sintocsa(rdst) : sintocsa(dst),
-				rt);
+			error = (*ifp->if_output)(ifp, m, sa, rt);
 			KERNEL_UNLOCK_ONE(NULL);
 		} else {
-			error =
-			    ip_tso_output(ifp, m,
-				(m->m_flags & M_MCAST) ?
-				    sintocsa(rdst) : sintocsa(dst),
-				rt);
+			error = ip_tso_output(ifp, m, sa, rt);
 		}
 		goto done;
 	}
@@ -590,44 +595,46 @@ sendit:
 	for (; m; m = m0) {
 		m0 = m->m_nextpkt;
 		m->m_nextpkt = 0;
-		if (error == 0) {
-#if IFA_STATS
-			if (ia)
-				ia->ia_ifa.ifa_data.ifad_outbytes +=
-				    ntohs(ip->ip_len);
-#endif
-			/*
-			 * If we get there, the packet has not been handled by
-			 * IPsec whereas it should have. Now that it has been
-			 * fragmented, re-inject it in ip_output so that IPsec
-			 * processing can occur.
-			 */
-			if (natt_frag) {
-				error = ip_output(m, opt, ro,
-				    flags | IP_RAWOUTPUT | IP_NOIPNEWID,
-				    imo, so);
-			} else {
-				KASSERT((m->m_pkthdr.csum_flags &
-				    (M_CSUM_UDPv4 | M_CSUM_TCPv4)) == 0);
-				KERNEL_LOCK(1, NULL);
-				error = (*ifp->if_output)(ifp, m,
-				    (m->m_flags & M_MCAST) ?
-				    sintocsa(rdst) : sintocsa(dst), rt);
-				KERNEL_UNLOCK_ONE(NULL);
-			}
-		} else
+		if (error) {
 			m_freem(m);
-	}
-
-	if (error == 0)
-		IP_STATINC(IP_STAT_FRAGMENTED);
-done:
-	rtcache_free(&iproute);
-	if (sp) {
-#ifdef IPSEC
-		KEY_FREESP(&sp);
+			continue;
+		}
+#if IFA_STATS
+		if (ia)
+			ia->ia_ifa.ifa_data.ifad_outbytes += ntohs(ip->ip_len);
 #endif
+		/*
+		 * If we get there, the packet has not been handled by
+		 * IPsec whereas it should have. Now that it has been
+		 * fragmented, re-inject it in ip_output so that IPsec
+		 * processing can occur.
+		 */
+		if (natt_frag) {
+			error = ip_output(m, opt, ro,
+			    flags | IP_RAWOUTPUT | IP_NOIPNEWID,
+			    imo, so);
+		} else {
+			KASSERT((m->m_pkthdr.csum_flags &
+			    (M_CSUM_UDPv4 | M_CSUM_TCPv4)) == 0);
+			KERNEL_LOCK(1, NULL);
+			error = (*ifp->if_output)(ifp, m,
+			    (m->m_flags & M_MCAST) ?
+			    sintocsa(rdst) : sintocsa(dst), rt);
+			KERNEL_UNLOCK_ONE(NULL);
+		}
 	}
+	if (error == 0) {
+		IP_STATINC(IP_STAT_FRAGMENTED);
+	}
+done:
+	if (ro == &iproute) {
+		rtcache_free(&iproute);
+	}
+#ifdef IPSEC
+	if (sp) {
+		KEY_FREESP(&sp);
+	}
+#endif
 	return error;
 bad:
 	m_freem(m);
@@ -1031,10 +1038,14 @@ ip_ctloutput(int op, struct socket *so, struct sockopt *sopt)
 
 #if defined(IPSEC)
 		case IP_IPSEC_POLICY:
-			error = ipsec4_set_policy(inp, sopt->sopt_name,
-			    sopt->sopt_data, sopt->sopt_size, curlwp->l_cred);
-			break;
-#endif /*IPSEC*/
+			if (ipsec_enabled) {
+				error = ipsec4_set_policy(inp, sopt->sopt_name,
+				    sopt->sopt_data, sopt->sopt_size,
+				    curlwp->l_cred);
+				break;
+			}
+			/*FALLTHROUGH*/
+#endif /* IPSEC */
 
 		default:
 			error = ENOPROTOOPT;

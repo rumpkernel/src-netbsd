@@ -1,4 +1,4 @@
-/*	$NetBSD: in.h,v 1.90 2014/05/22 22:01:12 rmind Exp $	*/
+/*	$NetBSD: in.h,v 1.92 2014/06/05 23:48:16 rmind Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -282,9 +282,7 @@ struct ip_opts {
 #define	IP_PORTRANGE		19   /* int; range to use for ephemeral port */
 #define	IP_RECVIF		20   /* bool; receive reception if w/dgram */
 #define	IP_ERRORMTU		21   /* int; get MTU of last xmit = EMSGSIZE */
-#if 1 /*IPSEC*/
-#define	IP_IPSEC_POLICY		22 /* struct; get/set security policy */
-#endif
+#define	IP_IPSEC_POLICY		22   /* struct; get/set security policy */
 #define	IP_RECVTTL		23   /* bool; receive IP TTL w/dgram */
 #define	IP_MINTTL		24   /* minimum TTL for packet or drop */
 #define	IP_PKTINFO		25   /* int; send interface and src addr */
@@ -463,7 +461,7 @@ struct ip_mreq {
 #define	IPCTL_MAXFRAGPACKETS   18	/* max packets reassembly queue */
 #define	IPCTL_GRE_TTL          19	/* default TTL for gre encap packet */
 #define	IPCTL_CHECKINTERFACE   20	/* drop pkts in from 'wrong' iface */
-#define	IPCTL_IFQ	       21	/* ipintrq node */
+#define	IPCTL_IFQ	       21	/* IP packet input queue */
 #define	IPCTL_RANDOMID	       22	/* use random IP ids (if configured) */
 #define	IPCTL_LOOPBACKCKSUM    23	/* do IP checksum on loopback */
 #define	IPCTL_STATS		24	/* IP statistics */
