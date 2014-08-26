@@ -1,4 +1,4 @@
-/*	$NetBSD: ppc_reloc.c,v 1.51 2014/03/06 19:19:40 matt Exp $	*/
+/*	$NetBSD: ppc_reloc.c,v 1.53 2014/08/25 20:40:52 joerg Exp $	*/
 
 /*-
  * Copyright (C) 1998	Tsubai Masanari
@@ -30,7 +30,7 @@
 
 #include <sys/cdefs.h>
 #ifndef lint
-__RCSID("$NetBSD: ppc_reloc.c,v 1.51 2014/03/06 19:19:40 matt Exp $");
+__RCSID("$NetBSD: ppc_reloc.c,v 1.53 2014/08/25 20:40:52 joerg Exp $");
 #endif /* not lint */
 
 #include <stdarg.h>
@@ -51,7 +51,7 @@ void _rtld_powerpc_pltresolve(Elf_Word, Elf_Word);
 #define __ha48		__u64(0xffffffff8000)
 #define __ha32		__u64(0xffff8000)
 #define __ha16		__u32(0x8000)
-#define __ha(x,n) ((((x) >> (n)) + ((x) & __ha##n) == __ha##n) & 0xffff)
+#define __ha(x,n) ((((x) >> (n)) + (((x) & __ha##n) == __ha##n)) & 0xffff)
 #define __hi(x,n) (((x) >> (n)) & 0xffff)
 #ifdef __LP64
 #define highesta(x)	__ha(__u64(x), 48)
@@ -366,7 +366,13 @@ _rtld_relocate_plt_object(const Obj_Entry *obj, const Elf_Rela *rela, int reloff
 	if (__predict_false(def == &_rtld_sym_zero))
 		return 0;
 
-	value = (Elf_Addr)(defobj->relocbase + def->st_value);
+	if (ELF_ST_TYPE(def->st_info) == STT_GNU_IFUNC) {
+		if (tp == NULL)
+			return 0;
+		value = _rtld_resolve_ifunc(defobj, def);
+	} else {
+		value = (Elf_Addr)(defobj->relocbase + def->st_value);
+	}
 	rdbg(("bind now/fixup in %s --> new=%p", 
 	    defobj->strtab + def->st_name, (void *)value));
 
