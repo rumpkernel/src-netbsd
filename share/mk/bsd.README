@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.README,v 1.332 2014/05/08 13:58:34 phx Exp $
+#	$NetBSD: bsd.README,v 1.335 2014/08/05 15:25:20 apb Exp $
 #	@(#)bsd.README	8.2 (Berkeley) 4/2/94
 
 This is the README file for the make "include" files for the NetBSD
@@ -197,6 +197,12 @@ MKGCCCMDS	If "no", don't build gcc(1), but do build the GCC-related
 
 MKGDB		If "no", don't build gdb(1).
 		Default: yes
+
+MKGROFFHTMLDOC	If "no", avoid trying to use groff to generate html for
+		miscellaneous articles, as this seems to sometimes want
+		to run software not in base. Does not affect html man
+		pages.
+		Default: no
 
 MKHESIOD	If "no", disables building of Hesiod infrastructure
 		(libraries and support programs).
@@ -609,14 +615,15 @@ LIBMODE		Library mode.  [${NONBINMODE}]
 DOCDIR		Base path for system documentation (e.g. PSD, USD, etc.)
 	        installation.  [/usr/share/doc]
 
-HTMLDOCDIR	Base path for html system documentation installation.
-		[/usr/share/doc/html]
-
 DOCGRP		Documentation group.  [wheel]
 
 DOCOWN		Documentation owner.  [root]
 
 DOCMODE		Documentation mode.  [${NONBINMODE}]
+
+GZIP_N_FLAG	Flags to pass to TOOL_GZIP to prevent it from inserting
+		file names or timestamps in the compressed output.
+		[-n, or -nT when TOOL_GZIP is really TOOL_PIGZ]
 
 NLSDIR		Base path for Native Language Support files installation.
 		[/usr/share/nls]
@@ -796,6 +803,11 @@ TOOL_GREP		Print lines matching a pattern.  [grep]
 TOOL_GROFF		Front end for groff document formatting system.  [groff]
 
 TOOL_GZIP		Compression/decompression tool.  [gzip]
+
+TOOL_GZIP_N		Same as TOOL_GZIP, plus a command line option to
+			prevent it from inserting file names or timestamps
+			into the compressed output.
+			[${TOOL_GZIP} ${GZIP_N_FLAG}]
 
 TOOL_HEXDUMP		Ascii, decimal, hexadecimal, octal dump.  [hexdump]
 

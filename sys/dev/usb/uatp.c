@@ -1,4 +1,4 @@
-/*	$NetBSD: uatp.c,v 1.7 2014/04/25 18:10:21 riastradh Exp $	*/
+/*	$NetBSD: uatp.c,v 1.10 2014/07/17 17:11:12 riastradh Exp $	*/
 
 /*-
  * Copyright (c) 2011-2014 The NetBSD Foundation, Inc.
@@ -146,7 +146,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uatp.c,v 1.7 2014/04/25 18:10:21 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uatp.c,v 1.10 2014/07/17 17:11:12 riastradh Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -155,10 +155,10 @@ __KERNEL_RCSID(0, "$NetBSD: uatp.c,v 1.7 2014/04/25 18:10:21 riastradh Exp $");
 #include <sys/errno.h>
 #include <sys/ioctl.h>
 #include <sys/kernel.h>
+#include <sys/module.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <sys/time.h>
-#include <sys/workqueue.h>
 
 /* Order is important here...sigh...  */
 #include <dev/usb/usb.h>
@@ -289,7 +289,7 @@ static void geyser34_enable_raw_mode(struct uatp_softc *);
 static void geyser34_initialize(struct uatp_softc *);
 static int geyser34_finalize(struct uatp_softc *);
 static void geyser34_deferred_reset(struct uatp_softc *);
-static void geyser34_reset_worker(struct work *, void *);
+static void geyser34_reset_task(void *);
 static void uatp_intr(struct uhidev *, void *, unsigned int);
 static bool base_sample_softc_flag(const struct uatp_softc *, const uint8_t *);
 static bool base_sample_input_flag(const struct uatp_softc *, const uint8_t *);
@@ -506,9 +506,7 @@ struct uatp_softc {
 #define UATP_ENABLED	(1 << 0)	/* . Is the wsmouse enabled?  */
 #define UATP_DYING	(1 << 1)	/* . Have we been deactivated?  */
 #define UATP_VALID	(1 << 2)	/* . Do we have valid sensor data?  */
-	struct workqueue *sc_reset_wq;	/* Workqueue for resetting.  */
-	struct work sc_reset_work;	/* Work for said workqueue.  */
-	unsigned int sc_reset_pending;	/* True if a reset is pending.  */
+	struct usb_task sc_reset_task;	/* Task for resetting device.  */
 
 	callout_t sc_untap_callout;	/* Releases button after tap.  */
 	kmutex_t sc_tap_mutex;		/* Protects the following fields.  */
@@ -976,7 +974,8 @@ uatp_attach(device_t parent, device_t self, void *aux)
 	/* Attach wsmouse.  */
 	a.accessops = &uatp_accessops;
 	a.accesscookie = sc;
-	sc->sc_wsmousedev = config_found(self, &a, wsmousedevprint);
+	sc->sc_wsmousedev = config_found_ia(self, "wsmousedev", &a,
+	    wsmousedevprint);
 }
 
 /* Sysctl setup */
@@ -1342,41 +1341,25 @@ geyser34_enable_raw_mode(struct uatp_softc *sc)
 
 /*
  * The Geyser 3 and 4 need to be reset periodically after we detect a
- * continual flow of spurious interrupts.  We use a workqueue for this.
- * The flag avoids deferring a reset more than once before it has run,
- * or detaching the device while there is a deferred reset pending.
+ * continual flow of spurious interrupts.  We use a USB task for this.
  */
 
 static void
 geyser34_initialize(struct uatp_softc *sc)
 {
+
 	DPRINTF(sc, UATP_DEBUG_MISC, ("initializing\n"));
-
 	geyser34_enable_raw_mode(sc);
-	sc->sc_reset_pending = 0;
-
-	if (workqueue_create(&sc->sc_reset_wq, "uatprstq",
-		geyser34_reset_worker, sc, PRI_NONE, IPL_USB, WQ_MPSAFE)
-            != 0) {
-		sc->sc_reset_wq = NULL;
-		aprint_error_dev(uatp_dev(sc),
-		    "couldn't create Geyser 3/4 reset workqueue\n");
-	}
+	usb_init_task(&sc->sc_reset_task, &geyser34_reset_task, sc,
+	    USB_TASKQ_MPSAFE);
 }
 
 static int
 geyser34_finalize(struct uatp_softc *sc)
 {
+
 	DPRINTF(sc, UATP_DEBUG_MISC, ("finalizing\n"));
-
-	/* Can't destroy the work queue if there is work pending.  */
-	if (sc->sc_reset_pending) {
-		DPRINTF(sc, UATP_DEBUG_MISC, ("EBUSY -- reset pending\n"));
-		return EBUSY;
-	}
-
-	if (sc->sc_reset_wq != NULL)
-		workqueue_destroy(sc->sc_reset_wq);
+	usb_rem_task(sc->sc_hdev.sc_parent->sc_udev, &sc->sc_reset_task);
 
 	return 0;
 }
@@ -1384,21 +1367,14 @@ geyser34_finalize(struct uatp_softc *sc)
 static void
 geyser34_deferred_reset(struct uatp_softc *sc)
 {
-	DPRINTF(sc, UATP_DEBUG_RESET, ("deferring reset\n"));
 
-	/* Initialization can fail, so make sure we have a work queue.  */
-	if (sc->sc_reset_wq == NULL)
-		DPRINTF(sc, UATP_DEBUG_RESET, ("no work queue\n"));
-	/* Check for pending work.  */
-	else if (atomic_swap_uint(&sc->sc_reset_pending, 1))
-		DPRINTF(sc, UATP_DEBUG_RESET, ("already pending\n"));
-	/* No work was pending; flag is now set.  */
-	else
-		workqueue_enqueue(sc->sc_reset_wq, &sc->sc_reset_work, NULL);
+	DPRINTF(sc, UATP_DEBUG_RESET, ("deferring reset\n"));
+	usb_add_task(sc->sc_hdev.sc_parent->sc_udev, &sc->sc_reset_task,
+	    USB_TASKQ_DRIVER);
 }
 
 static void
-geyser34_reset_worker(struct work *work, void *arg)
+geyser34_reset_task(void *arg)
 {
 	struct uatp_softc *sc = arg;
 
@@ -1406,9 +1382,6 @@ geyser34_reset_worker(struct work *work, void *arg)
 
 	/* Reset by putting it into raw mode.  Not sure why.  */
 	geyser34_enable_raw_mode(sc);
-
-	/* Mark the device ready for new work.  */
-	(void)atomic_swap_uint(&sc->sc_reset_pending, 0);
 }
 
 /* Interrupt handler */
@@ -2673,4 +2646,33 @@ accelerate(struct uatp_softc *sc, unsigned int old_raw, unsigned int raw,
 	    (sc, (((int) smoothed) - ((int) old_smoothed)), remainder);
 
 #undef CHECK_
+}
+
+MODULE(MODULE_CLASS_DRIVER, uatp, NULL);
+
+#ifdef _MODULE
+#include "ioconf.c"
+#endif
+
+static int
+uatp_modcmd(modcmd_t cmd, void *aux)
+{
+	int error = 0;
+
+	switch (cmd) {
+	case MODULE_CMD_INIT:
+#ifdef _MODULE
+		error = config_init_component(cfdriver_ioconf_uatp,
+		    cfattach_ioconf_uatp, cfdata_ioconf_uatp);
+#endif
+		return error;
+	case MODULE_CMD_FINI:
+#ifdef _MODULE
+		error = config_fini_component(cfdriver_ioconf_uatp,
+		    cfattach_ioconf_uatp, cfdata_ioconf_uatp);
+#endif
+		return error;
+	default:
+		return ENOTTY;
+	}
 }

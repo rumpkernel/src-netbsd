@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.256 2014/04/23 09:06:57 macallan Exp $ */
+/*	$NetBSD: autoconf.c,v 1.258 2014/08/12 13:53:49 martin Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -48,7 +48,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.256 2014/04/23 09:06:57 macallan Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.258 2014/08/12 13:53:49 martin Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -1034,8 +1034,13 @@ char *
 clockfreq(int freq)
 {
 	static char buf[10];
+	size_t len;
 
-	humanize_number(buf, sizeof(buf), freq / 1000, "", 1000);
+	freq /= 1000;
+	len = snprintf(buf, sizeof(buf), "%d", freq / 1000);
+	freq %= 1000;
+	if (freq)
+		snprintf(buf + len, sizeof(buf) - len, ".%03d", freq);
 	return buf;
 }
 
@@ -1558,6 +1563,7 @@ static struct {
 	{ "SUNW,fdtwo",	"fdc" },
 	{ "network",	"hme" }, /* Krups */
 	{ "SUNW,hme",   "hme" },
+	{ "SUNW,qfe",   "hme" },
 };
 
 static const char *

@@ -1,4 +1,4 @@
-/*	$NetBSD: sco.h,v 1.6 2014/05/20 18:25:54 rmind Exp $	*/
+/*	$NetBSD: sco.h,v 1.11 2014/08/05 07:55:32 rtr Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -69,14 +69,14 @@ int sco_ctloutput(int, struct socket *, struct sockopt *);
 
 /* sco_upper.c */
 int sco_attach_pcb(struct sco_pcb **, const struct btproto *, void *);
-int sco_bind(struct sco_pcb *, struct sockaddr_bt *);
-int sco_sockaddr(struct sco_pcb *, struct sockaddr_bt *);
-int sco_connect(struct sco_pcb *, struct sockaddr_bt *);
-int sco_peeraddr(struct sco_pcb *, struct sockaddr_bt *);
-int sco_disconnect(struct sco_pcb *, int);
+int sco_bind_pcb(struct sco_pcb *, struct sockaddr_bt *);
+int sco_sockaddr_pcb(struct sco_pcb *, struct sockaddr_bt *);
+int sco_connect_pcb(struct sco_pcb *, struct sockaddr_bt *);
+int sco_peeraddr_pcb(struct sco_pcb *, struct sockaddr_bt *);
+int sco_disconnect_pcb(struct sco_pcb *, int);
 void sco_detach_pcb(struct sco_pcb **);
-int sco_listen(struct sco_pcb *);
-int sco_send(struct sco_pcb *, struct mbuf *);
+int sco_listen_pcb(struct sco_pcb *);
+int sco_send_pcb(struct sco_pcb *, struct mbuf *);
 int sco_setopt(struct sco_pcb *, const struct sockopt *);
 int sco_getopt(struct sco_pcb *, struct sockopt *);
 

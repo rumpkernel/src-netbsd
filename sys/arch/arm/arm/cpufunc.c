@@ -1,4 +1,4 @@
-/*	$NetBSD: cpufunc.c,v 1.147 2014/04/18 23:50:59 christos Exp $	*/
+/*	$NetBSD: cpufunc.c,v 1.150 2014/07/31 07:14:42 skrll Exp $	*/
 
 /*
  * arm7tdmi support code Copyright (c) 2001 John Fremlin
@@ -49,7 +49,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cpufunc.c,v 1.147 2014/04/18 23:50:59 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpufunc.c,v 1.150 2014/07/31 07:14:42 skrll Exp $");
 
 #include "opt_compat_netbsd.h"
 #include "opt_cpuoptions.h"
@@ -1734,7 +1734,7 @@ get_cachetype_table(void)
 			    cachetab[i].ct_pdcache_line_size;
 			arm_pcache.dcache_ways = cachetab[i].ct_pdcache_ways;
 			if (arm_pcache.dcache_ways) {
-				arm_pcache.dcache_way_size = 
+				arm_pcache.dcache_way_size =
 				    arm_pcache.dcache_line_size
 				    / arm_pcache.dcache_ways;
 			}
@@ -1743,7 +1743,7 @@ get_cachetype_table(void)
 			    cachetab[i].ct_picache_line_size;
 			arm_pcache.icache_ways = cachetab[i].ct_picache_ways;
 			if (arm_pcache.icache_ways) {
-				arm_pcache.icache_way_size = 
+				arm_pcache.icache_way_size =
 				    arm_pcache.icache_line_size
 				    / arm_pcache.icache_ways;
 			}
@@ -3135,7 +3135,7 @@ armv7_setup(char *args)
 #endif /* CPU_ARMV7 */
 
 
-#if defined(CPU_ARM1136) || defined(CPU_ARM1176) 
+#if defined(CPU_ARM1136) || defined(CPU_ARM1176)
 void
 arm11x6_setup(char *args)
 {
@@ -3153,10 +3153,11 @@ arm11x6_setup(char *args)
 		CPU_CONTROL_32BP_ENABLE |
 		CPU_CONTROL_32BD_ENABLE |
 		CPU_CONTROL_LABT_ENABLE |
-		CPU_CONTROL_SYST_ENABLE |
 		CPU_CONTROL_UNAL_ENABLE |
 #ifdef ARM_MMU_EXTENDED
 		CPU_CONTROL_XP_ENABLE   |
+#else
+		CPU_CONTROL_SYST_ENABLE |
 #endif
 		CPU_CONTROL_IC_ENABLE;
 
@@ -3203,9 +3204,24 @@ arm11x6_setup(char *args)
 	}
 
 	/*
-	 * Enable an errata workaround
+	 * This enables the workaround for the following ARM1176 r0pX
+	 * errata.
+	 *
+	 * 394601: In low interrupt latency configuration, interrupted clean
+	 * and invalidate operation may not clean dirty data.
+	 *
+	 * 716151: Clean Data Cache line by MVA can corrupt subsequent
+	 * stores to the same cache line.
+	 *
+	 * 714068: Prefetch Instruction Cache Line or Invalidate Instruction
+	 * Cache Line by MVA can cause deadlock.
 	 */
 	if ((cpuid & CPU_ID_CPU_MASK) == CPU_ID_ARM1176JZS) { /* ARM1176JZSr0 */
+		/* 394601 and 716151 */
+		cpuctrl |= CPU_CONTROL_FI_ENABLE;
+		auxctrl |= ARM1176_AUXCTL_FIO;
+
+		/* 714068 */
 		auxctrl |= ARM1176_AUXCTL_PHD;
 	}
 

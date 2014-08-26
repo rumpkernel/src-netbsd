@@ -1,4 +1,4 @@
-/*	$NetBSD: drm_agp_netbsd.h,v 1.2 2014/03/18 18:20:43 riastradh Exp $	*/
+/*	$NetBSD: drm_agp_netbsd.h,v 1.4 2014/08/23 08:03:33 riastradh Exp $	*/
 
 /*-
  * Copyright (c) 2013 The NetBSD Foundation, Inc.
@@ -41,6 +41,7 @@
 #include <sys/agpio.h>
 
 #include <dev/pci/pcivar.h>	/* XXX include order botch */
+#include <dev/pci/agpreg.h>
 #include <dev/pci/agpvar.h>
 
 #include <linux/kernel.h>
@@ -48,11 +49,14 @@
 
 #define	__OS_HAS_AGP	1
 
+#define	PCI_AGP_COMMAND_FW	AGPCMD_FWEN
+
 __CTASSERT(PAGE_SIZE == AGP_PAGE_SIZE);
 __CTASSERT(PAGE_SHIFT == AGP_PAGE_SHIFT);
 
-typedef struct agp_memory DRM_AGP_MEM;
-typedef struct agp_info DRM_AGP_KERN;
+struct agp_kern_info {
+	struct agp_info aki_info;
+};
 
 struct agp_bridge_data {
 	struct agp_softc abd_sc; /* XXX Abstraction violation! */
@@ -150,26 +154,28 @@ agp_bind_memory(struct agp_memory *mem, size_t npages)
 #endif
 
 static inline void
-agp_copy_info(struct agp_bridge_data *bridge, DRM_AGP_KERN *info)
+agp_copy_info(struct agp_bridge_data *bridge, struct agp_kern_info *info)
 {
-	agp_get_info(bridge, info);
+	agp_get_info(bridge, &info->aki_info);
 }
 
 static inline int
-drm_bind_agp(struct agp_bridge_data *bridge, DRM_AGP_MEM *mem, size_t page)
+drm_bind_agp(struct agp_bridge_data *bridge, struct agp_memory *mem,
+    unsigned npages)
 {
-	return agp_bind_memory(&bridge->abd_sc, mem, (page << AGP_PAGE_SHIFT));
+	return agp_bind_memory(&bridge->abd_sc, mem,
+	    ((size_t)npages << AGP_PAGE_SHIFT));
 }
 
 static inline int
-drm_unbind_agp(struct agp_bridge_data *bridge, DRM_AGP_MEM *mem)
+drm_unbind_agp(struct agp_bridge_data *bridge, struct agp_memory *mem)
 {
 	return agp_unbind_memory(&bridge->abd_sc, mem);
 }
 
 static inline void
-drm_free_agp(struct agp_bridge_data *bridge, DRM_AGP_MEM *mem,
-    size_t npages __unused)
+drm_free_agp(struct agp_bridge_data *bridge, struct agp_memory *mem,
+    int npages __unused)
 {
 	agp_free_memory(&bridge->abd_sc, mem);
 }

@@ -1,4 +1,4 @@
-/*	$NetBSD: puffs_vnops.c,v 1.181 2014/03/24 13:42:40 hannken Exp $	*/
+/*	$NetBSD: puffs_vnops.c,v 1.183 2014/08/16 16:19:41 manu Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007  Antti Kantee.  All Rights Reserved.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: puffs_vnops.c,v 1.181 2014/03/24 13:42:40 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: puffs_vnops.c,v 1.183 2014/08/16 16:19:41 manu Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -113,6 +113,8 @@ const struct vnodeopv_entry_desc puffs_vnodeop_entries[] = {
         { &vop_setattr_desc, puffs_vnop_checkop },	/* setattr */
         { &vop_read_desc, puffs_vnop_checkop },		/* read */
         { &vop_write_desc, puffs_vnop_checkop },	/* write */
+	{ &vop_fallocate_desc, genfs_eopnotsupp },	/* fallocate */
+	{ &vop_fdiscard_desc, genfs_eopnotsupp },	/* fdiscard */
         { &vop_fsync_desc, puffs_vnop_fsync },		/* REAL fsync */
         { &vop_seek_desc, puffs_vnop_checkop },		/* seek */
         { &vop_remove_desc, puffs_vnop_checkop },	/* remove */
@@ -168,6 +170,8 @@ const struct vnodeopv_entry_desc puffs_specop_entries[] = {
 	{ &vop_setattr_desc, puffs_vnop_checkop },	/* setattr */
 	{ &vop_read_desc, puffs_vnop_spec_read },	/* update, read */
 	{ &vop_write_desc, puffs_vnop_spec_write },	/* update, write */
+	{ &vop_fallocate_desc, spec_fallocate },	/* fallocate */
+	{ &vop_fdiscard_desc, spec_fdiscard },		/* fdiscard */
 	{ &vop_ioctl_desc, spec_ioctl },		/* spec_ioctl */
 	{ &vop_fcntl_desc, genfs_fcntl },		/* dummy */
 	{ &vop_poll_desc, spec_poll },			/* spec_poll */
@@ -225,6 +229,8 @@ const struct vnodeopv_entry_desc puffs_fifoop_entries[] = {
 	{ &vop_setattr_desc, puffs_vnop_checkop },	/* setattr */
 	{ &vop_read_desc, puffs_vnop_fifo_read },	/* read, update */
 	{ &vop_write_desc, puffs_vnop_fifo_write },	/* write, update */
+	{ &vop_fallocate_desc, vn_fifo_bypass },	/* fallocate */
+	{ &vop_fdiscard_desc, vn_fifo_bypass },		/* fdiscard */
 	{ &vop_ioctl_desc, vn_fifo_bypass },		/* ioctl */
 	{ &vop_fcntl_desc, genfs_fcntl },		/* dummy */
 	{ &vop_poll_desc, vn_fifo_bypass },		/* poll */
@@ -887,6 +893,7 @@ puffs_vnop_open(void *v)
 	PUFFS_MSG_VARS(vn, open);
 	struct vnode *vp = ap->a_vp;
 	struct puffs_mount *pmp = MPTOPUFFSMP(vp->v_mount);
+	struct puffs_node *pn = VPTOPP(vp);
 	int mode = ap->a_mode;
 	int error;
 
@@ -907,6 +914,12 @@ puffs_vnop_open(void *v)
 	PUFFS_MSG_ENQUEUEWAIT2(pmp, park_open, vp->v_data, NULL, error);
 	error = checkerr(pmp, error, __func__);
 
+	if (open_msg->pvnr_oflags & PUFFS_OPEN_IO_DIRECT) {
+		if (mode & FREAD)
+			pn->pn_stat |= PNODE_RDIRECT;
+		if (mode & FWRITE)
+			pn->pn_stat |= PNODE_WDIRECT;
+	}
  out:
 	DPRINTF(("puffs_open: returning %d\n", error));
 	PUFFS_MSG_RELEASE(open);
@@ -2175,6 +2188,7 @@ puffs_vnop_read(void *v)
 	} */ *ap = v;
 	PUFFS_MSG_VARS(vn, read);
 	struct vnode *vp = ap->a_vp;
+	struct puffs_node *pn = VPTOPP(vp);
 	struct puffs_mount *pmp = MPTOPUFFSMP(vp->v_mount);
 	struct uio *uio = ap->a_uio;
 	size_t tomove, argsize;
@@ -2190,7 +2204,9 @@ puffs_vnop_read(void *v)
 	if (uio->uio_offset < 0)
 		return EINVAL;
 
-	if (vp->v_type == VREG && PUFFS_USE_PAGECACHE(pmp)) {
+	if (vp->v_type == VREG &&
+	    PUFFS_USE_PAGECACHE(pmp) &&
+	    !(pn->pn_stat & PNODE_RDIRECT)) {
 		const int advice = IO_ADV_DECODE(ap->a_ioflag);
 
 		while (uio->uio_resid > 0) {
@@ -2295,7 +2311,9 @@ puffs_vnop_write(void *v)
 
 	mutex_enter(&pn->pn_sizemtx);
 
-	if (vp->v_type == VREG && PUFFS_USE_PAGECACHE(pmp)) {
+	if (vp->v_type == VREG && 
+	    PUFFS_USE_PAGECACHE(pmp) &&
+	    !(pn->pn_stat & PNODE_WDIRECT)) {
 		ubcflags = UBC_WRITE | UBC_PARTIALOK | UBC_UNMAP_FLAG(vp);
 
 		/*

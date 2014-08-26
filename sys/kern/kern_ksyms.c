@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_ksyms.c,v 1.71 2014/03/16 05:20:30 dholland Exp $	*/
+/*	$NetBSD: kern_ksyms.c,v 1.73 2014/08/17 21:17:44 joerg Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -71,12 +71,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_ksyms.c,v 1.71 2014/03/16 05:20:30 dholland Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_ksyms.c,v 1.73 2014/08/17 21:17:44 joerg Exp $");
 
 #if defined(_KERNEL) && defined(_KERNEL_OPT)
 #include "opt_ddb.h"
 #include "opt_dtrace.h"
-#include "opt_ksyms.h"
 #endif
 
 #define _KSYMS_PRIVATE
@@ -122,11 +121,11 @@ static void ksyms_sizes_calc(void);
 static int ksyms_debug;
 #endif
 
-#ifdef SYMTAB_SPACE
 #define		SYMTAB_FILLER	"|This is the symbol table!"
 
-char		db_symtab[SYMTAB_SPACE] = SYMTAB_FILLER;
-int		db_symtabsize = SYMTAB_SPACE;
+#ifdef COPY_SYMTAB
+extern char db_symtab[];
+extern int db_symtabsize;
 #endif
 
 /*
@@ -220,7 +219,7 @@ void
 ksyms_init(void)
 {
 
-#ifdef SYMTAB_SPACE
+#ifdef COPY_SYMTAB
 	if (!ksyms_loaded &&
 	    strncmp(db_symtab, SYMTAB_FILLER, sizeof(SYMTAB_FILLER))) {
 		ksyms_addsyms_elf(db_symtabsize, db_symtab,
@@ -1145,5 +1144,6 @@ const struct cdevsw ksyms_cdevsw = {
 	.d_poll = nopoll,
 	.d_mmap = nommap,
 	.d_kqfilter = nullkqfilter,
+	.d_discard = nodiscard,
 	.d_flag = D_OTHER | D_MPSAFE
 };

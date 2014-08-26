@@ -1,4 +1,4 @@
-/*	$NetBSD: exec_elf.h,v 1.140 2014/03/09 17:59:19 christos Exp $	*/
+/*	$NetBSD: exec_elf.h,v 1.143 2014/08/25 20:40:52 joerg Exp $	*/
 
 /*-
  * Copyright (c) 1994 The NetBSD Foundation, Inc.
@@ -280,7 +280,8 @@ typedef struct {
 #define EM_MN10300	89	/* Matsushita MN10300 */
 #define EM_MN10200	90	/* Matsushita MN10200 */
 #define EM_PJ		91	/* picoJava */
-#define EM_OPENRISC	92	/* OpenRISC 32-bit embedded processor */
+#define EM_OR1K		92	/* OpenRISC 32-bit embedded processor */
+#define EM_OPENRISC	EM_OR1K
 #define EM_ARC_A5	93	/* ARC Cores Tangent-A5 */
 #define EM_XTENSA	94	/* Tensilica Xtensa Architecture */
 #define EM_VIDEOCORE	95	/* Alphamosaic VideoCore processor */
@@ -515,6 +516,7 @@ typedef struct {
 #define STT_NUM			7
 
 #define STT_LOOS		10	/* Operating system specific range */
+#define STT_GNU_IFUNC		10	/* GNU extension: indirect function */
 #define STT_HIOS		12
 #define STT_LOPROC		13	/* Processor-specific range */
 #define STT_HIPROC		15
@@ -1224,6 +1226,13 @@ typedef struct {
 typedef Elf32_Versym	Elf64_Versym;
 
 #ifdef _KERNEL
+
+/*
+ * Arbitrary limits to avoid DoS for excessive memory allocation.
+ */
+#define ELF_MAXPHNUM	128
+#define ELF_MAXSHNUM	32768
+#define ELF_MAXNOTESIZE	1024
 
 #define ELF_AUX_ENTRIES 15	/* Max size of aux array passed to loader */
 #define ELF32_NO_ADDR	(~(Elf32_Addr)0) /* Indicates addr. not yet filled in */

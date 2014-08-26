@@ -1,4 +1,4 @@
-/*	$NetBSD: udp6_usrreq.c,v 1.97 2014/05/22 22:56:53 rmind Exp $	*/
+/*	$NetBSD: udp6_usrreq.c,v 1.115 2014/08/09 05:33:01 rtr Exp $	*/
 /*	$KAME: udp6_usrreq.c,v 1.86 2001/05/27 17:33:00 itojun Exp $	*/
 
 /*
@@ -62,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: udp6_usrreq.c,v 1.97 2014/05/22 22:56:53 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: udp6_usrreq.c,v 1.115 2014/08/09 05:33:01 rtr Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet_csum.h"
@@ -341,7 +341,7 @@ udp6_sendup(struct mbuf *m, int off /* offset of data portion */,
 
 #if defined(IPSEC)
 	/* check AH/ESP integrity. */
-	if (so != NULL && ipsec6_in_reject_so(m, so)) {
+	if (ipsec_used && so != NULL && ipsec6_in_reject_so(m, so)) {
 		IPSEC6_STATINC(IPSEC_STAT_IN_POLVIO);
 		if ((n = m_copypacket(m, M_DONTWAIT)) != NULL)
 			icmp6_error(n, ICMP6_DST_UNREACH,
@@ -677,16 +677,120 @@ udp6_detach(struct socket *so)
 	splx(s);
 }
 
-int
-udp6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr6,
-    struct mbuf *control, struct lwp *l)
+static int
+udp6_accept(struct socket *so, struct mbuf *nam)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+udp6_bind(struct socket *so, struct mbuf *nam, struct lwp *l)
 {
 	struct in6pcb *in6p = sotoin6pcb(so);
-	int s, error = 0;
+	int error = 0;
+	int s;
 
-	KASSERT(req != PRU_ATTACH);
-	KASSERT(req != PRU_DETACH);
+	KASSERT(solocked(so));
+	KASSERT(in6p != NULL);
 
+	s = splsoftnet();
+	error = in6_pcbbind(in6p, nam, l);
+	splx(s);
+	return error;
+}
+
+static int
+udp6_listen(struct socket *so, struct lwp *l)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+udp6_connect(struct socket *so, struct mbuf *nam, struct lwp *l)
+{
+	struct in6pcb *in6p = sotoin6pcb(so);
+	int error = 0;
+	int s;
+
+	KASSERT(solocked(so));
+	KASSERT(in6p != NULL);
+
+	if (!IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_faddr))
+		return EISCONN;
+	s = splsoftnet();
+	error = in6_pcbconnect(in6p, nam, l);
+	splx(s);
+	if (error == 0)
+		soisconnected(so);
+
+	return error;
+}
+
+static int
+udp6_connect2(struct socket *so, struct socket *so2)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+udp6_disconnect(struct socket *so)
+{
+	struct in6pcb *in6p = sotoin6pcb(so);
+	int s;
+
+	KASSERT(solocked(so));
+	KASSERT(in6p != NULL);
+
+	if (IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_faddr))
+		return ENOTCONN;
+
+	s = splsoftnet();
+	in6_pcbdisconnect(in6p);
+	memset((void *)&in6p->in6p_laddr, 0, sizeof(in6p->in6p_laddr));
+	splx(s);
+
+	so->so_state &= ~SS_ISCONNECTED;	/* XXX */
+	in6_pcbstate(in6p, IN6P_BOUND);		/* XXX */
+	return 0;
+}
+
+static int
+udp6_shutdown(struct socket *so)
+{
+	int s;
+
+	s = splsoftnet();
+	socantsendmore(so);
+	splx(s);
+
+	return 0;
+}
+
+static int
+udp6_abort(struct socket *so)
+{
+	int s;
+
+	KASSERT(solocked(so));
+	KASSERT(sotoin6pcb(so) != NULL);
+
+	s = splsoftnet();
+	soisdisconnected(so);
+	in6_pcbdetach(sotoin6pcb(so));
+	splx(s);
+
+	return 0;
+}
+
+static int
+udp6_ioctl(struct socket *so, u_long cmd, void *addr6, struct ifnet *ifp)
+{
 	/*
 	 * MAPPED_ADDR implementation info:
 	 *  Mapped addr support for PRU_CONTROL is not necessary.
@@ -697,99 +801,139 @@ udp6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr6,
 	 *  So AF_INET socket need to be used to control AF_INET addrs,
 	 *  and AF_INET6 socket for AF_INET6 addrs.
 	 */
-	if (req == PRU_CONTROL) {
-		return in6_control(so, (u_long)m, (void *)addr6,
-				   (struct ifnet *)control, l);
-	}
-	if (req == PRU_PURGEIF) {
-		mutex_enter(softnet_lock);
-		in6_pcbpurgeif0(&udbtable, (struct ifnet *)control);
-		in6_purgeif((struct ifnet *)control);
-		in6_pcbpurgeif(&udbtable, (struct ifnet *)control);
-		mutex_exit(softnet_lock);
-		return 0;
-	}
-	if (in6p == NULL) {
+	return in6_control(so, cmd, addr6, ifp);
+}
+
+static int
+udp6_stat(struct socket *so, struct stat *ub)
+{
+	KASSERT(solocked(so));
+
+	/* stat: don't bother with a blocksize */
+	return 0;
+}
+
+static int
+udp6_peeraddr(struct socket *so, struct mbuf *nam)
+{
+	KASSERT(solocked(so));
+	KASSERT(sotoin6pcb(so) != NULL);
+	KASSERT(nam != NULL);
+
+	in6_setpeeraddr(sotoin6pcb(so), nam);
+	return 0;
+}
+
+static int
+udp6_sockaddr(struct socket *so, struct mbuf *nam)
+{
+	KASSERT(solocked(so));
+	KASSERT(sotoin6pcb(so) != NULL);
+	KASSERT(nam != NULL);
+
+	in6_setsockaddr(sotoin6pcb(so), nam);
+	return 0;
+}
+
+static int
+udp6_rcvd(struct socket *so, int flags, struct lwp *l)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+udp6_recvoob(struct socket *so, struct mbuf *m, int flags)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+udp6_send(struct socket *so, struct mbuf *m, struct mbuf *nam,
+    struct mbuf *control, struct lwp *l)
+{
+	struct in6pcb *in6p = sotoin6pcb(so);
+	int error = 0;
+	int s;
+
+	KASSERT(solocked(so));
+	KASSERT(in6p != NULL);
+	KASSERT(m != NULL);
+
+	s = splsoftnet();
+	error = udp6_output(in6p, m, nam, control, l);
+	splx(s);
+
+	return error;
+}
+
+static int
+udp6_sendoob(struct socket *so, struct mbuf *m, struct mbuf *control)
+{
+	KASSERT(solocked(so));
+
+	if (m)
+		m_freem(m);
+	if (control)
+		m_freem(control);
+
+	return EOPNOTSUPP;
+}
+
+static int
+udp6_purgeif(struct socket *so, struct ifnet *ifp)
+{
+
+	mutex_enter(softnet_lock);
+	in6_pcbpurgeif0(&udbtable, ifp);
+	in6_purgeif(ifp);
+	in6_pcbpurgeif(&udbtable, ifp);
+	mutex_exit(softnet_lock);
+
+	return 0;
+}
+
+int
+udp6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr6,
+    struct mbuf *control, struct lwp *l)
+{
+	int error = 0;
+
+	KASSERT(req != PRU_ATTACH);
+	KASSERT(req != PRU_DETACH);
+	KASSERT(req != PRU_ACCEPT);
+	KASSERT(req != PRU_BIND);
+	KASSERT(req != PRU_LISTEN);
+	KASSERT(req != PRU_CONNECT);
+	KASSERT(req != PRU_CONNECT2);
+	KASSERT(req != PRU_DISCONNECT);
+	KASSERT(req != PRU_SHUTDOWN);
+	KASSERT(req != PRU_ABORT);
+	KASSERT(req != PRU_CONTROL);
+	KASSERT(req != PRU_SENSE);
+	KASSERT(req != PRU_PEERADDR);
+	KASSERT(req != PRU_SOCKADDR);
+	KASSERT(req != PRU_RCVD);
+	KASSERT(req != PRU_RCVOOB);
+	KASSERT(req != PRU_SEND);
+	KASSERT(req != PRU_SENDOOB);
+	KASSERT(req != PRU_PURGEIF);
+
+	if (sotoin6pcb(so) == NULL) {
 		error = EINVAL;
 		goto release;
 	}
 
 	switch (req) {
-
-	case PRU_BIND:
-		s = splsoftnet();
-		error = in6_pcbbind(in6p, addr6, l);
-		splx(s);
-		break;
-
-	case PRU_CONNECT:
-		if (!IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_faddr)) {
-			error = EISCONN;
-			break;
-		}
-		s = splsoftnet();
-		error = in6_pcbconnect(in6p, addr6, l);
-		splx(s);
-		if (error == 0)
-			soisconnected(so);
-		break;
-
-	case PRU_DISCONNECT:
-		if (IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_faddr)) {
-			error = ENOTCONN;
-			break;
-		}
-		s = splsoftnet();
-		in6_pcbdisconnect(in6p);
-		memset((void *)&in6p->in6p_laddr, 0, sizeof(in6p->in6p_laddr));
-		splx(s);
-		so->so_state &= ~SS_ISCONNECTED;		/* XXX */
-		in6_pcbstate(in6p, IN6P_BOUND);		/* XXX */
-		break;
-
-	case PRU_SHUTDOWN:
-		socantsendmore(so);
-		break;
-
-	case PRU_SEND:
-		s = splsoftnet();
-		error = udp6_output(in6p, m, addr6, control, l);
-		splx(s);
-		return error;
-
-	case PRU_ABORT:
-		soisdisconnected(so);
-		in6_pcbdetach(in6p);
-		break;
-
-	case PRU_SOCKADDR:
-		in6_setsockaddr(in6p, addr6);
-		break;
-
-	case PRU_PEERADDR:
-		in6_setpeeraddr(in6p, addr6);
-		break;
-
-	case PRU_SENSE:
-		/*
-		 * stat: don't bother with a blocksize
-		 */
-		return 0;
-
-	case PRU_LISTEN:
-	case PRU_CONNECT2:
-	case PRU_ACCEPT:
-	case PRU_SENDOOB:
 	case PRU_FASTTIMO:
 	case PRU_SLOWTIMO:
 	case PRU_PROTORCV:
 	case PRU_PROTOSEND:
 		error = EOPNOTSUPP;
 		break;
-
-	case PRU_RCVD:
-	case PRU_RCVOOB:
-		return EOPNOTSUPP;	/* do not free mbuf's */
 
 	default:
 		panic("udp6_usrreq");
@@ -874,10 +1018,44 @@ udp6_statinc(u_int stat)
 PR_WRAP_USRREQS(udp6)
 #define	udp6_attach	udp6_attach_wrapper
 #define	udp6_detach	udp6_detach_wrapper
+#define	udp6_accept	udp6_accept_wrapper
+#define	udp6_bind	udp6_bind_wrapper
+#define	udp6_listen	udp6_listen_wrapper
+#define	udp6_connect	udp6_connect_wrapper
+#define	udp6_connect2	udp6_connect2_wrapper
+#define	udp6_disconnect	udp6_disconnect_wrapper
+#define	udp6_shutdown	udp6_shutdown_wrapper
+#define	udp6_abort	udp6_abort_wrapper
+#define	udp6_ioctl	udp6_ioctl_wrapper
+#define	udp6_stat	udp6_stat_wrapper
+#define	udp6_peeraddr	udp6_peeraddr_wrapper
+#define	udp6_sockaddr	udp6_sockaddr_wrapper
+#define	udp6_rcvd	udp6_rcvd_wrapper
+#define	udp6_recvoob	udp6_recvoob_wrapper
+#define	udp6_send	udp6_send_wrapper
+#define	udp6_sendoob	udp6_sendoob_wrapper
+#define	udp6_purgeif	udp6_purgeif_wrapper
 #define	udp6_usrreq	udp6_usrreq_wrapper
 
 const struct pr_usrreqs udp6_usrreqs = {
 	.pr_attach	= udp6_attach,
 	.pr_detach	= udp6_detach,
+	.pr_accept	= udp6_accept,
+	.pr_bind	= udp6_bind,
+	.pr_listen	= udp6_listen,
+	.pr_connect	= udp6_connect,
+	.pr_connect2	= udp6_connect2,
+	.pr_disconnect	= udp6_disconnect,
+	.pr_shutdown	= udp6_shutdown,
+	.pr_abort	= udp6_abort,
+	.pr_ioctl	= udp6_ioctl,
+	.pr_stat	= udp6_stat,
+	.pr_peeraddr	= udp6_peeraddr,
+	.pr_sockaddr	= udp6_sockaddr,
+	.pr_rcvd	= udp6_rcvd,
+	.pr_recvoob	= udp6_recvoob,
+	.pr_send	= udp6_send,
+	.pr_sendoob	= udp6_sendoob,
+	.pr_purgeif	= udp6_purgeif,
 	.pr_generic	= udp6_usrreq,
 };

@@ -1,4 +1,4 @@
-/*	$NetBSD: btsco.c,v 1.29 2014/05/20 18:25:54 rmind Exp $	*/
+/*	$NetBSD: btsco.c,v 1.33 2014/08/05 07:55:31 rtr Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: btsco.c,v 1.29 2014/05/20 18:25:54 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: btsco.c,v 1.33 2014/08/05 07:55:31 rtr Exp $");
 
 #include <sys/param.h>
 #include <sys/audioio.h>
@@ -359,7 +359,7 @@ btsco_detach(device_t self, int flags)
 	mutex_enter(bt_lock);
 	if (sc->sc_sco != NULL) {
 		DPRINTF("sc_sco=%p\n", sc->sc_sco);
-		sco_disconnect(sc->sc_sco, 0);
+		sco_disconnect_pcb(sc->sc_sco, 0);
 		sco_detach_pcb(&sc->sc_sco);
 		sc->sc_sco = NULL;
 	}
@@ -592,13 +592,13 @@ btsco_open(void *hdl, int flags)
 		if (err)
 			goto done;
 
-		err = sco_bind(sc->sc_sco_l, &sa);
+		err = sco_bind_pcb(sc->sc_sco_l, &sa);
 		if (err) {
 			sco_detach_pcb(&sc->sc_sco_l);
 			goto done;
 		}
 
-		err = sco_listen(sc->sc_sco_l);
+		err = sco_listen_pcb(sc->sc_sco_l);
 		if (err) {
 			sco_detach_pcb(&sc->sc_sco_l);
 			goto done;
@@ -610,14 +610,14 @@ btsco_open(void *hdl, int flags)
 		if (err)
 			goto done;
 
-		err = sco_bind(sc->sc_sco, &sa);
+		err = sco_bind_pcb(sc->sc_sco, &sa);
 		if (err) {
 			sco_detach_pcb(&sc->sc_sco);
 			goto done;
 		}
 
 		bdaddr_copy(&sa.bt_bdaddr, &sc->sc_raddr);
-		err = sco_connect(sc->sc_sco, &sa);
+		err = sco_connect_pcb(sc->sc_sco, &sa);
 		if (err) {
 			sco_detach_pcb(&sc->sc_sco);
 			goto done;
@@ -672,7 +672,7 @@ btsco_close(void *hdl)
 	KASSERT(mutex_owned(bt_lock));
 
 	if (sc->sc_sco != NULL) {
-		sco_disconnect(sc->sc_sco, 0);
+		sco_disconnect_pcb(sc->sc_sco, 0);
 		sco_detach_pcb(&sc->sc_sco);
 	}
 
@@ -1123,7 +1123,7 @@ btsco_dev_ioctl(void *hdl, u_long cmd, void *addr, int flag,
 /*
  * Our transmit interrupt. This is triggered when a new block is to be
  * sent.  We send mtu sized chunks of the block as mbufs with external
- * storage to sco_send()
+ * storage to sco_send_pcb()
  */
 static void
 btsco_intr(void *arg)
@@ -1163,7 +1163,7 @@ btsco_intr(void *arg)
 		m->m_pkthdr.len = m->m_len = mlen;
 		sc->sc_tx_pending++;
 
-		if (sco_send(sc->sc_sco, m) > 0) {
+		if (sco_send_pcb(sc->sc_sco, m) > 0) {
 			sc->sc_tx_pending--;
 			break;
 		}
