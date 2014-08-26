@@ -1,4 +1,4 @@
-/*	$NetBSD: main.c,v 1.38 2014/02/24 07:23:40 skrll Exp $	*/
+/*	$NetBSD: main.c,v 1.41 2014/08/10 06:48:51 apb Exp $	*/
 
 /*
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
@@ -76,7 +76,7 @@ __COPYRIGHT("@(#) Copyright (c) 1987, 1993\
 static char sccsid[] = "@(#)disklabel.c	8.4 (Berkeley) 5/4/95";
 /* from static char sccsid[] = "@(#)disklabel.c	1.2 (Symmetric) 11/28/85"; */
 #else
-__RCSID("$NetBSD: main.c,v 1.38 2014/02/24 07:23:40 skrll Exp $");
+__RCSID("$NetBSD: main.c,v 1.41 2014/08/10 06:48:51 apb Exp $");
 #endif
 #endif	/* not lint */
 
@@ -258,7 +258,8 @@ static const struct disklabel_params {
 
 	{ "prep",	1, 1,   0,  8, 2, 0, BIG_ENDIAN },	/* powerpc */
 
-	{ "dreadmcast",	1, 1,   0, 16, 2, 0, LITTLE_ENDIAN },	/* sh3 */
+	{ "dreamcast",	1, 1,   0, 16, 2, 0, LITTLE_ENDIAN },	/* sh3 */
+	{ "evbarm64",	1, 1,   0, 16, 2, 0, 0 },		/* aarch64 */
 	{ "evbsh3",	1, 1,   0, 16, 2, 0, 0 },		/* sh3 */
 	{ "evbcf",	1, 1,   0, 16, 2, 0, BIG_ENDIAN },	/* coldfire */
 	{ "evbppc-mbr",	1, 1,   0, 16, 2, 0, BIG_ENDIAN },	/* powerpc */
@@ -296,6 +297,7 @@ static const struct arch_endian {
 	int byteorder;
 	const char *arch;
 } arch_endians[] = {
+	{ LITTLE_ENDIAN, "aarch64" },
 	{ LITTLE_ENDIAN, "alpha" },
 	{ LITTLE_ENDIAN, "arm" },
 	{ LITTLE_ENDIAN, "earm" },
@@ -314,6 +316,7 @@ static const struct arch_endian {
 	{ LITTLE_ENDIAN, "vax" },
 	{ LITTLE_ENDIAN, "x86_64" },
 
+	{ BIG_ENDIAN, "aarch64eb" },
 	{ BIG_ENDIAN, "armeb" },
 	{ BIG_ENDIAN, "coldfire" },
 	{ BIG_ENDIAN, "earmeb" },
@@ -1384,7 +1387,7 @@ makedisktab(FILE *f, struct disklabel *lp)
 		did = "";
 	}
 	if (lp->d_headswitch != 0) {
-		(void) fprintf(f, "%shs#%" PRIu16 ":", did, lp->d_headswitch);
+		(void) fprintf(f, "%shs#%" PRIu32 ":", did, lp->d_headswitch);
 		did = "";
 	}
 	if (lp->d_trkseek != 0) {

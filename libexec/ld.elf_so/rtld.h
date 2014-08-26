@@ -1,4 +1,4 @@
-/*	$NetBSD: rtld.h,v 1.117 2014/03/06 19:19:40 matt Exp $	 */
+/*	$NetBSD: rtld.h,v 1.121 2014/08/26 07:54:27 christos Exp $	 */
 
 /*
  * Copyright 1996 John D. Polstra.
@@ -48,7 +48,7 @@
 
 #if defined(_RTLD_SOURCE)
 
-#ifdef __ARM_EABI__
+#if defined(__ARM_EABI__) && !defined(__ARM_DWARF_EH__)
 #include "unwind.h"
 #endif
 
@@ -193,8 +193,8 @@ typedef struct Struct_Obj_Entry {
 	Search_Path    *rpaths;		/* Search path specified in object */
 	Needed_Entry   *needed;		/* Shared objects needed by this (%) */
 
-	fptr_t		init;		/* Initialization function to call */
-	fptr_t		fini;		/* Termination function to call */
+	Elf_Addr	init;		/* Initialization function to call */
+	Elf_Addr	fini;		/* Termination function to call */
 
 	/*
 	 * BACKWARDS COMPAT Entry points for dlopen() and friends.
@@ -288,9 +288,9 @@ typedef struct Struct_Obj_Entry {
 	int		vertabnum;	/* Number of entries in vertab */
 
 	/* init_array/fini_array */
-	fptr_t		*init_array;	/* start of init array */
+	Elf_Addr	*init_array;	/* start of init array */
 	size_t		init_arraysz;	/* # of entries in it */
-	fptr_t		*fini_array;	/* start of fini array */
+	Elf_Addr	*fini_array;	/* start of fini array */
 	size_t		fini_arraysz;	/* # of entries in it */
 #ifdef __ARM_EABI__
 	void		*exidx_start;
@@ -326,7 +326,7 @@ extern Elf_Sym _rtld_sym_zero;
 
 /* Flags to be passed into _rtld_symlook_ family of functions. */
 #define SYMLOOK_IN_PLT	0x01	/* Lookup for PLT symbol */
-#define SYMLOOK_DLSYM	0x02	/* Return newes versioned symbol.
+#define SYMLOOK_DLSYM	0x02	/* Return newest versioned symbol.
 				   Used by dlsym. */
 
 /* Flags for _rtld_load_object() and friends. */
@@ -352,7 +352,7 @@ __dso_public int dl_iterate_phdr(int (*)(struct dl_phdr_info *, size_t, void *),
 
 __dso_public void *_dlauxinfo(void) __pure;
 
-#ifdef __ARM_EABI__
+#if defined(__ARM_EABI__) && !defined(__ARM_DWARF_EH__)
 /*
  * This is used by libgcc to find the start and length of the exception table
  * associated with a PC.
@@ -404,6 +404,7 @@ int _rtld_relocate_nonplt_objects(Obj_Entry *);
 int _rtld_relocate_plt_lazy(const Obj_Entry *);
 int _rtld_relocate_plt_objects(const Obj_Entry *);
 void _rtld_setup_pltgot(const Obj_Entry *);
+Elf_Addr _rtld_resolve_ifunc(const Obj_Entry *, const Elf_Sym *);
 
 /* search.c */
 Obj_Entry *_rtld_load_library(const char *, const Obj_Entry *, int);
@@ -474,11 +475,34 @@ Obj_Entry *_rtld_map_object(const char *, int, const struct stat *);
 void _rtld_obj_free(Obj_Entry *);
 Obj_Entry *_rtld_obj_new(void);
 
+/*
+ * The following uintptr_t cast is for Elf32 emulation on _LP64 systems
+ */
+#if defined(_LP64) && ELFSIZE == 32 
+#define RTLD_ELF32_CAST (uintptr_t)
+#else
+#define RTLD_ELF32_CAST 
+#endif
+
 /* function descriptors */
 #ifdef __HAVE_FUNCTION_DESCRIPTORS
 Elf_Addr _rtld_function_descriptor_alloc(const Obj_Entry *,
     const Elf_Sym *, Elf_Addr);
 const void *_rtld_function_descriptor_function(const void *);
+
+void _rtld_call_function_void(const Obj_Entry *, Elf_Addr);
+Elf_Addr _rtld_call_function_addr(const Obj_Entry *, Elf_Addr);
+#else
+static inline void
+_rtld_call_function_void(const Obj_Entry *obj, Elf_Addr addr)
+{
+	((void (*)(void)) RTLD_ELF32_CAST addr)();
+}
+static inline Elf_Addr
+_rtld_call_function_addr(const Obj_Entry *obj, Elf_Addr addr)
+{
+	return ((Elf_Addr(*)(void)) RTLD_ELF32_CAST addr)();
+}
 #endif /* __HAVE_FUNCTION_DESCRIPTORS */
 
 #endif /* _RTLD_SOURCE */
