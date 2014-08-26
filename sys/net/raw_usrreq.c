@@ -1,4 +1,4 @@
-/*	$NetBSD: raw_usrreq.c,v 1.39 2014/05/19 02:51:24 rmind Exp $	*/
+/*	$NetBSD: raw_usrreq.c,v 1.52 2014/08/09 05:33:01 rtr Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1993
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: raw_usrreq.c,v 1.39 2014/05/19 02:51:24 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: raw_usrreq.c,v 1.52 2014/08/09 05:33:01 rtr Exp $");
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
@@ -154,133 +154,76 @@ raw_setpeeraddr(struct rawcb *rp, struct mbuf *nam)
 }
 
 int
-raw_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
+raw_send(struct socket *so, struct mbuf *m, struct mbuf *nam,
     struct mbuf *control, struct lwp *l)
 {
 	struct rawcb *rp = sotorawcb(so);
-	int s, error = 0;
+	int error = 0;
 
-	KASSERT(req != PRU_ATTACH);
-	KASSERT(req != PRU_DETACH);
-
-	if (req == PRU_CONTROL)
-		return EOPNOTSUPP;
-
-	s = splsoftnet();
-	KERNEL_LOCK(1, NULL);
-
-	KASSERT(!control || (req == PRU_SEND || req == PRU_SENDOOB));
-	if (rp == NULL) {
-		error = EINVAL;
-		goto release;
-	}
-
-	switch (req) {
-	/*
-	 * If a socket isn't bound to a single address,
-	 * the raw input routine will hand it anything
-	 * within that protocol family (assuming there's
-	 * nothing else around it should go to).
-	 */
-	case PRU_BIND:
-	case PRU_LISTEN:
-	case PRU_CONNECT:
-	case PRU_CONNECT2:
-		error = EOPNOTSUPP;
-		break;
-
-	case PRU_DISCONNECT:
-		soisdisconnected(so);
-		raw_disconnect(rp);
-		break;
-
-	/*
-	 * Mark the connection as being incapable of further input.
-	 */
-	case PRU_SHUTDOWN:
-		socantsendmore(so);
-		break;
-
-	case PRU_RCVD:
-		error = EOPNOTSUPP;
-		break;
+	KASSERT(rp != NULL);
 
 	/*
 	 * Ship a packet out.  The appropriate raw output
 	 * routine handles any massaging necessary.
 	 */
-	case PRU_SEND:
-		if (control && control->m_len) {
-			m_freem(control);
-			m_freem(m);
-			error = EINVAL;
-			break;
-		}
-		if (nam) {
-			if ((so->so_state & SS_ISCONNECTED) != 0) {
-				error = EISCONN;
-				goto die;
-			}
-			error = (*so->so_proto->pr_usrreqs->pr_generic)(so,
-			    PRU_CONNECT, NULL, nam, NULL, l);
-			if (error) {
-			die:
-				m_freem(m);
-				break;
-			}
-		} else {
-			if ((so->so_state & SS_ISCONNECTED) == 0) {
-				error = ENOTCONN;
-				goto die;
-			}
-		}
-		error = (*so->so_proto->pr_output)(m, so);
-		if (nam)
-			raw_disconnect(rp);
-		break;
-
-	case PRU_SENSE:
-		/*
-		 * stat: don't bother with a blocksize.
-		 */
-		error = 0;
-		break;
-
-	/*
-	 * Not supported.
-	 */
-	case PRU_RCVOOB:
-		error = EOPNOTSUPP;
-		break;
-
-	case PRU_SENDOOB:
+	if (control && control->m_len) {
 		m_freem(control);
 		m_freem(m);
-		error = EOPNOTSUPP;
-		break;
-
-	case PRU_SOCKADDR:
-		if (rp->rcb_laddr == NULL) {
-			error = EINVAL;
-			break;
-		}
-		raw_setsockaddr(rp, nam);
-		break;
-
-	case PRU_PEERADDR:
-		if (rp->rcb_faddr == NULL) {
-			error = ENOTCONN;
-			break;
-		}
-		raw_setpeeraddr(rp, nam);
-		break;
-
-	default:
-		panic("raw_usrreq");
+		return EINVAL;
 	}
+	if (nam) {
+		if ((so->so_state & SS_ISCONNECTED) != 0) {
+			error = EISCONN;
+			goto die;
+		}
+		error = (*so->so_proto->pr_usrreqs->pr_connect)(so, nam, l);
+		if (error) {
+		die:
+			m_freem(m);
+			return error;
+		}
+	} else {
+		if ((so->so_state & SS_ISCONNECTED) == 0) {
+			error = ENOTCONN;
+			goto die;
+		}
+	}
+	error = (*so->so_proto->pr_output)(m, so);
+	if (nam)
+		raw_disconnect(rp);
 
-release:
-	KERNEL_UNLOCK_ONE(NULL);
-	splx(s);
-	return (error);
+	return error;
+}
+
+int
+raw_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
+    struct mbuf *control, struct lwp *l)
+{
+
+	KASSERT(req != PRU_ATTACH);
+	KASSERT(req != PRU_DETACH);
+	KASSERT(req != PRU_ACCEPT);
+	KASSERT(req != PRU_BIND);
+	KASSERT(req != PRU_LISTEN);
+	KASSERT(req != PRU_CONNECT);
+	KASSERT(req != PRU_CONNECT2);
+	KASSERT(req != PRU_DISCONNECT);
+	KASSERT(req != PRU_SHUTDOWN);
+	KASSERT(req != PRU_ABORT);
+	KASSERT(req != PRU_CONTROL);
+	KASSERT(req != PRU_SENSE);
+	KASSERT(req != PRU_PEERADDR);
+	KASSERT(req != PRU_SOCKADDR);
+	KASSERT(req != PRU_RCVD);
+	KASSERT(req != PRU_RCVOOB);
+	KASSERT(req != PRU_SEND);
+	KASSERT(req != PRU_SENDOOB);
+	KASSERT(req != PRU_PURGEIF);
+
+	if (sotorawcb(so) == NULL)
+		return EINVAL;
+
+	panic("raw_usrreq");
+
+	return 0;
 }

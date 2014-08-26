@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.inc,v 1.187 2014/01/16 20:31:42 christos Exp $
+#	$NetBSD: Makefile.inc,v 1.188 2014/06/13 15:45:05 joerg Exp $
 #	from: @(#)Makefile.inc	8.6 (Berkeley) 5/4/95
 
 # gen sources
@@ -6,8 +6,8 @@
 
 #SRCS+=	_errno.c
 
-SRCS+= 	alarm.c alphasort.c arc4random.c assert.c basename.c clock.c \
-	closedir.c closefrom.c \
+SRCS+= 	alarm.c alphasort.c arc4random.c assert.c asysctl.c \
+	basename.c clock.c closedir.c closefrom.c \
 	confstr.c ctermid.c ctype_.c daemon.c \
 	dehumanize_number.c devname.c dirname.c disklabel.c err.c errx.c \
 	errc.c errlist.c errno.c execl.c execle.c execlp.c execv.c execvp.c \

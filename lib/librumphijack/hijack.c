@@ -1,4 +1,4 @@
-/*      $NetBSD: hijack.c,v 1.107 2014/04/02 17:09:23 justin Exp $	*/
+/*      $NetBSD: hijack.c,v 1.110 2014/08/12 23:47:09 pooka Exp $	*/
 
 /*-
  * Copyright (c) 2011 Antti Kantee.  All Rights Reserved.
@@ -28,7 +28,7 @@
 #include <rump/rumpuser_port.h>
 
 #if !defined(lint)
-__RCSID("$NetBSD: hijack.c,v 1.107 2014/04/02 17:09:23 justin Exp $");
+__RCSID("$NetBSD: hijack.c,v 1.110 2014/08/12 23:47:09 pooka Exp $");
 #endif
 
 #include <sys/param.h>
@@ -1380,7 +1380,7 @@ fcntl(int fd, int cmd, ...)
 		 * for the file descriptors not dup2'd.
 		 */
 
-		for (i = 0, maxdup2 = 0; i <= DUP2HIGH; i++) {
+		for (i = 0, maxdup2 = -1; i <= DUP2HIGH; i++) {
 			if (dup2vec[i] & DUP2BIT) {
 				int val;
 
@@ -2069,14 +2069,10 @@ REALPOLLTS(struct pollfd *fds, nfds_t nfds, const struct timespec *ts,
 		errno_host = parg.errnum;
 
 		/* strip cross-thread notification from real results */
-		if (pfd_host[nfds].revents & POLLIN) {
-			assert((pfd_rump[nfds].revents & POLLIN) == 0);
-			assert(rv_host > 0);
+		if (rv_host > 0 && pfd_host[nfds].revents & POLLIN) {
 			rv_host--;
 		}
-		if (pfd_rump[nfds].revents & POLLIN) {
-			assert((pfd_host[nfds].revents & POLLIN) == 0);
-			assert(rv_rump > 0);
+		if (rv_rump > 0 && pfd_rump[nfds].revents & POLLIN) {
 			rv_rump--;
 		}
 

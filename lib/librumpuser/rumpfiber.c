@@ -1,3 +1,5 @@
+/*	$NetBSD: rumpfiber.c,v 1.4 2014/08/24 14:37:31 pooka Exp $	*/
+
 /*
  * Copyright (c) 2007-2013 Antti Kantee.  All Rights Reserved.
  * Copyright (c) 2014 Justin Cormack.  All Rights Reserved.
@@ -66,7 +68,7 @@
 #include "rumpuser_port.h"
 
 #if !defined(lint)
-__RCSID("$NetBSD: rumpfiber.c,v 1.2 2014/07/22 22:41:58 justin Exp $");
+__RCSID("$NetBSD: rumpfiber.c,v 1.4 2014/08/24 14:37:31 pooka Exp $");
 #endif /* !lint */
 
 #include <sys/ioctl.h>
@@ -410,14 +412,16 @@ struct rumpuser_hyperup rumpuser__hyp;
 int
 rumpuser_init(int version, const struct rumpuser_hyperup *hyp)
 {
+	int rv;
 
 	if (version != RUMPUSER_VERSION) {
 		printk("rumpuser version mismatch\n");
-		return 1;
+		abort();
 	}
 
-	if (rumpuser__random_init() != 0) {
-		return 1;
+	rv = rumpuser__random_init();
+	if (rv != 0) {
+		ET(rv);
 	}
 
         rumpuser__hyp = *hyp;

@@ -1,4 +1,4 @@
-/*	$NetBSD: bthidev.c,v 1.25 2014/05/20 18:25:54 rmind Exp $	*/
+/*	$NetBSD: bthidev.c,v 1.29 2014/08/05 07:55:31 rtr Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bthidev.c,v 1.25 2014/05/20 18:25:54 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bthidev.c,v 1.29 2014/08/05 07:55:31 rtr Exp $");
 
 #include <sys/param.h>
 #include <sys/condvar.h>
@@ -370,14 +370,14 @@ bthidev_detach(device_t self, int flags)
 
 	/* close interrupt channel */
 	if (sc->sc_int != NULL) {
-		l2cap_disconnect(sc->sc_int, 0);
+		l2cap_disconnect_pcb(sc->sc_int, 0);
 		l2cap_detach_pcb(&sc->sc_int);
 		sc->sc_int = NULL;
 	}
 
 	/* close control channel */
 	if (sc->sc_ctl != NULL) {
-		l2cap_disconnect(sc->sc_ctl, 0);
+		l2cap_disconnect_pcb(sc->sc_ctl, 0);
 		l2cap_detach_pcb(&sc->sc_ctl);
 		sc->sc_ctl = NULL;
 	}
@@ -450,12 +450,12 @@ bthidev_timeout(void *arg)
 	switch (sc->sc_state) {
 	case BTHID_CLOSED:
 		if (sc->sc_int != NULL) {
-			l2cap_disconnect(sc->sc_int, 0);
+			l2cap_disconnect_pcb(sc->sc_int, 0);
 			break;
 		}
 
 		if (sc->sc_ctl != NULL) {
-			l2cap_disconnect(sc->sc_ctl, 0);
+			l2cap_disconnect_pcb(sc->sc_ctl, 0);
 			break;
 		}
 
@@ -508,11 +508,11 @@ bthidev_listen(struct bthidev_softc *sc)
 		return err;
 
 	sa.bt_psm = sc->sc_ctlpsm;
-	err = l2cap_bind(sc->sc_ctl_l, &sa);
+	err = l2cap_bind_pcb(sc->sc_ctl_l, &sa);
 	if (err)
 		return err;
 
-	err = l2cap_listen(sc->sc_ctl_l);
+	err = l2cap_listen_pcb(sc->sc_ctl_l);
 	if (err)
 		return err;
 
@@ -528,11 +528,11 @@ bthidev_listen(struct bthidev_softc *sc)
 		return err;
 
 	sa.bt_psm = sc->sc_intpsm;
-	err = l2cap_bind(sc->sc_int_l, &sa);
+	err = l2cap_bind_pcb(sc->sc_int_l, &sa);
 	if (err)
 		return err;
 
-	err = l2cap_listen(sc->sc_int_l);
+	err = l2cap_listen_pcb(sc->sc_int_l);
 	if (err)
 		return err;
 
@@ -569,17 +569,17 @@ bthidev_connect(struct bthidev_softc *sc)
 	}
 
 	bdaddr_copy(&sa.bt_bdaddr, &sc->sc_laddr);
-	err = l2cap_bind(sc->sc_ctl, &sa);
+	err = l2cap_bind_pcb(sc->sc_ctl, &sa);
 	if (err) {
-		aprint_error_dev(sc->sc_dev, "l2cap_bind failed (%d)\n", err);
+		aprint_error_dev(sc->sc_dev, "l2cap_bind_pcb failed (%d)\n", err);
 		return err;
 	}
 
 	sa.bt_psm = sc->sc_ctlpsm;
 	bdaddr_copy(&sa.bt_bdaddr, &sc->sc_raddr);
-	err = l2cap_connect(sc->sc_ctl, &sa);
+	err = l2cap_connect_pcb(sc->sc_ctl, &sa);
 	if (err) {
-		aprint_error_dev(sc->sc_dev, "l2cap_connect failed (%d)\n", err);
+		aprint_error_dev(sc->sc_dev, "l2cap_connect_pcb failed (%d)\n", err);
 		return err;
 	}
 
@@ -678,14 +678,14 @@ bthidev_process_one(struct bthidev_softc *sc, struct mbuf *m)
 			mutex_enter(bt_lock);
 			/* close interrupt channel */
 			if (sc->sc_int != NULL) {
-				l2cap_disconnect(sc->sc_int, 0);
+				l2cap_disconnect_pcb(sc->sc_int, 0);
 				l2cap_detach_pcb(&sc->sc_int);
 				sc->sc_int = NULL;
 			}
 
 			/* close control channel */
 			if (sc->sc_ctl != NULL) {
-				l2cap_disconnect(sc->sc_ctl, 0);
+				l2cap_disconnect_pcb(sc->sc_ctl, 0);
 				l2cap_detach_pcb(&sc->sc_ctl);
 				sc->sc_ctl = NULL;
 			}
@@ -747,13 +747,13 @@ bthidev_ctl_connected(void *arg)
 		sa.bt_family = AF_BLUETOOTH;
 		bdaddr_copy(&sa.bt_bdaddr, &sc->sc_laddr);
 
-		err = l2cap_bind(sc->sc_int, &sa);
+		err = l2cap_bind_pcb(sc->sc_int, &sa);
 		if (err)
 			goto fail;
 
 		sa.bt_psm = sc->sc_intpsm;
 		bdaddr_copy(&sa.bt_bdaddr, &sc->sc_raddr);
-		err = l2cap_connect(sc->sc_int, &sa);
+		err = l2cap_connect_pcb(sc->sc_int, &sa);
 		if (err)
 			goto fail;
 	}
@@ -939,10 +939,10 @@ bthidev_linkmode(void *arg, int new)
 		return;
 
 	if (sc->sc_int != NULL)
-		l2cap_disconnect(sc->sc_int, 0);
+		l2cap_disconnect_pcb(sc->sc_int, 0);
 
 	if (sc->sc_ctl != NULL)
-		l2cap_disconnect(sc->sc_ctl, 0);
+		l2cap_disconnect_pcb(sc->sc_ctl, 0);
 }
 
 /*
@@ -1017,7 +1017,7 @@ bthidev_output(struct bthidev *hidev, uint8_t *report, int rlen)
 	m->m_pkthdr.len = m->m_len = rlen + 2;
 
 	mutex_enter(bt_lock);
-	err = l2cap_send(sc->sc_int, m);
+	err = l2cap_send_pcb(sc->sc_int, m);
 	mutex_exit(bt_lock);
 
 	return err;

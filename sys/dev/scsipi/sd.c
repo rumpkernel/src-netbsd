@@ -1,4 +1,4 @@
-/*	$NetBSD: sd.c,v 1.305 2014/03/16 05:20:29 dholland Exp $	*/
+/*	$NetBSD: sd.c,v 1.308 2014/08/10 16:44:36 tls Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2003, 2004 The NetBSD Foundation, Inc.
@@ -47,7 +47,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sd.c,v 1.305 2014/03/16 05:20:29 dholland Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sd.c,v 1.308 2014/08/10 16:44:36 tls Exp $");
 
 #include "opt_scsi.h"
 
@@ -163,6 +163,7 @@ const struct bdevsw sd_bdevsw = {
 	.d_ioctl = sdioctl,
 	.d_dump = sddump,
 	.d_psize = sdsize,
+	.d_discard = nodiscard,
 	.d_flag = D_DISK
 };
 
@@ -177,6 +178,7 @@ const struct cdevsw sd_cdevsw = {
 	.d_poll = nopoll,
 	.d_mmap = nommap,
 	.d_kqfilter = nokqfilter,
+	.d_discard = nodiscard,
 	.d_flag = D_DISK
 };
 
@@ -332,7 +334,7 @@ sdattach(device_t parent, device_t self, void *aux)
 	 * attach the device into the random source list
 	 */
 	rnd_attach_source(&sd->rnd_source, device_xname(sd->sc_dev),
-			  RND_TYPE_DISK, 0);
+			  RND_TYPE_DISK, RND_FLAG_DEFAULT);
 
 	/* Discover wedges on this disk. */
 	dkwedge_discover(&sd->sc_dk);

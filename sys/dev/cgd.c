@@ -1,4 +1,4 @@
-/* $NetBSD: cgd.c,v 1.87 2014/05/25 19:23:49 bouyer Exp $ */
+/* $NetBSD: cgd.c,v 1.90 2014/07/25 08:10:35 dholland Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cgd.c,v 1.87 2014/05/25 19:23:49 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cgd.c,v 1.90 2014/07/25 08:10:35 dholland Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -55,6 +55,8 @@ __KERNEL_RCSID(0, "$NetBSD: cgd.c,v 1.87 2014/05/25 19:23:49 bouyer Exp $");
 #include <dev/dkvar.h>
 #include <dev/cgdvar.h>
 
+#include <miscfs/specfs/specdev.h> /* for v_rdev */
+
 /* Entry Point Functions */
 
 void	cgdattach(int);
@@ -75,6 +77,7 @@ const struct bdevsw cgd_bdevsw = {
 	.d_ioctl = cgdioctl,
 	.d_dump = cgddump,
 	.d_psize = cgdsize,
+	.d_discard = nodiscard,
 	.d_flag = D_DISK
 };
 
@@ -89,6 +92,7 @@ const struct cdevsw cgd_cdevsw = {
 	.d_poll = nopoll,
 	.d_mmap = nommap,
 	.d_kqfilter = nokqfilter,
+	.d_discard = nodiscard,
 	.d_flag = D_DISK
 };
 
@@ -809,7 +813,6 @@ cgdinit(struct cgd_softc *cs, const char *cpath, struct vnode *vp,
 	struct lwp *l)
 {
 	struct	disk_geom *dg;
-	struct	vattr va;
 	int	ret;
 	char	*tmppath;
 	uint64_t psize;
@@ -826,13 +829,7 @@ cgdinit(struct cgd_softc *cs, const char *cpath, struct vnode *vp,
 	cs->sc_tpath = malloc(cs->sc_tpathlen, M_DEVBUF, M_WAITOK);
 	memcpy(cs->sc_tpath, tmppath, cs->sc_tpathlen);
 
-	vn_lock(vp, LK_SHARED | LK_RETRY);
-	ret = VOP_GETATTR(vp, &va, l->l_cred);
-	VOP_UNLOCK(vp);
-	if (ret != 0)
-		goto bail;
-
-	cs->sc_tdev = va.va_rdev;
+	cs->sc_tdev = vp->v_rdev;
 
 	if ((ret = getdisksize(vp, &psize, &secsize)) != 0)
 		goto bail;

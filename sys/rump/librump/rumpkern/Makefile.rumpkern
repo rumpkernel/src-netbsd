@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.rumpkern,v 1.146 2014/04/27 15:15:13 pooka Exp $
+#	$NetBSD: Makefile.rumpkern,v 1.149 2014/08/11 22:03:25 matt Exp $
 #
 
 .include "${RUMPTOP}/Makefile.rump"
@@ -15,6 +15,7 @@ LIB=		rump
 	${RUMPTOP}/../dev					\
 	${RUMPTOP}/../crypto/nist_ctr_drbg			\
 	${RUMPTOP}/../crypto/rijndael				\
+	${RUMPTOP}/../crypto/cprng_fast				\
 	${RUMPTOP}/../secmodel					\
 	${RUMPTOP}/../secmodel/suser				\
 	${RUMPTOP}/../compat/common
@@ -115,6 +116,7 @@ SRCS+=	init_sysctl_base.c	\
 	subr_log.c		\
 	subr_lwp_specificdata.c	\
 	subr_once.c		\
+	subr_pcq.c		\
 	subr_percpu.c		\
 	subr_prf.c		\
 	subr_pserialize.c	\
@@ -152,7 +154,8 @@ SRCS+=	clock_subr.c
 SRCS+=	nist_ctr_drbg.c
 SRCS+=	rijndael-alg-fst.c
 SRCS+=	rijndael-api-fst.c
-SRCS+=	rijndael.c	
+SRCS+=	rijndael.c
+SRCS+=	cprng_fast.c
 
 # compat
 SRCS+=	kern_select_50.c
@@ -198,7 +201,11 @@ AFLAGS+=	-D_LOCORE -Wa,--fatal-warnings
 # the kernel of our compat target (amd64->i386 & sparc64->sparc), so
 # take MD stuff from the right arch.
 #
-.ifdef MLIBDIR
+.if defined(COMPAT_MACHINE_CPU) \
+    && exists(${RUMPTOP}/librump/rumpkern/arch/${COMPAT_MACHINE_CPU})
+ARCHDIR=	${RUMPTOP}/librump/rumpkern/arch/${COMPAT_MACHINE_CPU}
+LIBKERN_ARCH=	${COMPAT_MACHINE_CPU}
+.elif defined(MLIBDIR)
 ARCHDIR=	${RUMPTOP}/librump/rumpkern/arch/${MLIBDIR}
 LIBKERN_ARCH=	${MLIBDIR}
 .elif exists(${RUMPTOP}/librump/rumpkern/arch/${MACHINE_CPU})

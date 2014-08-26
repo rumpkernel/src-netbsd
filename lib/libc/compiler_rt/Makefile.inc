@@ -1,12 +1,12 @@
-# $NetBSD: Makefile.inc,v 1.20 2014/05/20 12:23:47 joerg Exp $
+# $NetBSD: Makefile.inc,v 1.26 2014/08/17 16:14:59 matt Exp $
 
 COMPILER_RT_SRCDIR=	${NETBSDSRCDIR}/sys/external/bsd/compiler_rt/dist
 
-.if ${LIBC_MACHINE_ARCH} == "powerpc"
+.if ${LIBC_MACHINE_ARCH} == "powerpc" || ${LIBC_MACHINE_ARCH} == "powerpc64"
 COMPILER_RT_CPU_DIR=	${COMPILER_RT_SRCDIR}/lib/builtins/ppc
 COMPILER_RT_ARCH_DIR=	${COMPILER_RT_SRCDIR}/lib/builtins/ppc
 .else
-COMPILER_RT_CPU_DIR=	${COMPILER_RT_SRCDIR}/lib/builtins/${MACHINE_CPU}
+COMPILER_RT_CPU_DIR=	${COMPILER_RT_SRCDIR}/lib/builtins/${LIBC_MACHINE_CPU}
 COMPILER_RT_ARCH_DIR=	${COMPILER_RT_SRCDIR}/lib/builtins/${LIBC_MACHINE_ARCH}
 .endif
 
@@ -23,10 +23,8 @@ COMPILER_RT_ARCH_DIR=	${COMPILER_RT_SRCDIR}/lib/builtins/${LIBC_MACHINE_ARCH}
 #	divdc3.c \
 #	divsc3.c
 
-.if ${HAVE_LLVM:Uno} == "yes"
-# Requires C11 support
-GENERIC_SRCS+= atomic.c
-.endif
+# Implemented on top of our atomic interface.
+#GENERIC_SRCS+= atomic.c
 
 .if ${HAVE_LIBGCC_EH} == "no"
 GENERIC_SRCS+= \
@@ -40,9 +38,13 @@ GENERIC_SRCS+= \
 	comparesf2.c \
 	adddf3.c \
 	addsf3.c \
+	addtf3.c \
 	divdf3.c \
 	divsf3.c \
+	divtf3.c \
 	extendsfdf2.c \
+	extendsftf2.c \
+	extenddftf2.c \
 	fixdfsi.c \
 	fixdfti.c \
 	fixsfsi.c \
@@ -53,9 +55,13 @@ GENERIC_SRCS+= \
 	floatunsisf.c \
 	muldf3.c \
 	mulsf3.c \
+	multf3.c \
 	subdf3.c \
 	subsf3.c \
-	truncdfsf2.c
+	subtf3.c \
+	truncdfsf2.c \
+	trunctfdf2.c \
+	trunctfsf2.c
 .endif
 
 GENERIC_SRCS+= \
@@ -65,43 +71,28 @@ GENERIC_SRCS+= \
 	addvti3.c \
 	ashlti3.c \
 	ashrti3.c \
-	clzsi2.c \
 	clzti2.c \
 	cmpti2.c \
-	ctzsi2.c \
 	ctzti2.c \
-	divmodsi4.c \
-	divsi3.c \
 	divti3.c \
 	ffsti2.c \
 	fixsfdi.c \
 	fixdfdi.c \
 	fixunsdfdi.c \
 	fixunsdfsi.c \
-	fixunsdfti.c \
 	fixunssfdi.c \
 	fixunssfsi.c \
-	fixunssfti.c \
 	fixunsxfdi.c \
 	fixunsxfsi.c \
-	fixunsxfti.c \
 	fixxfdi.c \
-	fixxfti.c \
 	floatdidf.c \
 	floatdisf.c \
 	floatdixf.c \
-	floattidf.c \
-	floattisf.c \
-	floattixf.c \
 	floatundidf.c \
 	floatundisf.c \
 	floatundixf.c \
-	floatuntidf.c \
-	floatuntisf.c \
-	floatuntixf.c \
 	int_util.c \
 	lshrti3.c \
-	modsi3.c \
 	modti3.c \
 	muldc3.c \
 	mulosi4.c \
@@ -125,26 +116,55 @@ GENERIC_SRCS+= \
 	subvsi3.c \
 	subvti3.c \
 	ucmpti2.c \
-	udivmodsi4.c \
 	udivmodti4.c \
 	udivti3.c \
-	umodsi3.c \
 	umodti3.c
 
-.if ${MACHINE_CPU} != "sh3"
+.if ${MACHINE_ARCH} != "aarch64"
+GENERIC_SRCS+= \
+	fixunsdfti.c \
+	fixunssfti.c \
+	fixunsxfti.c \
+	fixxfti.c \
+	floattidf.c \
+	floattisf.c \
+	floattixf.c \
+	floatuntidf.c \
+	floatuntisf.c \
+	floatuntixf.c
+.endif
+
+# These have h/w instructions which are always used.
+.if ${LIBC_MACHINE_ARCH} != "alpha" && ${LIBC_MACHINE_CPU} != "powerpc" \
+    && ${LIBC_MACHINE_CPU} != "aarch64"
+GENERIC_SRCS+= \
+	clzsi2.c
+.endif
+
+# These have h/w instructions which are always used.
+.if ${LIBC_MACHINE_ARCH} != "alpha" && ${LIBC_MACHINE_CPU} != "powerpc" \
+    && ${LIBC_MACHINE_CPU} != "aarch64" && ${LIBC_MACHINE_ARCH} != "vax"
+GENERIC_SRCS+= \
+	ctzsi2.c \
+	divmodsi4.c \
+	divsi3.c \
+	modsi3.c \
+	udivmodsi4.c \
+	umodsi3.c
+
+. if ${LIBC_MACHINE_CPU} != "sh3"
 # On sh3 __udivsi3 is gcc "millicode" with special calling convention
 # (less registers clobbered than usual).  Each DSO that needs it gets
 # its own hidden copy from libgcc.a.
 GENERIC_SRCS+= \
 	udivsi3.c
+. endif
 .endif
+
 
 GENERIC_SRCS+= \
 	absvdi2.c \
 	addvdi3.c \
-	clzdi2.c \
-	ctzdi2.c \
-	ffsdi2.c \
 	mulodi4.c \
 	mulvdi3.c \
 	negvdi2.c \
@@ -152,6 +172,16 @@ GENERIC_SRCS+= \
 	popcountdi2.c \
 	subvdi3.c
 
+# These have h/w instructions which are always used.
+.if ${LIBC_MACHINE_ARCH} != "alpha" && ${LIBC_MACHINE_CPU} != "powerpc64" \
+    && ${LIBC_MACHINE_ARCH} != "aarch64"
+GENERIC_SRCS+= \
+	clzdi2.c \
+	ctzdi2.c \
+	ffsdi2.c
+.endif
+
+# Don't need these on 64-bit machines.
 .if empty(LIBC_MACHINE_ARCH:M*64*) && ${LIBC_MACHINE_ARCH} != "alpha"
 GENERIC_SRCS+= \
 	cmpdi2.c \
@@ -176,7 +206,7 @@ GENERIC_SRCS+= \
 	InstrProfilingFile.c \
 	InstrProfilingPlatformOther.c
 
-.if ${LIBC_MACHINE_ARCH} == "powerpc"
+.if ${LIBC_MACHINE_ARCH} == "powerpc" || ${LIBC_MACHINE_ARCH} == "powerpc64"
 GENERIC_SRCS+= \
 	fixtfdi.c \
 	fixunstfdi.c \
@@ -188,7 +218,12 @@ GENERIC_SRCS+= \
 	gcc_qsub.c
 .endif
 
-.if ${MACHINE_CPU} == "arm"
+.if ${LIBC_MACHINE_CPU} == "aarch64"
+GENERIC_SRCS+= \
+	clear_cache.c
+.endif
+
+.if ${LIBC_MACHINE_CPU} == "arm"
 .if !empty(LIBC_MACHINE_ARCH:Mearm*)
 GENERIC_SRCS+= \
 	aeabi_idivmod.S \

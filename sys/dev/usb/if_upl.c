@@ -1,4 +1,4 @@
-/*	$NetBSD: if_upl.c,v 1.45 2014/05/15 09:23:52 msaitoh Exp $	*/
+/*	$NetBSD: if_upl.c,v 1.47 2014/08/10 16:44:36 tls Exp $	*/
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_upl.c,v 1.45 2014/05/15 09:23:52 msaitoh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_upl.c,v 1.47 2014/08/10 16:44:36 tls Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
@@ -311,7 +311,7 @@ upl_attach(device_t parent, device_t self, void *aux)
 
 	bpf_attach(ifp, DLT_RAW, 0);
 	rnd_attach_source(&sc->sc_rnd_source, device_xname(sc->sc_dev),
-	    RND_TYPE_NET, 0);
+	    RND_TYPE_NET, RND_FLAG_DEFAULT);
 
 	sc->sc_attached = 1;
 	splx(s);
@@ -1033,28 +1033,17 @@ Static void
 upl_input(struct ifnet *ifp, struct mbuf *m)
 {
 #ifdef INET
-	struct ifqueue *inq;
+	size_t pktlen = m->m_len;
 	int s;
 
-	/* XXX Assume all traffic is IP */
-
-	inq = &ipintrq;
-
 	s = splnet();
-	if (IF_QFULL(inq)) {
-		IF_DROP(inq);
-		splx(s);
-#if 0
-		if (sc->sc_flags & SC_DEBUG)
-			printf("%s: input queue full\n", ifp->if_xname);
-#endif
+	if (__predict_false(!pktq_enqueue(ip_pktq, m, 0))) {
 		ifp->if_iqdrops++;
-		return;
+		m_freem(m);
+	} else {
+		ifp->if_ipackets++;
+		ifp->if_ibytes += pktlen;
 	}
-	IF_ENQUEUE(inq, m);
-	schednetisr(NETISR_IP);
 	splx(s);
 #endif
-	ifp->if_ipackets++;
-	ifp->if_ibytes += m->m_len;
 }

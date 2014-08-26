@@ -1,4 +1,4 @@
-/*	$NetBSD: uhidev.c,v 1.59 2013/12/26 15:32:48 christos Exp $	*/
+/*	$NetBSD: uhidev.c,v 1.61 2014/08/10 16:44:36 tls Exp $	*/
 
 /*
  * Copyright (c) 2001, 2012 The NetBSD Foundation, Inc.
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uhidev.c,v 1.59 2013/12/26 15:32:48 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uhidev.c,v 1.61 2014/08/10 16:44:36 tls Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -358,7 +358,8 @@ nomem:
 #endif
 				rnd_attach_source(&csc->rnd_source,
 						  device_xname(dev),
-						  RND_TYPE_TTY, 0);
+						  RND_TYPE_TTY,
+						  RND_FLAG_DEFAULT);
 			}
 		}
 	}
@@ -545,6 +546,10 @@ uhidev_open(struct uhidev *scd)
 		return (EBUSY);
 	}
 	scd->sc_state |= UHIDEV_OPEN;
+	if (sc->sc_refcnt++) {
+		mutex_exit(&sc->sc_lock);
+		return (0);
+	}
 	mutex_exit(&sc->sc_lock);
 
 	if (sc->sc_isize == 0)
@@ -604,6 +609,7 @@ out1:
 	free(sc->sc_ibuf, M_USBDEV);
 	mutex_enter(&sc->sc_lock);
 	scd->sc_state &= ~UHIDEV_OPEN;
+	sc->sc_refcnt = 0;
 	sc->sc_ibuf = NULL;
 	sc->sc_ipipe = NULL;
 	sc->sc_opipe = NULL;
@@ -623,6 +629,10 @@ uhidev_close(struct uhidev *scd)
 		return;
 	}
 	scd->sc_state &= ~UHIDEV_OPEN;
+	if (--sc->sc_refcnt) {
+		mutex_exit(&sc->sc_lock);
+		return;
+	}
 	mutex_exit(&sc->sc_lock);
 
 	DPRINTF(("uhidev_close: close pipe\n"));

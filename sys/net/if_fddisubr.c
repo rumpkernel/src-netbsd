@@ -1,4 +1,4 @@
-/*	$NetBSD: if_fddisubr.c,v 1.85 2014/05/15 09:04:03 msaitoh Exp $	*/
+/*	$NetBSD: if_fddisubr.c,v 1.88 2014/06/07 09:34:02 martin Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -96,7 +96,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_fddisubr.c,v 1.85 2014/05/15 09:04:03 msaitoh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_fddisubr.c,v 1.88 2014/06/07 09:34:02 martin Exp $");
 
 #include "opt_gateway.h"
 #include "opt_inet.h"
@@ -459,13 +459,19 @@ bad:
 static void
 fddi_input(struct ifnet *ifp, struct mbuf *m)
 {
-#if defined(INET) || defined(INET6) || defined(NS) || defined(DECNET) || defined(IPX) || defined(NETATALK)
-	struct ifqueue *inq;
+#if defined(INET) || defined(INET6)
+	pktqueue_t *pktq = NULL;
+#endif
+#if defined(NS) || defined(DECNET) || defined(IPX) || defined(NETATALK)
+	struct ifqueue *inq = NULL;
+#endif
+#if defined(NS) || defined(DECNET) || defined(IPX) || defined(NETATALK)
+	int isr = 0;
 	int s;
 #endif
+
 	struct llc *l;
 	struct fddi_header *fh;
-	int isr = 0;
 
 	MCLAIM(m, &((struct ethercom *)ifp)->ec_rx_mowner);
 	if ((ifp->if_flags & IFF_UP) == 0) {
@@ -548,14 +554,15 @@ fddi_input(struct ifnet *ifp, struct mbuf *m)
 			if (ipflow_fastforward(m))
 				return;
 #endif
-			isr = NETISR_IP;
-			inq = &ipintrq;
+			pktq = ip_pktq;
 			break;
 
 		case ETHERTYPE_ARP:
 #if !defined(__bsdi__) || _BSDI_VERSION >= 199401
+#if defined(NS) || defined(DECNET) || defined(IPX) || defined(NETATALK)
 			isr = NETISR_ARP;
 			inq = &arpintrq;
+#endif
 			break;
 #else
 			arpinput(ifp, m);
@@ -574,8 +581,7 @@ fddi_input(struct ifnet *ifp, struct mbuf *m)
 			if (ip6flow_fastforward(&m))
 				return;
 #endif
-			isr = NETISR_IPV6;
-			inq = &ip6intrq;
+			pktq = ip6_pktq;
 			break;
 
 #endif
@@ -612,7 +618,18 @@ fddi_input(struct ifnet *ifp, struct mbuf *m)
 		return;
 	}
 
-#if defined(INET) || defined(INET6) || defined(NS) || defined(DECNET) || defined(IPX) || defined(NETATALK)
+#if defined(INET) || defined(INET6)
+	if (__predict_true(pktq)) {
+		if (__predict_false(!pktq_enqueue(pktq, m, 0))) {
+			m_freem(m);
+		}
+		return;
+	}
+#endif
+#if defined(NS) || defined(DECNET) || defined(IPX) || defined(NETATALK)
+	if (!inq) {
+		m_freem(m);
+	}
 	s = splnet();
 	if (IF_QFULL(inq)) {
 		IF_DROP(inq);

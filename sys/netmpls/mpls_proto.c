@@ -1,4 +1,4 @@
-/*	$NetBSD: mpls_proto.c,v 1.9 2014/05/20 19:04:00 rmind Exp $ */
+/*	$NetBSD: mpls_proto.c,v 1.24 2014/08/09 05:33:01 rtr Exp $ */
 
 /*
  * Copyright (c) 2010 The NetBSD Foundation, Inc.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mpls_proto.c,v 1.9 2014/05/20 19:04:00 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mpls_proto.c,v 1.24 2014/08/09 05:33:01 rtr Exp $");
 
 #include "opt_inet.h"
 #include "opt_mbuftrace.h"
@@ -61,7 +61,7 @@ int mpls_mapttl_inet = 1;
 int mpls_mapttl_inet6 = 1;
 int mpls_icmp_respond = 0;
 int mpls_forwarding = 0;
-int mpls_accept = 0;
+int mpls_frame_accept = 0;
 int mpls_mapprec_inet = 1;
 int mpls_mapclass_inet6 = 1;
 int mpls_rfc4182 = 1;
@@ -95,9 +95,163 @@ mpls_detach(struct socket *so)
 }
 
 static int
+mpls_accept(struct socket *so, struct mbuf *nam)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_bind(struct socket *so, struct mbuf *nam, struct lwp *l)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_listen(struct socket *so, struct lwp *l)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_connect(struct socket *so, struct mbuf *nam, struct lwp *l)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_connect2(struct socket *so, struct socket *so2)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_disconnect(struct socket *so)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_shutdown(struct socket *so)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_abort(struct socket *so)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_ioctl(struct socket *so, u_long cmd, void *nam, struct ifnet *ifp)
+{
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_stat(struct socket *so, struct stat *ub)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_peeraddr(struct socket *so, struct mbuf *nam)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_sockaddr(struct socket *so, struct mbuf *nam)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_rcvd(struct socket *so, int flags, struct lwp *l)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_recvoob(struct socket *so, struct mbuf *m, int flags)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_send(struct socket *so, struct mbuf *m, struct mbuf *nam,
+    struct mbuf *control, struct lwp *l)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_sendoob(struct socket *so, struct mbuf *m, struct mbuf *control)
+{
+	KASSERT(solocked(so));
+
+	return EOPNOTSUPP;
+}
+
+static int
+mpls_purgeif(struct socket *so, struct ifnet *ifp)
+{
+
+	return EOPNOTSUPP;
+}
+
+static int
 mpls_usrreq(struct socket *so, int req, struct mbuf *m,
     struct mbuf *nam, struct mbuf *control, struct lwp *l)
 {
+	KASSERT(req != PRU_ATTACH);
+	KASSERT(req != PRU_DETACH);
+	KASSERT(req != PRU_ACCEPT);
+	KASSERT(req != PRU_BIND);
+	KASSERT(req != PRU_LISTEN);
+	KASSERT(req != PRU_CONNECT);
+	KASSERT(req != PRU_CONNECT2);
+	KASSERT(req != PRU_DISCONNECT);
+	KASSERT(req != PRU_SHUTDOWN);
+	KASSERT(req != PRU_ABORT);
+	KASSERT(req != PRU_CONTROL);
+	KASSERT(req != PRU_SENSE);
+	KASSERT(req != PRU_PEERADDR);
+	KASSERT(req != PRU_SOCKADDR);
+	KASSERT(req != PRU_RCVD);
+	KASSERT(req != PRU_RCVOOB);
+	KASSERT(req != PRU_SEND);
+	KASSERT(req != PRU_SENDOOB);
+	KASSERT(req != PRU_PURGEIF);
+
 	return EOPNOTSUPP;
 }
 
@@ -130,7 +284,7 @@ sysctl_net_mpls_setup(struct sysctllog **clog)
 		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
 		       CTLTYPE_INT, "accept",
 		       SYSCTL_DESCR("Accept MPLS Frames"),
-		       NULL, 0, &mpls_accept, 0,
+		       NULL, 0, &mpls_frame_accept, 0,
 		       CTL_NET, PF_MPLS, CTL_CREATE, CTL_EOL);
 	sysctl_createv(clog, 0, NULL, NULL,
 		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
@@ -185,11 +339,45 @@ DOMAIN_DEFINE(mplsdomain);
 PR_WRAP_USRREQS(mpls)
 #define	mpls_attach	mpls_attach_wrapper
 #define	mpls_detach	mpls_detach_wrapper
+#define	mpls_accept	mpls_accept_wrapper
+#define	mpls_bind	mpls_bind_wrapper
+#define	mpls_listen	mpls_listen_wrapper
+#define	mpls_connect	mpls_connect_wrapper
+#define	mpls_connect2	mpls_connect2_wrapper
+#define	mpls_disconnect	mpls_disconnect_wrapper
+#define	mpls_shutdown	mpls_shutdown_wrapper
+#define	mpls_abort	mpls_abort_wrapper
+#define	mpls_ioctl	mpls_ioctl_wrapper
+#define	mpls_stat	mpls_stat_wrapper
+#define	mpls_peeraddr	mpls_peeraddr_wrapper
+#define	mpls_sockaddr	mpls_sockaddr_wrapper
+#define	mpls_rcvd	mpls_rcvd_wrapper
+#define	mpls_recvoob	mpls_recvoob_wrapper
+#define	mpls_send	mpls_send_wrapper
+#define	mpls_sendoob	mpls_sendoob_wrapper
+#define	mpls_purgeif	mpls_purgeif_wrapper
 #define	mpls_usrreq	mpls_usrreq_wrapper
 
 static const struct pr_usrreqs mpls_usrreqs = {
 	.pr_attach	= mpls_attach,
 	.pr_detach	= mpls_detach,
+	.pr_accept	= mpls_accept,
+	.pr_bind	= mpls_bind,
+	.pr_listen	= mpls_listen,
+	.pr_connect	= mpls_connect,
+	.pr_connect2	= mpls_connect2,
+	.pr_disconnect	= mpls_disconnect,
+	.pr_shutdown	= mpls_shutdown,
+	.pr_abort	= mpls_abort,
+	.pr_ioctl	= mpls_ioctl,
+	.pr_stat	= mpls_stat,
+	.pr_peeraddr	= mpls_peeraddr,
+	.pr_sockaddr	= mpls_sockaddr,
+	.pr_rcvd	= mpls_rcvd,
+	.pr_recvoob	= mpls_recvoob,
+	.pr_send	= mpls_send,
+	.pr_sendoob	= mpls_sendoob,
+	.pr_purgeif	= mpls_purgeif,
 	.pr_generic	= mpls_usrreq,
 };
 

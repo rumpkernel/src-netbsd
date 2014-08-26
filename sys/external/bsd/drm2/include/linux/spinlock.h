@@ -1,4 +1,4 @@
-/*	$NetBSD: spinlock.h,v 1.2 2014/03/18 18:20:43 riastradh Exp $	*/
+/*	$NetBSD: spinlock.h,v 1.4 2014/08/23 08:03:33 riastradh Exp $	*/
 
 /*-
  * Copyright (c) 2013 The NetBSD Foundation, Inc.
@@ -34,6 +34,9 @@
 
 #include <sys/cdefs.h>
 #include <sys/mutex.h>
+
+#define	__acquires(lock)	/* XXX lockdep stuff */
+#define	__releases(lock)	/* XXX lockdep stuff */
 
 typedef struct spinlock {
 	kmutex_t sl_lock;
@@ -103,5 +106,20 @@ spin_lock_destroy(spinlock_t *spinlock)
 /* This is a macro to make the panic message clearer.  */
 #define	assert_spin_locked(spinlock)	\
 	KASSERT(mutex_owned(&(spinlock)->sl_lock))
+
+/*
+ * Linux rwlocks are reader/writer spin locks.  We implement them as
+ * normal spin locks without reader/writer semantics for expedience.
+ * If that turns out to not work, adapting to reader/writer semantics
+ * shouldn't be too hard.
+ */
+
+#define	rwlock_t		spinlock_t
+#define	rwlock_init		spin_lock_init
+#define	rwlock_destroy		spin_lock_destroy
+#define	write_lock_irq		spin_lock_irq
+#define	write_unlock_irq	spin_unlock_irq
+#define	read_lock		spin_lock
+#define	read_unlock		spin_unlock
 
 #endif  /* _LINUX_SPINLOCK_H_ */
