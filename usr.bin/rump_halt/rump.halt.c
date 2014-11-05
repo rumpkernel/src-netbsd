@@ -1,7 +1,7 @@
-/*	$NetBSD: rumpuser_random.c,v 1.4 2014/11/04 19:05:17 pooka Exp $	*/
+/*	$NetBSD: rump.halt.c,v 1.5 2014/11/04 19:05:17 pooka Exp $	*/
 
-/*
- * Copyright (c) 2014 Justin Cormack.  All Rights Reserved.
+/*-
+ * Copyright (c) 2010 Antti Kantee.  All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,69 +25,72 @@
  * SUCH DAMAGE.
  */
 
-#include "rumpuser_port.h"
+#include <rump/rumpuser_port.h>
 
-#if !defined(lint)
-__RCSID("$NetBSD: rumpuser_random.c,v 1.4 2014/11/04 19:05:17 pooka Exp $");
+#include <sys/cdefs.h>
+#ifndef lint
+__RCSID("$NetBSD: rump.halt.c,v 1.5 2014/11/04 19:05:17 pooka Exp $");
 #endif /* !lint */
 
 #include <sys/types.h>
 
-#include <assert.h>
+#include <rump/rump.h>
+#include <rump/rumpclient.h>
+#include <rump/rump_syscalls.h>
+
+#include <err.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-#include <rump/rumpuser.h>
+#define ARGFLAGS "dhn"
 
-#include "rumpuser_int.h"
-
-static const size_t random_maxread = 32;
-
-#ifdef HAVE_ARC4RANDOM_BUF
-int
-rumpuser__random_init(void)
-{
-
-	return 0;
-}
-#else
-static const char *random_device = "/dev/urandom";
-static int random_fd = -1;
-
-int
-rumpuser__random_init(void)
-{
-
-	random_fd = open(random_device, O_RDONLY);
-	if (random_fd < 0) {
-		fprintf(stderr, "random init open failed\n");
-		return errno;
-	}
-	return 0;
-}
+#ifndef HAVE_GETPROGNAME
+#define getprogname() "rump_halt"
 #endif
 
-int
-rumpuser_getrandom(void *buf, size_t buflen, int flags, size_t *retp)
+__dead static void
+usage(void)
 {
-#ifndef HAVE_ARC4RANDOM_BUF
-	ssize_t rv;
 
-	rv = read(random_fd, buf, buflen > random_maxread ? random_maxread : buflen);
-	if (rv < 0) {
-		ET(errno);
+	fprintf(stderr, "usage: %s [-" ARGFLAGS "]\n", getprogname());
+	exit(1);
+}
+
+int
+main(int argc, char *argv[])
+{
+	int ch, flags;
+
+	setprogname(argv[0]);
+	flags = 0;
+	while ((ch = getopt(argc, argv, ARGFLAGS)) != -1) {
+		switch (ch) {
+		case 'd':
+			flags |= RUMP_RB_DUMP;
+			break;
+		case 'h':
+			flags |= RUMP_RB_HALT;
+			break;
+		case 'n':
+			flags |= RUMP_RB_NOSYNC;
+			break;
+		default:
+			usage();
+			break;
+		}
 	}
-	*retp = rv;
-#else
-	buflen = buflen > random_maxread ? random_maxread : buflen;
-	arc4random_buf(buf, buflen);
-	*retp = buflen;
-#endif
+
+	if (optind != argc)
+		usage();
+
+	if (rumpclient_init() == -1)
+		err(1, "init failed");
+
+	if (rump_sys_reboot(flags, NULL) == -1)
+		err(1, "reboot");
 
 	return 0;
 }
