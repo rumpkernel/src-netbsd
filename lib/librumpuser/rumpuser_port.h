@@ -1,4 +1,4 @@
-/*	$NetBSD: rumpuser_port.h,v 1.40 2014/11/05 12:28:46 justin Exp $	*/
+/*	$NetBSD: rumpuser_port.h,v 1.42 2014/11/10 22:43:46 pooka Exp $	*/
 
 #ifndef _LIB_LIBRUMPUSER_RUMPUSER_PORT_H_
 #define _LIB_LIBRUMPUSER_RUMPUSER_PORT_H_
@@ -63,14 +63,24 @@
 #endif
 
 #ifdef __linux__
-#define _XOPEN_SOURCE 600
-#define _BSD_SOURCE
 #define _GNU_SOURCE
 #endif
 
 #if defined(HAVE_SYS_CDEFS_H)
 #include <sys/cdefs.h>
 #endif
+
+/*
+ * Some versions of FreeBSD (e.g. 9.2) contain C11 stuff without
+ * any obvious way to expose the protos.  Kludge around it.
+ */
+#ifdef __FreeBSD__
+#if __ISO_C_VISIBLE < 2011
+#undef __ISO_C_VISIBLE
+#define __ISO_C_VISIBLE 2011
+#endif
+#endif
+
 #if defined(HAVE_SYS_PARAM_H)
 #include <sys/param.h>
 #endif
