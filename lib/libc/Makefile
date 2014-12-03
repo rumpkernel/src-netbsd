@@ -29,7 +29,7 @@ LIBCDIR=	${.CURDIR}
 .include "${ARCHDIR}/Makefile.inc"
 .endif
 
-.if exists (${ARCHDIR}/genassym.cf)
+.if exists (${ARCHDIR}/genassym.cf) && false
 DPSRCS+=	assym.h
 CLEANFILES+=	assym.h assym.h.tmp
 
