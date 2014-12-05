@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.177 2014/08/10 05:57:31 matt Exp $
+#	$NetBSD: Makefile,v 1.179 2014/12/05 01:50:47 pooka Exp $
 
 .include <bsd.own.mk>
 .include <bsd.endian.mk>
@@ -95,9 +95,9 @@ dependall-binstall: dependall-compat
 # See above for special treatment for host-mkdep, compat, and binstall.
 #
 SUBDIR=	host-mkdep compat binstall \
-	.WAIT mktemp .WAIT sed .WAIT
+	.WAIT mktemp .WAIT sed .WAIT genassym
 .if ${TOOLS_BUILDRUMP} == "no"
-SUBDIR+= cap_mkdb crunchgen ctags genassym gencat hexdump \
+SUBDIR+= cap_mkdb crunchgen ctags gencat hexdump \
 		${LINT_BITS} \
 		makewhatis mtree nbperf .WAIT uudecode
 .endif
@@ -113,7 +113,7 @@ SUBDIR += .WAIT texinfo \
 		asn1_compile cksum compile_et db \
 		file lint1 slc \
 		makefs .WAIT menuc mkcsmapper mkesdb mklocale mknod msgc \
-		.WAIT disklabel \
+		.WAIT disklabel gpt \
 		.WAIT paxctl \
 		.WAIT fdisk \
 		.WAIT installboot \
