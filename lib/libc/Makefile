@@ -160,9 +160,6 @@ CSHLIBFLAGS+=	-D_I18N_DYNAMIC
 
 # force the dynamic linker to initialize libc first
 SHLIB_SHFLAGS+=	-Wl,-z,initfirst
-
-# XXX: makecontext()
-CFLAGS+= -Wno-strict-prototypes
 .if ${HAVE_LIBGCC} == "no"
 SHLIB_SHFLAGS+= -Wl,-z,defs
 .endif
