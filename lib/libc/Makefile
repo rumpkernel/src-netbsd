@@ -50,7 +50,7 @@ SUBDIR=compat
 .include <bsd.subdir.mk>
 .else
 COMPATDIR=${.CURDIR}/compat
-# .include "${.CURDIR}/compat/Makefile.inc"
+.include "${.CURDIR}/compat/Makefile.inc"
 # Marker for compat code that can't be easily isolated
 CPPFLAGS+=	-D__BUILD_LEGACY
 .endif
