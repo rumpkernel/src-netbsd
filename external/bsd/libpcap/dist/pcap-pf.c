@@ -1,4 +1,4 @@
-/*	$NetBSD: pcap-pf.c,v 1.1.1.4 2013/12/31 16:57:24 christos Exp $	*/
+/*	$NetBSD: pcap-pf.c,v 1.2 2014/11/19 19:33:30 christos Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1992, 1993, 1994, 1995, 1996
@@ -24,10 +24,8 @@
  *	Extraction/creation by Jeffrey Mogul, DECWRL
  */
 
-#ifndef lint
-static const char rcsid[] _U_ =
-    "@(#) Header: /tcpdump/master/libpcap/pcap-pf.c,v 1.97 2008-04-14 20:40:58 guy Exp  (LBL)";
-#endif
+#include <sys/cdefs.h>
+__RCSID("$NetBSD: pcap-pf.c,v 1.2 2014/11/19 19:33:30 christos Exp $");
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -221,7 +219,7 @@ pcap_read_pf(pcap_t *pc, int cnt, pcap_handler callback, u_char *user)
 			buflen -= pad;
 			h.caplen = buflen;
 			(*callback)(user, &h, p);
-			if (++n >= cnt && cnt > 0) {
+			if (++n >= cnt && !PACKET_COUNT_IS_UNLIMITED(cnt)) {
 				pc->cc = cc;
 				pc->bp = bp;
 				return (n);
