@@ -1,4 +1,4 @@
-/*	$NetBSD: uipc_mbuf.c,v 1.158 2014/02/25 18:30:11 pooka Exp $	*/
+/*	$NetBSD: uipc_mbuf.c,v 1.160 2014/12/02 04:43:35 ozaki-r Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2001 The NetBSD Foundation, Inc.
@@ -62,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uipc_mbuf.c,v 1.158 2014/02/25 18:30:11 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uipc_mbuf.c,v 1.160 2014/12/02 04:43:35 ozaki-r Exp $");
 
 #include "opt_mbuftrace.h"
 #include "opt_nmbclusters.h"

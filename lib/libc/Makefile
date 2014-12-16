@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.166 2014/08/10 23:39:08 matt Exp $
+#	$NetBSD: Makefile,v 1.167 2014/12/10 00:37:30 pooka Exp $
 #	@(#)Makefile	8.2 (Berkeley) 2/3/94
 #
 # All library objects contain sccsid strings by default; they may be
@@ -41,6 +41,7 @@ assym.h: ${ARCHDIR}/genassym.cf
 	mv -f assym.h.tmp assym.h
 .endif
 
+.if ${RUMPRUN} != "yes"
 # The following controls how to build compatibility code for old NetBSD
 # binaries. If BUILD_LEGACY is yes, then we build a separate library; otherwise
 # we include the code in libc.
@@ -50,9 +51,10 @@ SUBDIR=compat
 .include <bsd.subdir.mk>
 .else
 COMPATDIR=${.CURDIR}/compat
-# .include "${.CURDIR}/compat/Makefile.inc"
+.include "${.CURDIR}/compat/Makefile.inc"
 # Marker for compat code that can't be easily isolated
 CPPFLAGS+=	-D__BUILD_LEGACY
+.endif
 .endif
 
 .include "${.CURDIR}/../../common/lib/libc/Makefile.inc"
@@ -90,13 +92,10 @@ CPPFLAGS+=	-D__BUILD_LEGACY
 .include "${.CURDIR}/termios/Makefile.inc"
 .include "${.CURDIR}/thread-stub/Makefile.inc"
 .include "${.CURDIR}/time/Makefile.inc"
-# .include "${.CURDIR}/tls/Makefile.inc"
-
-# We want just a few wrappers out of libc/sys
-# .include "${.CURDIR}/sys/Makefile.inc"
-.PATH: ${.CURDIR}/sys
-SRCS+=  posix_fadvise.c statvfs.c semctl.c
-
+.if ${RUMPRUN} != "yes"
+.include "${.CURDIR}/tls/Makefile.inc"
+.endif
+.include "${.CURDIR}/sys/Makefile.inc"
 .if ${HAVE_LIBGCC_EH} == "no"
 .include "${NETBSDSRCDIR}/sys/lib/libunwind/Makefile.inc"
 .endif
@@ -128,28 +127,31 @@ LSRCS := ${LSRCS} ${unwanted_file}
 NLS=	C.msg Pig.msg ca.msg cs.msg de.msg es.msg fi.msg fr.msg nl.msg \
 	no.msg pl.msg sk.msg sv.msg
 
-#.if ${MKREPRO:Uno} == "yes"
-#REGEX_SPECIALS=[][)(^$$.?*\\;]
-#MKREPRO_SED=   -e 's;${NETBSDSRCDIR:C/${REGEX_SPECIALS}/\\\\&/g};/usr/src;'
-#.endif
+.if ${MKREPRO:Uno} == "yes"
+REGEX_SPECIALS=[][)(^$$.?*\\;]
+MKREPRO_SED=   -e 's;${NETBSDSRCDIR:C/${REGEX_SPECIALS}/\\\\&/g};/usr/src;'
+.endif
 
-#realall: tags
-#tags: ${SRCS}
-#	${_MKTARGET_CREATE}
-#	-${TOOL_CTAGS} -f ${.TARGET}.tmp -w ${.ALLSRC:M*.c}
-#	-egrep "^ENTRY(.*)|^FUNC(.*)|^SYSCALL(.*)" /dev/null ${.ALLSRC:M*.S} | \
-#	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
-#           >> ${.TARGET}.tmp
-#.if ${MKREPRO:Uno} == "yes"
-#	sed ${MKREPRO_SED} <${.TARGET}.tmp | sort -o ${.TARGET}
-#.else
-#	sort -o ${.TARGET} ${.TARGET}.tmp
-#.endif
-#	rm -f ${.TARGET}.tmp
-#
-#FILES=		tags
-#FILESNAME=	libc.tags
-#FILESDIR=	/var/db
+.if ${RUMPRUN} != "yes"
+realall: tags
+tags: ${SRCS}
+	${_MKTARGET_CREATE}
+	-${TOOL_CTAGS} -f ${.TARGET}.tmp -w ${.ALLSRC:M*.c}
+	-egrep "^ENTRY(.*)|^FUNC(.*)|^SYSCALL(.*)" /dev/null ${.ALLSRC:M*.S} | \
+	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
+           >> ${.TARGET}.tmp
+.if ${MKREPRO:Uno} == "yes"
+	sed ${MKREPRO_SED} <${.TARGET}.tmp | sort -o ${.TARGET}
+.else
+	sort -o ${.TARGET} ${.TARGET}.tmp
+.endif
+	rm -f ${.TARGET}.tmp
+
+FILES=		tags
+FILESNAME=	libc.tags
+FILESDIR=	/var/db
+.endif
+
 
 # workaround for I18N stuffs: build singlebyte setlocale() for libc.a,
 # multibyte for libc.so.  the quirk should be removed when we support
@@ -160,9 +162,6 @@ CSHLIBFLAGS+=	-D_I18N_DYNAMIC
 
 # force the dynamic linker to initialize libc first
 SHLIB_SHFLAGS+=	-Wl,-z,initfirst
-
-# XXX: makecontext()
-CFLAGS+= -Wno-strict-prototypes
 .if ${HAVE_LIBGCC} == "no"
 SHLIB_SHFLAGS+= -Wl,-z,defs
 .endif

@@ -1,4 +1,4 @@
-# $Id: escape.mk,v 1.8 2014/08/24 16:47:12 apb Exp $
+# $Id: escape.mk,v 1.10 2014/09/09 10:22:27 apb Exp $
 #
 # Test backslash escaping.
 
@@ -53,7 +53,7 @@ should continue the comment. \
 
 __printvars: .USE .MADE
 	@echo ${.TARGET}
-	@${.ALLSRC:@v@ printf "%s=:%s:\n" ${v:Q} ${${v}:Q}; @}
+	${.ALLSRC:@v@ printf "%s=:%s:\n" ${v:Q} ${${v}:Q}; @}
 
 # Embedded backslash in variable should be taken literally.
 #
@@ -194,15 +194,26 @@ var-1bsnl-space: .PHONY __printvars \
 all: cmd-1bsnl
 cmd-1bsnl: .PHONY
 	@echo ${.TARGET}
-	@echo :'first line\
+	echo :'first line\
 #second line without space\
 third line':
-	@echo :'first line\
+	echo :'first line\
      second line spaces should be retained':
-	@echo :'first line\
+	echo :'first line\
 	second line tab should be elided':
-	@echo :'first line\
+	echo :'first line\
 		only one tab should be elided, second tab remains'
+
+# When backslash-newline appears at the end of a command script,
+# both the backslash and the newline should be passed to the shell.
+# The shell should elide the backslash-newline.
+#
+all: cmd-1bsnl-eof
+cmd-1bsnl-eof:
+	@echo ${.TARGET}
+	echo :'command ending with backslash-newline'; \
+
+# above line must be blank
 
 # Double-backslash-newline in a command.
 # Both backslashes are retained, but the newline is not escaped.
@@ -214,22 +225,22 @@ third line':
 all: cmd-2bsnl
 cmd-2bsnl: .PHONY
 	@echo ${.TARGET}
-	@echo take one\\
+	echo take one\\
 # this should be a comment
-	@echo take two\\
-	@echo take three\\
+	echo take two\\
+	echo take three\\
 
 # Triple-backslash-newline in a command is retained.
 #
 all: cmd-3bsnl
 cmd-3bsnl: .PHONY
 	@echo ${.TARGET}
-	@echo :'first line\\\
+	echo :'first line\\\
 #second line without space\\\
 third line':
-	@echo :'first line\\\
+	echo :'first line\\\
      second line spaces should be retained':
-	@echo :'first line\\\
+	echo :'first line\\\
 	second line tab should be elided':
-	@echo :'first line\\\
+	echo :'first line\\\
 		only one tab should be elided, second tab remains'

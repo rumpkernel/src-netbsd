@@ -1,4 +1,4 @@
-/*	$NetBSD: pcap-sita.c,v 1.1.1.3 2013/12/31 16:57:26 christos Exp $	*/
+/*	$NetBSD: pcap-sita.c,v 1.2 2014/11/19 19:33:30 christos Exp $	*/
 
 /*
  *  pcap-sita.c: Packet capture interface additions for SITA ACN devices
@@ -26,7 +26,8 @@
  *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
- /* $Id: pcap-sita.c */
+#include <sys/cdefs.h>
+__RCSID("$NetBSD: pcap-sita.c,v 1.2 2014/11/19 19:33:30 christos Exp $");
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"

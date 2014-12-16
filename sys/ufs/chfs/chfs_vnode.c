@@ -1,4 +1,4 @@
-/*	$NetBSD: chfs_vnode.c,v 1.10 2014/01/23 10:13:57 hannken Exp $	*/
+/*	$NetBSD: chfs_vnode.c,v 1.12 2014/11/09 18:23:28 maxv Exp $	*/
 
 /*-
  * Copyright (c) 2010 Department of Software Engineering,
@@ -34,7 +34,6 @@
 
 #include "chfs.h"
 #include "chfs_inode.h"
-#include <sys/malloc.h>
 #include <sys/kauth.h>
 #include <sys/namei.h>
 #include <sys/uio.h>
@@ -94,11 +93,14 @@ chfs_readvnode(struct mount *mp, ino_t ino, struct vnode **vpp)
 		buf = kmem_alloc(len, KM_SLEEP);
 		err = chfs_read_leb(chmp, chvc->v->nref_lnr, buf,
 		    CHFS_GET_OFS(chvc->v->nref_offset), len, &retlen);
-		if (err)
+		if (err) {
+			kmem_free(buf, len);
 			return err;
+		}
 		if (retlen != len) {
 			chfs_err("Error reading vnode: read: %zu insted of: %zu\n",
 			    len, retlen);
+			kmem_free(buf, len);
 			return EIO;
 		}
 		chfvn = (struct chfs_flash_vnode*)buf;

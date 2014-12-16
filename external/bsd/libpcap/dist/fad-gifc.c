@@ -1,4 +1,4 @@
-/*	$NetBSD: fad-gifc.c,v 1.1.1.4 2013/12/31 16:57:26 christos Exp $	*/
+/*	$NetBSD: fad-gifc.c,v 1.2 2014/11/19 19:33:30 christos Exp $	*/
 
 /* -*- Mode: c; tab-width: 8; indent-tabs-mode: 1; c-basic-offset: 8; -*- */
 /*
@@ -34,10 +34,8 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-static const char rcsid[] _U_ =
-    "@(#) Header: /tcpdump/master/libpcap/fad-gifc.c,v 1.12 2008-08-06 07:34:09 guy Exp  (LBL)";
-#endif
+#include <sys/cdefs.h>
+__RCSID("$NetBSD: fad-gifc.c,v 1.2 2014/11/19 19:33:30 christos Exp $");
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -244,8 +242,7 @@ pcap_findalldevs_interfaces(pcap_if_t **alldevsp, char *errbuf)
 			continue;
 
 		/*
-		 * Get the flags for this interface, and skip it if it's
-		 * not up.
+		 * Get the flags for this interface.
 		 */
 		strncpy(ifrflags.ifr_name, ifrp->ifr_name,
 		    sizeof(ifrflags.ifr_name));
@@ -260,8 +257,6 @@ pcap_findalldevs_interfaces(pcap_if_t **alldevsp, char *errbuf)
 			ret = -1;
 			break;
 		}
-		if (!(ifrflags.ifr_flags & IFF_UP))
-			continue;
 
 		/*
 		 * Get the netmask for this address on this interface.

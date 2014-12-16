@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.h,v 1.135 2014/07/31 08:04:57 skrll Exp $	*/
+/*	$NetBSD: pmap.h,v 1.137 2014/11/08 17:18:22 skrll Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003 Wasabi Systems, Inc.
@@ -75,6 +75,7 @@
 #ifndef _LOCORE
 #if defined(_KERNEL_OPT)
 #include "opt_arm32_pmap.h"
+#include "opt_multiprocessor.h"
 #endif
 #include <arm/cpufunc.h>
 #include <uvm/uvm_object.h>
@@ -344,9 +345,9 @@ extern int		arm_poolpage_vmfreelist;
 
 #define pmap_phys_address(ppn)		(arm_ptob((ppn)))
 u_int arm32_mmap_flags(paddr_t);
-#define ARM32_MMAP_WRITECOMBINE	0x40000000
+#define ARM32_MMAP_WRITECOMBINE		0x40000000
 #define ARM32_MMAP_CACHEABLE		0x20000000
-#define pmap_mmap_flags(ppn)			arm32_mmap_flags(ppn)
+#define pmap_mmap_flags(ppn)		arm32_mmap_flags(ppn)
 
 #define	PMAP_PTE			0x10000000 /* kenter_pa */
 

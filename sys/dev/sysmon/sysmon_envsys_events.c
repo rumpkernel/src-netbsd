@@ -1,4 +1,4 @@
-/* $NetBSD: sysmon_envsys_events.c,v 1.110 2013/09/15 14:40:56 martin Exp $ */
+/* $NetBSD: sysmon_envsys_events.c,v 1.113 2014/11/23 10:00:20 ozaki-r Exp $ */
 
 /*-
  * Copyright (c) 2007, 2008 Juan Romero Pardines.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sysmon_envsys_events.c,v 1.110 2013/09/15 14:40:56 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sysmon_envsys_events.c,v 1.113 2014/11/23 10:00:20 ozaki-r Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -345,6 +345,7 @@ sme_event_unregister_all(struct sysmon_envsys *sme)
 {
 	sme_event_t *see;
 	int evcounter = 0;
+	bool destroy = false;
 
 	KASSERT(sme != NULL);
 
@@ -374,10 +375,15 @@ sme_event_unregister_all(struct sysmon_envsys *sme)
 		}
 	}
 
-	if (LIST_EMPTY(&sme->sme_events_list))
-		if (sme->sme_flags & SME_CALLOUT_INITIALIZED)
-			sme_events_destroy(sme);
+	if (LIST_EMPTY(&sme->sme_events_list) &&
+	    sme->sme_flags & SME_CALLOUT_INITIALIZED) {
+		sme_events_halt_callout(sme);
+		destroy = true;
+	}
 	mutex_exit(&sme->sme_mtx);
+
+	if (destroy)
+		sme_events_destroy(sme);
 }
 
 /*
@@ -390,6 +396,7 @@ sme_event_unregister(struct sysmon_envsys *sme, const char *sensor, int type)
 {
 	sme_event_t *see;
 	bool found = false;
+	bool destroy = false;
 
 	KASSERT(sensor != NULL);
 
@@ -420,7 +427,15 @@ sme_event_unregister(struct sysmon_envsys *sme, const char *sensor, int type)
 
 	sme_remove_event(see, sme);
 
+	if (LIST_EMPTY(&sme->sme_events_list)) {
+		sme_events_halt_callout(sme);
+		destroy = true;
+	}
 	mutex_exit(&sme->sme_mtx);
+
+	if (destroy)
+		sme_events_destroy(sme);
+
 	return 0;
 }
 
@@ -470,15 +485,6 @@ sme_remove_event(sme_event_t *see, struct sysmon_envsys *sme)
 	if (see->see_edata->flags & ENVSYS_FHAS_ENTROPY)
 		rnd_detach_source(&see->see_edata->rnd_src);
 	LIST_REMOVE(see, see_list);
-	/*
-	 * So the events list is empty, we'll do the following:
-	 *
-	 * 	- stop and destroy the callout.
-	 * 	- destroy the workqueue.
-	 */
-	if (LIST_EMPTY(&sme->sme_events_list))
-		sme_events_destroy(sme);
-
 	kmem_free(see, sizeof(*see));
 }
 
@@ -566,7 +572,6 @@ sme_events_init(struct sysmon_envsys *sme)
 	if (error)
 		return error;
 
-	mutex_init(&sme->sme_callout_mtx, MUTEX_DEFAULT, IPL_SOFTCLOCK);
 	callout_init(&sme->sme_callout, CALLOUT_MPSAFE);
 	callout_setfunc(&sme->sme_callout, sme_events_check, sme);
 	sme->sme_flags |= SME_CALLOUT_INITIALIZED;
@@ -602,21 +607,39 @@ sme_schedule_callout(struct sysmon_envsys *sme)
 }
 
 /*
+ * sme_events_halt_callout:
+ *
+ * 	+ Halt the callout of the event framework for this device.
+ */
+void
+sme_events_halt_callout(struct sysmon_envsys *sme)
+{
+	KASSERT(mutex_owned(&sme->sme_mtx));
+
+	/*
+	 * Unset before callout_halt to ensure callout is not scheduled again
+	 * during callout_halt.
+	 */
+	sme->sme_flags &= ~SME_CALLOUT_INITIALIZED;
+
+	callout_halt(&sme->sme_callout, &sme->sme_mtx);
+}
+
+/*
  * sme_events_destroy:
  *
- * 	+ Destroys the event framework for this device: callout
- * 	  stopped, workqueue destroyed and callout mutex destroyed.
+ * 	+ Destroy the callout and the workqueue of the event framework
+ *	  for this device.
  */
 void
 sme_events_destroy(struct sysmon_envsys *sme)
 {
-	KASSERT(mutex_owned(&sme->sme_mtx));
+	KASSERT(!mutex_owned(&sme->sme_mtx));
+	KASSERT((sme->sme_flags & SME_CALLOUT_INITIALIZED) == 0);
 
-	callout_stop(&sme->sme_callout);
-	workqueue_destroy(sme->sme_wq);
-	mutex_destroy(&sme->sme_callout_mtx);
 	callout_destroy(&sme->sme_callout);
-	sme->sme_flags &= ~SME_CALLOUT_INITIALIZED;
+	workqueue_destroy(sme->sme_wq);
+
 	DPRINTF(("%s: events framework destroyed for '%s'\n",
 	    __func__, sme->sme_name));
 }
@@ -708,14 +731,14 @@ sme_events_check(void *arg)
 
 	KASSERT(sme != NULL);
 
-	mutex_enter(&sme->sme_callout_mtx);
+	mutex_enter(&sme->sme_mtx);
 	LIST_FOREACH(see, &sme->sme_events_list, see_list) {
 		workqueue_enqueue(sme->sme_wq, &see->see_wk, NULL);
 		see->see_edata->flags |= ENVSYS_FNEED_REFRESH;
 	}
 	if (!sysmon_low_power)
 		sme_schedule_callout(sme);
-	mutex_exit(&sme->sme_callout_mtx);
+	mutex_exit(&sme->sme_mtx);
 }
 
 /*

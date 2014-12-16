@@ -1,4 +1,4 @@
-/*	$NetBSD: rtld.h,v 1.121 2014/08/26 07:54:27 christos Exp $	 */
+/*	$NetBSD: rtld.h,v 1.124 2014/09/19 17:43:33 matt Exp $	 */
 
 /*
  * Copyright 1996 John D. Polstra.
@@ -179,7 +179,7 @@ typedef struct Struct_Obj_Entry {
 	const Elf_Sym  *symtab;		/* Symbol table */
 	const char     *strtab;		/* String table */
 	unsigned long   strsize;	/* Size in bytes of string table */
-#ifdef __mips__
+#if defined(__mips__) || defined(__riscv__)
 	Elf_Word        local_gotno;	/* Number of local GOT entries */
 	Elf_Word        symtabno;	/* Number of dynamic symbols */
 	Elf_Word        gotsym;		/* First dynamic symbol in GOT */
@@ -475,15 +475,7 @@ Obj_Entry *_rtld_map_object(const char *, int, const struct stat *);
 void _rtld_obj_free(Obj_Entry *);
 Obj_Entry *_rtld_obj_new(void);
 
-/*
- * The following uintptr_t cast is for Elf32 emulation on _LP64 systems
- */
-#if defined(_LP64) && ELFSIZE == 32 
-#define RTLD_ELF32_CAST (uintptr_t)
-#else
-#define RTLD_ELF32_CAST 
-#endif
-
+#ifdef RTLD_LOADER
 /* function descriptors */
 #ifdef __HAVE_FUNCTION_DESCRIPTORS
 Elf_Addr _rtld_function_descriptor_alloc(const Obj_Entry *,
@@ -496,14 +488,15 @@ Elf_Addr _rtld_call_function_addr(const Obj_Entry *, Elf_Addr);
 static inline void
 _rtld_call_function_void(const Obj_Entry *obj, Elf_Addr addr)
 {
-	((void (*)(void)) RTLD_ELF32_CAST addr)();
+	((void (*)(void))addr)();
 }
 static inline Elf_Addr
 _rtld_call_function_addr(const Obj_Entry *obj, Elf_Addr addr)
 {
-	return ((Elf_Addr(*)(void)) RTLD_ELF32_CAST addr)();
+	return ((Elf_Addr(*)(void))addr)();
 }
 #endif /* __HAVE_FUNCTION_DESCRIPTORS */
+#endif /* RTLD_LOADER */
 
 #endif /* _RTLD_SOURCE */
 

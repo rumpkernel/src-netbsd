@@ -1,4 +1,4 @@
-/*	$NetBSD: moduleparam.h,v 1.2 2014/03/18 18:20:43 riastradh Exp $	*/
+/*	$NetBSD: moduleparam.h,v 1.4 2014/11/12 04:53:14 christos Exp $	*/
 
 /*-
  * Copyright (c) 2013 The NetBSD Foundation, Inc.
@@ -32,6 +32,27 @@
 #ifndef _LINUX_MODULEPARAM_H_
 #define _LINUX_MODULEPARAM_H_
 
-#define	module_param_named(NAME, VAR, TYPE, MODE)
+#include <sys/types.h>
+
+struct linux_module_param_info {
+	const char *dname;	// Name used for description
+	const char *name;	// Name for sysctl
+	void *ptr;		// Pointer to variable value
+	int type;		// MTYPE_ 
+	mode_t mode;		// 600 (rw) or 400 (r)
+};
+
+#define MTYPE_int	0
+#define MTYPE_bool	1
+
+#define	module_param_named(NAME, VAR, TYPE, MODE) \
+static __attribute__((__used__)) struct linux_module_param_info info_ ## NAME = { \
+	.dname = # NAME, \
+	.name = # VAR, \
+	.ptr = & VAR, \
+	.type = MTYPE_ ## TYPE, \
+	.mode = MODE, \
+}; \
+__link_set_add_data(linux_module_param_info, info_ ## NAME)
 
 #endif  /* _LINUX_MODULEPARAM_H_ */

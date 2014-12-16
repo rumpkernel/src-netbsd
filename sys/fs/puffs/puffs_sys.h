@@ -1,4 +1,4 @@
-/*	$NetBSD: puffs_sys.h,v 1.85 2014/08/16 16:19:41 manu Exp $	*/
+/*	$NetBSD: puffs_sys.h,v 1.88 2014/10/05 20:40:46 apb Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006  Antti Kantee.  All Rights Reserved.
@@ -63,11 +63,15 @@ extern struct pool puffs_vapool;
 
 #ifdef PUFFSDEBUG
 extern int puffsdebug; /* puffs_subr.c */
-#define DPRINTF(x) if (puffsdebug > 0) printf x
-#define DPRINTF_VERBOSE(x) if (puffsdebug > 1) printf x
+#define DPRINTF(x) do { \
+		if (puffsdebug > 0) printf x; \
+	} while (/*CONSTCOND*/0)
+#define DPRINTF_VERBOSE(x) do { \
+		if (puffsdebug > 1) printf x; \
+	} while (/*CONSTCOND*/0)
 #else
-#define DPRINTF(x)
-#define DPRINTF_VERBOSE(x)
+#define DPRINTF(x) ((void)0)
+#define DPRINTF_VERBOSE(x) ((void)0)
 #endif
 
 #define MPTOPUFFSMP(mp) ((struct puffs_mount *)((mp)->mnt_data))
@@ -143,15 +147,6 @@ struct puffs_mount {
 	size_t				pmp_msg_maxsize;
 
 	struct puffs_wq			pmp_msg_replywait;
-
-	struct puffs_node_hashlist	*pmp_pnodehash;
-	int				pmp_npnodehash;
-
-	/*
-	 * a list of cookies which is going to be puffs_getvnode'd.
-	 * this is merely a loose attempt to prevent races.
-	 */
-	LIST_HEAD(, puffs_newcookie)	pmp_newcookie;
 
 	struct mount			*pmp_mp;
 
@@ -237,8 +232,6 @@ struct puffs_node {
 	int		pn_va_timeout;	/* attribute cache */
 	struct vattr *	pn_va_cache;	/* attribute cache */
 	struct vnode *  pn_parent;	/* parent cache */
-
-	LIST_ENTRY(puffs_node) pn_hashent;
 };
 
 typedef void (*parkdone_fn)(struct puffs_mount *, struct puffs_req *, void *);
@@ -274,7 +267,7 @@ void	puffs_releasenode(struct puffs_node *);
 void	puffs_referencenode(struct puffs_node *);
 
 #define PUFFS_NOSUCHCOOKIE (-1)
-int	puffs_cookie2vnode(struct puffs_mount *, puffs_cookie_t, int, int,
+int	puffs_cookie2vnode(struct puffs_mount *, puffs_cookie_t,
 			   struct vnode **);
 void	puffs_makecn(struct puffs_kcn *, struct puffs_kcred *,
 		     const struct componentname *, int);

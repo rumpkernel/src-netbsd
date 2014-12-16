@@ -1,4 +1,4 @@
-#  $NetBSD: Makefile,v 1.165 2014/08/26 11:48:20 christos Exp $
+#  $NetBSD: Makefile,v 1.167 2014/11/17 16:53:23 christos Exp $
 #
 #  @(#)Makefile 5.1beta 93/09/24
 #
@@ -147,6 +147,19 @@ ARCH_SRCS = e_acos.S e_asin.S e_atanh.S e_cosh.S e_exp.S e_fmod.S e_log.S \
 # and emulation code isn't written yet.
 ARCH_SRCS = n_scalbn.S
 WARNS?=5
+.elif (${LIBC_MACHINE_CPU} == "riscv")
+.PATH:	${.CURDIR}/arch/riscv
+
+COMMON_SRCS += fenv.c
+
+.if ${MKSOFTFLOAT} == "no"
+ARCH_SRCS = e_sqrt.S e_sqrtf.S
+ARCH_SRCS += s_copysign.S s_copysignf.S
+ARCH_SRCS += s_fabs.S s_fabsf.S
+ARCH_SRCS += s_fma.S s_fmaf.S
+ARCH_SRCS += s_fmax.S s_fmaxf.S
+ARCH_SRCS += s_fmin.S s_fminf.S
+.endif
 .endif
 
 WARNS?=5
@@ -295,7 +308,11 @@ MLINKS+=copysign.3 copysignf.3 \
 	copysign.3 copysignl.3
 MLINKS+=cos.3 cosf.3
 MLINKS+=cosh.3 coshf.3
-MLINKS+=erf.3 erff.3 erf.3 erfc.3 erf.3 erfcf.3
+MLINKS+=erf.3 erff.3 \
+	erf.3 erfl.3 \
+	erf.3 erfc.3 \
+	erf.3 erfcf.3 \
+	erf.3 erfcl.3
 MLINKS+=exp.3 expf.3 exp.3 expm1.3 exp.3 expm1f.3 			\
 	exp.3 exp2.3 exp.3 exp2f.3
 MLINKS+=log.3 logf.3 \
