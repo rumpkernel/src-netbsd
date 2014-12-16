@@ -1,12 +1,14 @@
-#	$NetBSD: Makefile.inc,v 1.188 2014/06/13 15:45:05 joerg Exp $
+#	$NetBSD: Makefile.inc,v 1.190 2014/12/10 16:55:54 pooka Exp $
 #	from: @(#)Makefile.inc	8.6 (Berkeley) 5/4/95
 
 # gen sources
 .PATH: ${ARCHDIR}/gen ${.CURDIR}/gen
 
-#SRCS+=	_errno.c
+.if ${RUMPRUN} != "yes"
+SRCS+=	_errno.c
+.endif
 
-SRCS+= 	alarm.c alphasort.c arc4random.c assert.c asysctl.c \
+SRCS+=	alarm.c alphasort.c arc4random.c assert.c asysctl.c \
 	basename.c clock.c closedir.c closefrom.c \
 	confstr.c ctermid.c ctype_.c daemon.c \
 	dehumanize_number.c devname.c dirname.c disklabel.c err.c errx.c \
@@ -96,8 +98,8 @@ MLINKS+=endutxent.3 getutxent.3 endutxent.3 getutxid.3 \
 MLINKS+=err.3 verr.3 err.3 errx.3 err.3 verrx.3 err.3 warn.3 err.3 vwarn.3 \
         err.3 warnx.3 err.3 vwarnx.3 err.3 errc.3 err.3 verrc.3 err.3 warnc.3 \
 	err.3 vwarnc.3
-MLINKS+=exec.3 execl.3 exec.3 execle.3 exec.3 execlp.3 exec.3 execv.3 \
-	exec.3 execvp.3 exec.3 exect.3
+MLINKS+=exec.3 execl.3 exec.3 execle.3 exec.3 execlp.3 exec.3 execlpe.3 \
+	exec.3 execv.3 exec.3 execvp.3 exec.3 execvpe.3 exec.3 exect.3 
 MLINKS+=extattr_namespace_to_string.3 extattr_string_to_namespace.3 \
 	extattr_copy_file.3 extattr_copy_fd.3 \
 	extattr_copy_file.3 extattr_copy_link.3 \

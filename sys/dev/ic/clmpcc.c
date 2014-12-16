@@ -1,4 +1,4 @@
-/*	$NetBSD: clmpcc.c,v 1.49 2014/07/25 08:10:37 dholland Exp $ */
+/*	$NetBSD: clmpcc.c,v 1.51 2014/11/15 19:18:18 christos Exp $ */
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: clmpcc.c,v 1.49 2014/07/25 08:10:37 dholland Exp $");
+__KERNEL_RCSID(0, "$NetBSD: clmpcc.c,v 1.51 2014/11/15 19:18:18 christos Exp $");
 
 #include "opt_ddb.h"
 
@@ -75,9 +75,9 @@ static void	clmpcc_set_params(struct clmpcc_chan *);
 static void	clmpcc_start(struct tty *);
 static int 	clmpcc_modem_control(struct clmpcc_chan *, int, int);
 
-#define	CLMPCCUNIT(x)		(minor(x) & 0x7fffc)
-#define CLMPCCCHAN(x)		(minor(x) & 0x00003)
-#define	CLMPCCDIALOUT(x)	(minor(x) & 0x80000)
+#define	CLMPCCUNIT(x)		(TTUNIT(x) & ~0x3)	// XXX >> 2? 
+#define	CLMPCCCHAN(x)		(TTUNIT(x) & 0x3)
+#define	CLMPCCDIALOUT(x)	TTDIALOUT(x)
 
 /*
  * These should be in a header file somewhere...
@@ -367,7 +367,7 @@ clmpcc_init(struct clmpcc_softc *sc)
 	delay(1000);
 
 	/*
-	 * The chip will set it's firmware revision register to a non-zero
+	 * The chip will set its firmware revision register to a non-zero
 	 * value to indicate completion of reset.
 	 */
 	for (i = 10000; clmpcc_rdreg(sc, CLMPCC_REG_GFRCR) == 0 && i; i--)

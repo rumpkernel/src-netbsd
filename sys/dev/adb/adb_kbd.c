@@ -1,4 +1,4 @@
-/*	$NetBSD: adb_kbd.c,v 1.22 2013/11/18 11:02:34 nisimura Exp $	*/
+/*	$NetBSD: adb_kbd.c,v 1.24 2014/11/08 17:21:51 macallan Exp $	*/
 
 /*
  * Copyright (C) 1998	Colin Wood
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: adb_kbd.c,v 1.22 2013/11/18 11:02:34 nisimura Exp $");
+__KERNEL_RCSID(0, "$NetBSD: adb_kbd.c,v 1.24 2014/11/08 17:21:51 macallan Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -190,6 +190,7 @@ adbkbd_attach(device_t parent, device_t self, void *aux)
 #if NWSMOUSE > 0
 	struct wsmousedev_attach_args am;
 #endif
+	uint8_t buffer[2];
 
 	sc->sc_dev = self;
 	sc->sc_ops = aaa->ops;
@@ -231,14 +232,14 @@ adbkbd_attach(device_t parent, device_t self, void *aux)
 	sc->sc_timestamp = 0;
 	sc->sc_emul_usb = FALSE;
 
-	printf(" addr %d: ", sc->sc_adbdev->current_addr);
+	aprint_normal(" addr %d: ", sc->sc_adbdev->current_addr);
 
 	switch (sc->sc_adbdev->handler_id) {
 	case ADB_STDKBD:
-		printf("standard keyboard\n");
+		aprint_normal("standard keyboard\n");
 		break;
 	case ADB_ISOKBD:
-		printf("standard keyboard (ISO layout)\n");
+		aprint_normal("standard keyboard (ISO layout)\n");
 		break;
 	case ADB_EXTKBD:
 		cmd = ADBTALK(sc->sc_adbdev->current_addr, 1);
@@ -249,88 +250,108 @@ adbkbd_attach(device_t parent, device_t self, void *aux)
 		/* Ignore Logitech MouseMan/Trackman pseudo keyboard */
 		/* XXX needs testing */
 		if (sc->sc_buffer[2] == 0x9a && sc->sc_buffer[3] == 0x20) {
-			printf("Mouseman (non-EMP) pseudo keyboard\n");
+			aprint_normal("Mouseman (non-EMP) pseudo keyboard\n");
 			return;
 		} else if (sc->sc_buffer[2] == 0x9a && 
 		    sc->sc_buffer[3] == 0x21) {
-			printf("Trackman (non-EMP) pseudo keyboard\n");
+			aprint_normal("Trackman (non-EMP) pseudo keyboard\n");
 			return;
 		} else {
-			printf("extended keyboard\n");
+			aprint_normal("extended keyboard\n");
 			adbkbd_initleds(sc);
 		}
 		break;
 	case ADB_EXTISOKBD:
-		printf("extended keyboard (ISO layout)\n");
+		aprint_normal("extended keyboard (ISO layout)\n");
 		adbkbd_initleds(sc);
 		break;
 	case ADB_KBDII:
-		printf("keyboard II\n");
+		aprint_normal("keyboard II\n");
 		break;
 	case ADB_ISOKBDII:
-		printf("keyboard II (ISO layout)\n");
+		aprint_normal("keyboard II (ISO layout)\n");
 		break;
 	case ADB_PBKBD:
-		printf("PowerBook keyboard\n");
+		aprint_normal("PowerBook keyboard\n");
 		sc->sc_power = 0x7e;
 		sc->sc_power_button_delay = 1;
 		break;
 	case ADB_PBISOKBD:
-		printf("PowerBook keyboard (ISO layout)\n");
+		aprint_normal("PowerBook keyboard (ISO layout)\n");
 		sc->sc_power = 0x7e;
 		sc->sc_power_button_delay = 1;
 		break;
 	case ADB_ADJKPD:
-		printf("adjustable keypad\n");
+		aprint_normal("adjustable keypad\n");
 		break;
 	case ADB_ADJKBD:
-		printf("adjustable keyboard\n");
+		aprint_normal("adjustable keyboard\n");
 		break;
 	case ADB_ADJISOKBD:
-		printf("adjustable keyboard (ISO layout)\n");
+		aprint_normal("adjustable keyboard (ISO layout)\n");
 		break;
 	case ADB_ADJJAPKBD:
-		printf("adjustable keyboard (Japanese layout)\n");
+		aprint_normal("adjustable keyboard (Japanese layout)\n");
 		break;
 	case ADB_PBEXTISOKBD:
-		printf("PowerBook extended keyboard (ISO layout)\n");
+		aprint_normal("PowerBook extended keyboard (ISO layout)\n");
 		sc->sc_power_button_delay = 1;
 		sc->sc_power = 0x7e;
 		break;
 	case ADB_PBEXTJAPKBD:
-		printf("PowerBook extended keyboard (Japanese layout)\n");
+		aprint_normal("PowerBook extended keyboard (Japanese layout)\n");
 		sc->sc_power_button_delay = 1;
 		sc->sc_power = 0x7e;
 		break;
 	case ADB_JPKBDII:
-		printf("keyboard II (Japanese layout)\n");
+		aprint_normal("keyboard II (Japanese layout)\n");
 		break;
 	case ADB_PBEXTKBD:
-		printf("PowerBook extended keyboard\n");
+		aprint_normal("PowerBook extended keyboard\n");
 		sc->sc_power_button_delay = 1;
 		sc->sc_power = 0x7e;
 		break;
 	case ADB_DESIGNKBD:
-		printf("extended keyboard\n");
+		aprint_normal("extended keyboard\n");
 		adbkbd_initleds(sc);
 		break;
 	case ADB_PBJPKBD:
-		printf("PowerBook keyboard (Japanese layout)\n");
+		aprint_normal("PowerBook keyboard (Japanese layout)\n");
 		sc->sc_power_button_delay = 1;
 		sc->sc_power = 0x7e;
 		break;
 	case ADB_PBG3KBD:
-		printf("PowerBook G3 keyboard\n");
+		aprint_normal("PowerBook G3 keyboard\n");
 		break;
 	case ADB_PBG3JPKBD:
-		printf("PowerBook G3 keyboard (Japanese layout)\n");
+		aprint_normal("PowerBook G3 keyboard (Japanese layout)\n");
 		break;
 	case ADB_IBOOKKBD:
-		printf("iBook keyboard\n");
+		aprint_normal("iBook keyboard\n");
 		break;
 	default:
-		printf("mapped device (%d)\n", sc->sc_adbdev->handler_id);
+		aprint_normal("mapped device (%d)\n", sc->sc_adbdev->handler_id);
 		break;
+	}
+
+	/*
+	 * try to switch to extended protocol
+	 * as in, tell the keyboard to distinguish between left and right
+	 * Shift, Control and Alt keys
+	 */
+	cmd = ADBLISTEN(sc->sc_adbdev->current_addr, 3);
+	buffer[0] = sc->sc_adbdev->current_addr;
+	buffer[1] = 3;
+	sc->sc_msg_len = 0;
+	sc->sc_ops->send(sc->sc_ops->cookie, sc->sc_poll, cmd, 2, buffer);
+	adbkbd_wait(sc, 10);
+
+	cmd = ADBTALK(sc->sc_adbdev->current_addr, 3);
+	sc->sc_msg_len = 0;
+	sc->sc_ops->send(sc->sc_ops->cookie, sc->sc_poll, cmd, 0, NULL);
+	adbkbd_wait(sc, 10);
+	if ((sc->sc_msg_len == 4) && (sc->sc_buffer[3] == 3)) {
+		aprint_verbose_dev(sc->sc_dev, "extended protocol enabled\n");
 	}
 
 	if (adbkbd_is_console && (adbkbd_console_attached == 0)) {
@@ -566,7 +587,7 @@ adbkbd_initleds(struct adbkbd_softc *sc)
 	sc->sc_msg_len = 0;
 	sc->sc_ops->send(sc->sc_ops->cookie, sc->sc_poll, cmd, 0, NULL);
 	if (!adbkbd_wait(sc, 10)) {
-		printf("unable to read LED state\n");
+		aprint_error_dev(sc->sc_dev, "unable to read LED state\n");
 		return;
 	}
 	sc->sc_have_led_control = 1;

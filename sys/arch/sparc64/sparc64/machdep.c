@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.278 2014/07/14 12:40:38 nakayama Exp $ */
+/*	$NetBSD: machdep.c,v 1.280 2014/10/28 13:04:51 nakayama Exp $ */
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -71,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.278 2014/07/14 12:40:38 nakayama Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.280 2014/10/28 13:04:51 nakayama Exp $");
 
 #include "opt_ddb.h"
 #include "opt_multiprocessor.h"
@@ -599,10 +599,13 @@ cpu_reboot(int howto, char *user_boot_string)
 	 */
 	maybe_dump(howto);
 
-	if ((howto & RB_NOSYNC) == 0 && !syncdone) {
+	/*
+	 * If we've panic'd, don't make the situation potentially
+	 * worse by syncing or unmounting the file systems.
+	 */
+	if ((howto & RB_NOSYNC) == 0 && panicstr == NULL) {
 		if (!syncdone) {
-		syncdone = true;
-		vfs_shutdown();
+			syncdone = true;
 			/* XXX used to force unmount as well, here */
 			vfs_sync_all(l);
 			/*
@@ -630,6 +633,7 @@ cpu_reboot(int howto, char *user_boot_string)
 	splhigh();
 
 haltsys:
+	doshutdownhooks();
 
 #ifdef MULTIPROCESSOR
 	/* Stop all secondary cpus */
@@ -1437,8 +1441,10 @@ _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	 */
 	error = uvm_pglistalloc(size, low, high,
 	    alignment, boundary, pglist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
-	if (error)
+	if (error) {
+		free(pglist, M_DEVBUF);
 		return (error);
+	}
 
 	/*
 	 * Compute the location, size, and number of segments actually

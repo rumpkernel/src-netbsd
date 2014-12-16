@@ -53,46 +53,6 @@
 #define copy_to_user(to, from, n)	copyout((from), (to), (n))
 
 /*
- * Bit API
- */
-
-static __inline int
-test_and_set_bit(int nr, volatile void *addr)
-{
-	volatile uint32_t *val;
-	uint32_t mask, old;
-
-	val = (volatile uint32_t *)addr;
-	mask = 1 << nr;
-
-	do {
-		old = *val;
-		if ((old & mask) != 0)
-			break;
-	} while (atomic_cas_uint(val, old, old | mask) != old);
-
-	return old & mask;
-}
-
-static __inline__ int
-test_and_clear_bit(int nr, volatile void *addr)
-{
-	volatile uint32_t *val;
-	uint32_t mask, old;
-
-	val = (volatile uint32_t *)addr;
-	mask = 1 << nr;
-
-	do {
-		old = *val;
-		if ((old & mask) == 0)
-			break;
-	} while (atomic_cas_uint(val, old, old & ~mask) != old);
-
-	return old & mask;
-}
-
-/*
  * Atomic API
  */
 typedef volatile unsigned int atomic_t;
@@ -123,7 +83,7 @@ typedef kmutex_t spinlock_t;
  */
 #define DEFINE_SPINLOCK(name)	kmutex_t name
 
-#define spin_lock_init(lock)	mutex_init(lock, MUTEX_DEFAULT, IPL_VM)
+#define spin_lock_init(lock)	mutex_init(lock, MUTEX_DEFAULT, IPL_SCHED)
 #define spin_lock_destroy(lock)	mutex_destroy(lock)
 #define spin_lock(lock)		mutex_spin_enter(lock)
 #define spin_unlock(lock)	mutex_spin_exit(lock)
@@ -148,7 +108,7 @@ typedef kmutex_t rwlock_t;
 
 #define DEFINE_RWLOCK(name)	kmutex_t name
 
-#define rwlock_init(rwlock)	mutex_init(rwlock, MUTEX_DEFAULT, IPL_VM)
+#define rwlock_init(rwlock)	mutex_init(rwlock, MUTEX_DEFAULT, IPL_SCHED)
 #define read_lock(rwlock)	mutex_spin_enter(rwlock)
 #define read_unlock(rwlock)	mutex_spin_exit(rwlock)
 

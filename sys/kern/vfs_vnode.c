@@ -1,4 +1,4 @@
-/*	$NetBSD: vfs_vnode.c,v 1.37 2014/07/05 09:33:15 hannken Exp $	*/
+/*	$NetBSD: vfs_vnode.c,v 1.39 2014/10/03 14:45:38 hannken Exp $	*/
 
 /*-
  * Copyright (c) 1997-2011 The NetBSD Foundation, Inc.
@@ -116,7 +116,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vfs_vnode.c,v 1.37 2014/07/05 09:33:15 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vfs_vnode.c,v 1.39 2014/10/03 14:45:38 hannken Exp $");
 
 #define _VFS_VNODE_PRIVATE
 
@@ -181,10 +181,11 @@ static lwp_t *		vrele_lwp		__cacheline_aligned;
 static int		vrele_pending		__cacheline_aligned;
 static int		vrele_gen		__cacheline_aligned;
 
+SLIST_HEAD(hashhead, vcache_node);
 static struct {
 	kmutex_t	lock;
 	u_long		hashmask;
-	SLIST_HEAD(hashhead, vcache_node)	*hashtab;
+	struct hashhead	*hashtab;
 	pool_cache_t	pool;
 }			vcache			__cacheline_aligned;
 
@@ -1292,6 +1293,7 @@ again:
 	}
 
 	/* Load the fs node.  Exclusive as new_node->vn_vnode is NULL. */
+	vp->v_iflag |= VI_CHANGING;
 	error = VFS_LOADVNODE(mp, vp, key, key_len, &new_key);
 	if (error) {
 		mutex_enter(&vcache.lock);
@@ -1319,6 +1321,10 @@ again:
 	new_node->vn_key.vk_key = new_key;
 	new_node->vn_vnode = vp;
 	mutex_exit(&vcache.lock);
+	mutex_enter(vp->v_interlock);
+	vp->v_iflag &= ~VI_CHANGING;
+	cv_broadcast(&vp->v_cv);
+	mutex_exit(vp->v_interlock);
 	*vpp = vp;
 	return 0;
 }

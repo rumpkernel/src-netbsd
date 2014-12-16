@@ -1,4 +1,4 @@
-/*	$NetBSD: ip_output.c,v 1.230 2014/06/06 00:11:19 rmind Exp $	*/
+/*	$NetBSD: ip_output.c,v 1.233 2014/11/26 10:18:37 ozaki-r Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -91,7 +91,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ip_output.c,v 1.230 2014/06/06 00:11:19 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ip_output.c,v 1.233 2014/11/26 10:18:37 ozaki-r Exp $");
 
 #include "opt_inet.h"
 #include "opt_ipsec.h"
@@ -124,6 +124,10 @@ __KERNEL_RCSID(0, "$NetBSD: ip_output.c,v 1.230 2014/06/06 00:11:19 rmind Exp $"
 #include <netinet/portalgo.h>
 #include <netinet/udp.h>
 
+#ifdef INET6
+#include <netinet6/ip6_var.h>
+#endif
+
 #ifdef MROUTING
 #include <netinet/ip_mroute.h>
 #endif
@@ -136,8 +140,6 @@ static struct mbuf *ip_insertoptions(struct mbuf *, struct mbuf *, int *);
 static struct ifnet *ip_multicast_if(struct in_addr *, int *);
 static void ip_mloopback(struct ifnet *, struct mbuf *,
     const struct sockaddr_in *);
-static int ip_setmoptions(struct inpcb *, const struct sockopt *);
-static int ip_getmoptions(struct inpcb *, struct sockopt *);
 
 extern pfil_head_t *inet_pfil_hook;			/* XXX */
 
@@ -1003,7 +1005,7 @@ ip_ctloutput(int op, struct socket *so, struct sockopt *sopt)
 		case IP_MULTICAST_LOOP:
 		case IP_ADD_MEMBERSHIP:
 		case IP_DROP_MEMBERSHIP:
-			error = ip_setmoptions(inp, sopt);
+			error = ip_setmoptions(&inp->inp_moptions, sopt);
 			break;
 
 		case IP_PORTRANGE:
@@ -1151,7 +1153,7 @@ ip_ctloutput(int op, struct socket *so, struct sockopt *sopt)
 		case IP_MULTICAST_LOOP:
 		case IP_ADD_MEMBERSHIP:
 		case IP_DROP_MEMBERSHIP:
-			error = ip_getmoptions(inp, sopt);
+			error = ip_getmoptions(inp->inp_moptions, sopt);
 			break;
 
 		case IP_PORTRANGE:
@@ -1361,17 +1363,168 @@ ip_getoptval(const struct sockopt *sopt, u_int8_t *val, u_int maxval)
 	return 0;
 }
 
+static int
+ip_get_membership(const struct sockopt *sopt, struct ifnet **ifp,
+    struct in_addr *ia, bool add)
+{
+	int error;
+	struct ip_mreq mreq;
+
+	error = sockopt_get(sopt, &mreq, sizeof(mreq));
+	if (error)
+		return error;
+
+	if (!IN_MULTICAST(mreq.imr_multiaddr.s_addr))
+		return EINVAL;
+
+	memcpy(ia, &mreq.imr_multiaddr, sizeof(*ia));
+
+	if (in_nullhost(mreq.imr_interface)) {
+		union {
+			struct sockaddr		dst;
+			struct sockaddr_in	dst4;
+		} u;
+		struct route ro;
+
+		if (!add) {
+			*ifp = NULL;
+			return 0;
+		}
+		/*
+		 * If no interface address was provided, use the interface of
+		 * the route to the given multicast address.
+		 */
+		struct rtentry *rt;
+		memset(&ro, 0, sizeof(ro));
+
+		sockaddr_in_init(&u.dst4, ia, 0);
+		rtcache_setdst(&ro, &u.dst);
+		*ifp = (rt = rtcache_init(&ro)) != NULL ? rt->rt_ifp : NULL;
+		rtcache_free(&ro);
+	} else {
+		*ifp = ip_multicast_if(&mreq.imr_interface, NULL);
+		if (!add && *ifp == NULL)
+			return EADDRNOTAVAIL;
+	}
+	return 0;
+}
+
+/*
+ * Add a multicast group membership.
+ * Group must be a valid IP multicast address.
+ */
+static int
+ip_add_membership(struct ip_moptions *imo, const struct sockopt *sopt)
+{
+	struct ifnet *ifp;
+	struct in_addr ia;
+	int i, error;
+
+	if (sopt->sopt_size == sizeof(struct ip_mreq))
+		error = ip_get_membership(sopt, &ifp, &ia, true);
+	else
+#ifdef INET6
+		error = ip6_get_membership(sopt, &ifp, &ia, sizeof(ia));
+#else
+		return EINVAL;	
+#endif
+
+	if (error)
+		return error;
+
+	/*
+	 * See if we found an interface, and confirm that it
+	 * supports multicast.
+	 */
+	if (ifp == NULL || (ifp->if_flags & IFF_MULTICAST) == 0)
+		return EADDRNOTAVAIL;
+
+	/*
+	 * See if the membership already exists or if all the
+	 * membership slots are full.
+	 */
+	for (i = 0; i < imo->imo_num_memberships; ++i) {
+		if (imo->imo_membership[i]->inm_ifp == ifp &&
+		    in_hosteq(imo->imo_membership[i]->inm_addr, ia))
+			break;
+	}
+	if (i < imo->imo_num_memberships)
+		return EADDRINUSE;
+
+	if (i == IP_MAX_MEMBERSHIPS)
+		return ETOOMANYREFS;
+
+	/*
+	 * Everything looks good; add a new record to the multicast
+	 * address list for the given interface.
+	 */
+	if ((imo->imo_membership[i] = in_addmulti(&ia, ifp)) == NULL)
+		return ENOBUFS;
+
+	++imo->imo_num_memberships;
+	return 0;
+}
+
+/*
+ * Drop a multicast group membership.
+ * Group must be a valid IP multicast address.
+ */
+static int
+ip_drop_membership(struct ip_moptions *imo, const struct sockopt *sopt)
+{
+	struct in_addr ia;
+	struct ifnet *ifp;
+	int i, error;
+
+	if (sopt->sopt_size == sizeof(struct ip_mreq))
+		error = ip_get_membership(sopt, &ifp, &ia, false);
+	else
+#ifdef INET6
+		error = ip6_get_membership(sopt, &ifp, &ia, sizeof(ia));
+#else
+		return EINVAL;
+#endif
+
+	if (error)
+		return error;
+
+	/*
+	 * Find the membership in the membership array.
+	 */
+	for (i = 0; i < imo->imo_num_memberships; ++i) {
+		if ((ifp == NULL ||
+		     imo->imo_membership[i]->inm_ifp == ifp) &&
+		     in_hosteq(imo->imo_membership[i]->inm_addr, ia))
+			break;
+	}
+	if (i == imo->imo_num_memberships)
+		return EADDRNOTAVAIL;
+
+	/*
+	 * Give up the multicast address record to which the
+	 * membership points.
+	 */
+	in_delmulti(imo->imo_membership[i]);
+
+	/*
+	 * Remove the gap in the membership array.
+	 */
+	for (++i; i < imo->imo_num_memberships; ++i)
+		imo->imo_membership[i-1] = imo->imo_membership[i];
+	--imo->imo_num_memberships;
+	return 0;
+}
+
 /*
  * Set the IP multicast options in response to user setsockopt().
  */
-static int
-ip_setmoptions(struct inpcb *inp, const struct sockopt *sopt)
+int
+ip_setmoptions(struct ip_moptions **pimo, const struct sockopt *sopt)
 {
-	struct ip_moptions *imo = inp->inp_moptions;
+	struct ip_moptions *imo = *pimo;
 	struct in_addr addr;
-	struct ip_mreq lmreq, *mreq;
 	struct ifnet *ifp;
-	int i, ifindex, error = 0;
+	int ifindex, error = 0;
 
 	if (!imo) {
 		/*
@@ -1387,7 +1540,7 @@ ip_setmoptions(struct inpcb *inp, const struct sockopt *sopt)
 		imo->imo_multicast_ttl = IP_DEFAULT_MULTICAST_TTL;
 		imo->imo_multicast_loop = IP_DEFAULT_MULTICAST_LOOP;
 		imo->imo_num_memberships = 0;
-		inp->inp_moptions = imo;
+		*pimo = imo;
 	}
 
 	switch (sopt->sopt_name) {
@@ -1440,134 +1593,12 @@ ip_setmoptions(struct inpcb *inp, const struct sockopt *sopt)
 		error = ip_getoptval(sopt, &imo->imo_multicast_loop, 1);
 		break;
 
-	case IP_ADD_MEMBERSHIP:
-		/*
-		 * Add a multicast group membership.
-		 * Group must be a valid IP multicast address.
-		 */
-		error = sockopt_get(sopt, &lmreq, sizeof(lmreq));
-		if (error)
-			break;
-
-		mreq = &lmreq;
-
-		if (!IN_MULTICAST(mreq->imr_multiaddr.s_addr)) {
-			error = EINVAL;
-			break;
-		}
-		/*
-		 * If no interface address was provided, use the interface of
-		 * the route to the given multicast address.
-		 */
-		if (in_nullhost(mreq->imr_interface)) {
-			struct rtentry *rt;
-			union {
-				struct sockaddr		dst;
-				struct sockaddr_in	dst4;
-			} u;
-			struct route ro;
-
-			memset(&ro, 0, sizeof(ro));
-
-			sockaddr_in_init(&u.dst4, &mreq->imr_multiaddr, 0);
-			rtcache_setdst(&ro, &u.dst);
-			ifp = (rt = rtcache_init(&ro)) != NULL ? rt->rt_ifp
-			                                        : NULL;
-			rtcache_free(&ro);
-		} else {
-			ifp = ip_multicast_if(&mreq->imr_interface, NULL);
-		}
-		/*
-		 * See if we found an interface, and confirm that it
-		 * supports multicast.
-		 */
-		if (ifp == NULL || (ifp->if_flags & IFF_MULTICAST) == 0) {
-			error = EADDRNOTAVAIL;
-			break;
-		}
-		/*
-		 * See if the membership already exists or if all the
-		 * membership slots are full.
-		 */
-		for (i = 0; i < imo->imo_num_memberships; ++i) {
-			if (imo->imo_membership[i]->inm_ifp == ifp &&
-			    in_hosteq(imo->imo_membership[i]->inm_addr,
-				      mreq->imr_multiaddr))
-				break;
-		}
-		if (i < imo->imo_num_memberships) {
-			error = EADDRINUSE;
-			break;
-		}
-		if (i == IP_MAX_MEMBERSHIPS) {
-			error = ETOOMANYREFS;
-			break;
-		}
-		/*
-		 * Everything looks good; add a new record to the multicast
-		 * address list for the given interface.
-		 */
-		if ((imo->imo_membership[i] =
-		    in_addmulti(&mreq->imr_multiaddr, ifp)) == NULL) {
-			error = ENOBUFS;
-			break;
-		}
-		++imo->imo_num_memberships;
+	case IP_ADD_MEMBERSHIP: /* IPV6_JOIN_GROUP */
+		error = ip_add_membership(imo, sopt);
 		break;
 
-	case IP_DROP_MEMBERSHIP:
-		/*
-		 * Drop a multicast group membership.
-		 * Group must be a valid IP multicast address.
-		 */
-		error = sockopt_get(sopt, &lmreq, sizeof(lmreq));
-		if (error)
-			break;
-
-		mreq = &lmreq;
-
-		if (!IN_MULTICAST(mreq->imr_multiaddr.s_addr)) {
-			error = EINVAL;
-			break;
-		}
-		/*
-		 * If an interface address was specified, get a pointer
-		 * to its ifnet structure.
-		 */
-		if (in_nullhost(mreq->imr_interface))
-			ifp = NULL;
-		else {
-			ifp = ip_multicast_if(&mreq->imr_interface, NULL);
-			if (ifp == NULL) {
-				error = EADDRNOTAVAIL;
-				break;
-			}
-		}
-		/*
-		 * Find the membership in the membership array.
-		 */
-		for (i = 0; i < imo->imo_num_memberships; ++i) {
-			if ((ifp == NULL ||
-			     imo->imo_membership[i]->inm_ifp == ifp) &&
-			     in_hosteq(imo->imo_membership[i]->inm_addr,
-				       mreq->imr_multiaddr))
-				break;
-		}
-		if (i == imo->imo_num_memberships) {
-			error = EADDRNOTAVAIL;
-			break;
-		}
-		/*
-		 * Give up the multicast address record to which the
-		 * membership points.
-		 */
-		in_delmulti(imo->imo_membership[i]);
-		/*
-		 * Remove the gap in the membership array.
-		 */
-		for (++i; i < imo->imo_num_memberships; ++i)
-			imo->imo_membership[i-1] = imo->imo_membership[i];
-		--imo->imo_num_memberships;
+	case IP_DROP_MEMBERSHIP: /* IPV6_LEAVE_GROUP */
+		error = ip_drop_membership(imo, sopt);
 		break;
 
 	default:
@@ -1583,7 +1614,7 @@ ip_setmoptions(struct inpcb *inp, const struct sockopt *sopt)
 	    imo->imo_multicast_loop == IP_DEFAULT_MULTICAST_LOOP &&
 	    imo->imo_num_memberships == 0) {
 		kmem_free(imo, sizeof(*imo));
-		inp->inp_moptions = NULL;
+		*pimo = NULL;
 	}
 
 	return error;
@@ -1592,10 +1623,9 @@ ip_setmoptions(struct inpcb *inp, const struct sockopt *sopt)
 /*
  * Return the IP multicast options in response to user getsockopt().
  */
-static int
-ip_getmoptions(struct inpcb *inp, struct sockopt *sopt)
+int
+ip_getmoptions(struct ip_moptions *imo, struct sockopt *sopt)
 {
-	struct ip_moptions *imo = inp->inp_moptions;
 	struct in_addr addr;
 	struct in_ifaddr *ia;
 	uint8_t optval;
@@ -1683,5 +1713,7 @@ ip_mloopback(struct ifnet *ifp, struct mbuf *m, const struct sockaddr_in *dst)
 
 	ip->ip_sum = 0;
 	ip->ip_sum = in_cksum(copym, ip->ip_hl << 2);
+	KERNEL_LOCK(1, NULL);
 	(void)looutput(ifp, copym, sintocsa(dst), NULL);
+	KERNEL_UNLOCK_ONE(NULL);
 }

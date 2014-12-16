@@ -1,4 +1,4 @@
-/*	$NetBSD: dwc2_hcd.c,v 1.13 2014/07/03 07:18:42 skrll Exp $	*/
+/*	$NetBSD: dwc2_hcd.c,v 1.15 2014/11/24 10:14:14 skrll Exp $	*/
 
 /*
  * hcd.c - DesignWare HS OTG Controller host-mode routines
@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dwc2_hcd.c,v 1.13 2014/07/03 07:18:42 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dwc2_hcd.c,v 1.15 2014/11/24 10:14:14 skrll Exp $");
 
 #include <sys/types.h>
 #include <sys/kmem.h>
@@ -887,6 +887,22 @@ enum dwc2_transaction_type dwc2_hcd_select_transactions(
 		if (list_empty(&hsotg->free_hc_list))
 			break;
 		qh = list_entry(qh_ptr, struct dwc2_qh, qh_list_entry);
+
+		/*
+		 * Check to see if this is a NAK'd retransmit, in which case
+		 * ignore for retransmission. We hold off on bulk/control
+		 * retransmissions to reduce NAK interrupt overhead for
+		 * cheeky devices that just hold off using NAKs.
+		 */
+		if (qh->nak_frame != 0xffff &&
+		    dwc2_full_frame_num(qh->nak_frame) ==
+		    dwc2_full_frame_num(dwc2_hcd_get_frame_number(hsotg))) {
+			qh_ptr = qh_ptr->next;
+			continue;
+		} else {
+			qh->nak_frame = 0xffff;
+		}
+
 		if (hsotg->core_params->uframe_sched > 0) {
 			if (hsotg->available_host_channels < 1)
 				break;

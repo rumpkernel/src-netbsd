@@ -1,4 +1,4 @@
-/* $NetBSD: udf_subr.c,v 1.125 2014/07/29 15:36:43 reinoud Exp $ */
+/* $NetBSD: udf_subr.c,v 1.127 2014/09/17 21:18:43 reinoud Exp $ */
 
 /*
  * Copyright (c) 2006, 2008 Reinoud Zandijk
@@ -29,7 +29,7 @@
 
 #include <sys/cdefs.h>
 #ifndef lint
-__KERNEL_RCSID(0, "$NetBSD: udf_subr.c,v 1.125 2014/07/29 15:36:43 reinoud Exp $");
+__KERNEL_RCSID(0, "$NetBSD: udf_subr.c,v 1.127 2014/09/17 21:18:43 reinoud Exp $");
 #endif /* not lint */
 
 
@@ -5285,11 +5285,12 @@ udf_get_node(struct udf_mount *ump, struct long_ad *node_icb_loc,
 	union dscrptr   *dscr;
 	struct udf_node *udf_node;
 	struct vnode    *nvp;
-	struct long_ad   icb_loc, last_fe_icb_loc;
+	struct long_ad   icb_loc, next_icb_loc, last_fe_icb_loc;
 	uint64_t file_size;
 	uint32_t lb_size, sector, dummy;
 	int udf_file_type, dscr_type, strat, strat4096, needs_indirect;
 	int slot, eof, error;
+	int num_indir_followed = 0;
 
 	DPRINTF(NODE, ("udf_get_node called\n"));
 	*udf_noderes = udf_node = NULL;
@@ -5392,8 +5393,13 @@ udf_get_node(struct udf_mount *ump, struct long_ad *node_icb_loc,
 		/* if dealing with an indirect entry, follow the link */
 		if (dscr_type == TAGID_INDIRECTENTRY) {
 			needs_indirect = 0;
+			next_icb_loc = dscr->inde.indirect_icb;
 			udf_free_logvol_dscr(ump, &icb_loc, dscr);
-			icb_loc = dscr->inde.indirect_icb;
+			icb_loc = next_icb_loc;
+			if (++num_indir_followed > UDF_MAX_INDIRS_FOLLOW) {
+				error = EMLINK;
+				break;
+			}
 			continue;
 		}
 
