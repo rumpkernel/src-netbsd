@@ -84,7 +84,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/malloc.h>
 #include <sys/kmem.h>
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
@@ -124,7 +123,7 @@
 
 #include <netinet/tcp_vtw.h>
 
-__KERNEL_RCSID(0, "$NetBSD: tcp_vtw.c,v 1.10 2013/09/15 14:47:40 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tcp_vtw.c,v 1.12 2014/11/10 18:52:51 maxv Exp $");
 
 #define db_trace(__a, __b)	do { } while (/*CONSTCOND*/0)
 
@@ -1342,9 +1341,9 @@ vtw_init(fatp_ctl_t *fat, vtw_ctl_t *ctl, const uint32_t n, vtw_t *ctl_base_v)
 /*!\brief	map class to TCP MSL
  */
 static inline uint32_t
-class_to_msl(int class)
+class_to_msl(int msl_class)
 {
-	switch (class) {
+	switch (msl_class) {
 	case 0:
 	case 1:
 		return tcp_msl_remote ? tcp_msl_remote : (TCPTV_MSL >> 0);
@@ -1875,7 +1874,7 @@ vtw_control(int af, uint32_t msl)
 {
 	fatp_ctl_t	*fat;
 	vtw_ctl_t	*ctl;
-	int		class	= msl_to_class(msl);
+	int		msl_class = msl_to_class(msl);
 
 	if (!vtw_select(af, &fat, &ctl))
 		return NULL;
@@ -1893,7 +1892,7 @@ vtw_control(int af, uint32_t msl)
 		tcbtable.vestige = &tcp_hooks;
 	}
 
-	return ctl + class;
+	return ctl + msl_class;
 }
 
 /*!\brief	add TCP pcb to vestigial timewait
@@ -2249,12 +2248,12 @@ vtw_earlyinit(void)
 /*!\brief	add lalp, fafp entries for debug
  */
 int
-vtw_debug_add(int af, sin_either_t *la, sin_either_t *fa, int msl, int class)
+vtw_debug_add(int af, sin_either_t *la, sin_either_t *fa, int msl, int msl_class)
 {
 	vtw_ctl_t	*ctl;
 	vtw_t		*vtw;
 
-	ctl = vtw_control(af, msl ? msl : class_to_msl(class));
+	ctl = vtw_control(af, msl ? msl : class_to_msl(msl_class));
 	if (!ctl)
 		return 0;
 

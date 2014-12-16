@@ -1,4 +1,4 @@
-/*	$NetBSD: pci.h,v 1.8 2014/08/13 20:56:21 riastradh Exp $	*/
+/*	$NetBSD: pci.h,v 1.11 2014/11/11 11:30:21 nonaka Exp $	*/
 
 /*-
  * Copyright (c) 2013 The NetBSD Foundation, Inc.
@@ -32,6 +32,14 @@
 #ifndef _LINUX_PCI_H_
 #define _LINUX_PCI_H_
 
+#ifdef _KERNEL_OPT
+#if defined(i386) || defined(amd64)
+#include "acpica.h"
+#else	/* !(i386 || amd64) */
+#define NACPICA	0
+#endif	/* i386 || amd64 */
+#endif
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -46,10 +54,15 @@
 #include <dev/pci/pcivar.h>
 #include <dev/pci/agpvar.h>
 
+#include <dev/acpi/acpivar.h>
+#include <dev/acpi/acpi_pci.h>
+
 #include <linux/dma-mapping.h>
 #include <linux/ioport.h>
 
-struct pci_bus;
+struct pci_bus {
+	u_int		number;
+};
 
 struct pci_device_id {
 	uint32_t	vendor;
@@ -122,6 +135,7 @@ struct pci_dev {
 		void __pci_iomem	*kva;
 	}			pd_resources[PCI_NUM_RESOURCES];
 	struct pci_conf_state	*pd_saved_state;
+	struct acpi_devnode	*pd_ad;
 	struct device		dev;		/* XXX Don't believe me!  */
 	struct pci_bus		*bus;
 	uint32_t		devfn;
@@ -152,7 +166,14 @@ linux_pci_dev_init(struct pci_dev *pdev, device_t dev,
 	pdev->pd_kludges = kludges;
 	pdev->pd_rom_vaddr = NULL;
 	pdev->pd_dev = dev;
-	pdev->bus = NULL;	/* XXX struct pci_dev::bus */
+#if (NACPICA > 0)
+	pdev->pd_ad = acpi_pcidev_find(0 /*XXX segment*/, pa->pa_bus,
+	    pa->pa_device, pa->pa_function);
+#else
+	pdev->pd_ad = NULL;
+#endif
+	pdev->bus = kmem_zalloc(sizeof(struct pci_bus), KM_NOSLEEP);
+	pdev->bus->number = pa->pa_bus;
 	pdev->devfn = PCI_DEVFN(pa->pa_device, pa->pa_function);
 	pdev->vendor = PCI_VENDOR(pa->pa_id);
 	pdev->device = PCI_PRODUCT(pa->pa_id);
@@ -430,6 +451,36 @@ pci_unmap_rom(struct pci_dev *pdev, void __pci_rom_iomem *vaddr __unused)
 	pdev->pd_rom_vaddr = NULL;
 }
 
+/* XXX Whattakludge!  Should move this in sys/arch/.  */
+static int
+pci_map_rom_md(struct pci_dev *pdev)
+{
+#if defined(__i386__) || defined(__x86_64__) || defined(__ia64__)
+	const bus_addr_t rom_base = 0xc0000;
+	const bus_size_t rom_size = 0x20000;
+	bus_space_handle_t rom_bsh;
+	int error;
+
+	if (PCI_CLASS(pdev->pd_pa.pa_class) != PCI_CLASS_DISPLAY)
+		return ENXIO;
+	if (PCI_SUBCLASS(pdev->pd_pa.pa_class) != PCI_SUBCLASS_DISPLAY_VGA)
+		return ENXIO;
+	/* XXX Check whether this is the primary VGA card?  */
+	error = bus_space_map(pdev->pd_pa.pa_memt, rom_base, rom_size,
+	    (BUS_SPACE_MAP_LINEAR | BUS_SPACE_MAP_PREFETCHABLE), &rom_bsh);
+	if (error)
+		return ENXIO;
+
+	pdev->pd_rom_bst = pdev->pd_pa.pa_memt;
+	pdev->pd_rom_bsh = rom_bsh;
+	pdev->pd_rom_size = rom_size;
+
+	return 0;
+#else
+	return ENXIO;
+#endif
+}
+
 static inline void __pci_rom_iomem *
 pci_map_rom(struct pci_dev *pdev, size_t *sizep)
 {
@@ -441,13 +492,14 @@ pci_map_rom(struct pci_dev *pdev, size_t *sizep)
 	if (pci_mapreg_map(&pdev->pd_pa, PCI_MAPREG_ROM, PCI_MAPREG_TYPE_ROM,
 		(BUS_SPACE_MAP_PREFETCHABLE | BUS_SPACE_MAP_LINEAR),
 		&pdev->pd_rom_bst, &pdev->pd_rom_bsh, NULL, &pdev->pd_rom_size)
-	    != 0)
+	    != 0 &&
+	    pci_map_rom_md(pdev) != 0)
 		return NULL;
 	pdev->pd_kludges |= NBPCI_KLUDGE_MAP_ROM;
 
 	/* XXX This type is obviously wrong in general...  */
 	if (pci_find_rom(&pdev->pd_pa, pdev->pd_rom_bst, pdev->pd_rom_bsh,
-		PCI_ROM_CODE_TYPE_X86, &bsh, &size)) {
+		pdev->pd_rom_size, PCI_ROM_CODE_TYPE_X86, &bsh, &size)) {
 		pci_unmap_rom(pdev, NULL);
 		return NULL;
 	}

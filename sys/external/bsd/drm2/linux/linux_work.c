@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_work.c,v 1.7 2014/07/29 17:36:06 riastradh Exp $	*/
+/*	$NetBSD: linux_work.c,v 1.9 2014/11/04 11:27:31 jmcneill Exp $	*/
 
 /*-
  * Copyright (c) 2013 The NetBSD Foundation, Inc.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_work.c,v 1.7 2014/07/29 17:36:06 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_work.c,v 1.9 2014/11/04 11:27:31 jmcneill Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -123,13 +123,13 @@ alloc_ordered_workqueue(const char *name, int linux_flags)
 
 	wq = kmem_alloc(sizeof(*wq), KM_SLEEP);
 	error = workqueue_create(&wq->wq_workqueue, name, &linux_worker,
-	    wq, PRI_NONE, IPL_VM, flags);
+	    wq, PRI_NONE, IPL_SCHED, flags);
 	if (error) {
 		kmem_free(wq, sizeof(*wq));
 		return NULL;
 	}
 
-	mutex_init(&wq->wq_lock, MUTEX_DEFAULT, IPL_VM);
+	mutex_init(&wq->wq_lock, MUTEX_DEFAULT, IPL_SCHED);
 	cv_init(&wq->wq_cv, name);
 	TAILQ_INIT(&wq->wq_delayed);
 	wq->wq_current_work = NULL;
@@ -577,7 +577,9 @@ queue_delayed_work(struct workqueue_struct *wq, struct delayed_work *dw,
 			    &linux_worker_intr, dw);
 			dw->work.w_state = WORK_DELAYED;
 			dw->work.w_wq = wq;
+			mutex_enter(&wq->wq_lock);
 			TAILQ_INSERT_HEAD(&wq->wq_delayed, dw, dw_entry);
+			mutex_exit(&wq->wq_lock);
 		}
 		newly_queued = true;
 		break;
@@ -636,7 +638,9 @@ mod_delayed_work(struct workqueue_struct *wq, struct delayed_work *dw,
 			    &linux_worker_intr, dw);
 			dw->work.w_state = WORK_DELAYED;
 			dw->work.w_wq = wq;
+			mutex_enter(&wq->wq_lock);
 			TAILQ_INSERT_HEAD(&wq->wq_delayed, dw, dw_entry);
+			mutex_exit(&wq->wq_lock);
 		}
 		timer_modified = false;
 		break;

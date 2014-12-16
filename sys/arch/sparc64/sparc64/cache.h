@@ -1,4 +1,4 @@
-/*	$NetBSD: cache.h,v 1.23 2014/06/08 17:33:24 palle Exp $ */
+/*	$NetBSD: cache.h,v 1.26 2014/11/05 13:50:50 nakayama Exp $ */
 
 /*
  * Copyright (c) 2011 Matthew R. Green
@@ -82,9 +82,7 @@
  */
 
 #include <machine/psl.h>
-#ifdef SUN4V
 #include <machine/hypervisor.h>
-#endif
 
 /* Various cache size/line sizes */
 extern	int	ecache_min_line_size;
@@ -120,7 +118,6 @@ void sp_tlb_flush_pte_usiii(vaddr_t, int);
 void sp_tlb_flush_all_us(void);
 void sp_tlb_flush_all_usiii(void);
 
-#ifdef SUN4V
 static __inline__ void
 sp_tlb_flush_pte_sun4v(vaddr_t va, int ctx)
 {
@@ -129,21 +126,16 @@ sp_tlb_flush_pte_sun4v(vaddr_t va, int ctx)
 	if ( hv_rc != H_EOK )
 		panic("hv_mmu_demap_page(%p,%d) failed - rc = %" PRIx64 "\n", (void*)va, ctx, hv_rc);
 }
-#endif
 
 static __inline__ void
 sp_tlb_flush_pte(vaddr_t va, int ctx)
 {
-	if (CPU_ISSUN4U || CPU_ISSUN4US) {
-		if (CPU_IS_USIII_UP() || CPU_IS_SPARC64_V_UP())
-			sp_tlb_flush_pte_usiii(va, ctx);
-		else
-			sp_tlb_flush_pte_us(va, ctx);
-	}
-#ifdef SUN4V	
-	else
+	if (CPU_ISSUN4V)
 		sp_tlb_flush_pte_sun4v(va, ctx);
-#endif
+	else if (CPU_IS_USIII_UP() || CPU_IS_SPARC64_V_UP())
+		sp_tlb_flush_pte_usiii(va, ctx);
+	else
+		sp_tlb_flush_pte_us(va, ctx);
 }
 
 static __inline__ void

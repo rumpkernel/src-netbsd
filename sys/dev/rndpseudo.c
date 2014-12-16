@@ -1,4 +1,4 @@
-/*	$NetBSD: rndpseudo.c,v 1.21 2014/08/10 16:44:35 tls Exp $	*/
+/*	$NetBSD: rndpseudo.c,v 1.24 2014/11/09 20:29:58 christos Exp $	*/
 
 /*-
  * Copyright (c) 1997-2013 The NetBSD Foundation, Inc.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rndpseudo.c,v 1.21 2014/08/10 16:44:35 tls Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rndpseudo.c,v 1.24 2014/11/09 20:29:58 christos Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_compat_netbsd.h"
@@ -58,6 +58,7 @@ __KERNEL_RCSID(0, "$NetBSD: rndpseudo.c,v 1.21 2014/08/10 16:44:35 tls Exp $");
 #include <sys/cpu.h>
 #include <sys/stat.h>
 #include <sys/percpu.h>
+#include <sys/evcnt.h>
 
 #include <sys/rnd.h>
 #ifdef COMPAT_50
@@ -166,6 +167,13 @@ extern int		rnd_ready;		/* XXX */
 extern rndsave_t	*boot_rsp;		/* XXX */
 extern LIST_HEAD(, krndsource) rnd_sources;	/* XXX */
 
+static struct evcnt rndpseudo_soft = EVCNT_INITIALIZER(EVCNT_TYPE_MISC,
+    NULL, "rndpseudo", "open soft");
+static struct evcnt rndpseudo_hard = EVCNT_INITIALIZER(EVCNT_TYPE_MISC,
+    NULL, "rndpseudo", "open hard");
+EVCNT_ATTACH_STATIC(rndpseudo_soft);
+EVCNT_ATTACH_STATIC(rndpseudo_hard);
+
 /*
  * Generate a 32-bit counter.  This should be more machine dependent,
  * using cycle counters and the like when possible.
@@ -219,10 +227,12 @@ rndopen(dev_t dev, int flags, int fmt, struct lwp *l)
 	switch (minor(dev)) {
 	case RND_DEV_URANDOM:
 		hard = false;
+		rndpseudo_soft.ev_count++;
 		break;
 
 	case RND_DEV_RANDOM:
 		hard = true;
+		rndpseudo_hard.ev_count++;
 		break;
 
 	default:
@@ -360,7 +370,7 @@ rnd_read(struct file *fp, off_t *offp, struct uio *uio, kauth_cred_t cred,
 	if (uio->uio_resid == 0)
 		return 0;
 
-	struct rnd_ctx *const ctx = fp->f_data;
+	struct rnd_ctx *const ctx = fp->f_rndctx;
 	uint8_t *const buf = pool_cache_get(rnd_temp_buffer_cache, PR_WAITOK);
 
 	/*
@@ -526,6 +536,20 @@ krndsource_to_rndsource_est(krndsource_t *kr, rndsource_est_t *re)
 	re->dv_total = kr->value_delta.outbits;
 }
 
+static void
+krs_setflags(krndsource_t *kr, uint32_t flags, uint32_t mask)
+{
+	uint32_t oflags = kr->flags;
+
+	kr->flags &= ~mask;
+	kr->flags |= (flags & mask);
+
+	if (oflags & RND_FLAG_HASENABLE &&
+            ((oflags & RND_FLAG_NO_COLLECT) != (flags & RND_FLAG_NO_COLLECT))) {
+		kr->enable(kr, !(flags & RND_FLAG_NO_COLLECT));
+	}
+}
+
 int
 rnd_ioctl(struct file *fp, u_long cmd, void *addr)
 {
@@ -536,7 +560,7 @@ rnd_ioctl(struct file *fp, u_long cmd, void *addr)
 	rndstat_est_name_t *rsetnm;
 	rndctl_t *rctl;
 	rnddata_t *rnddata;
-	u_int32_t count, start;
+	uint32_t count, start;
 	int ret = 0;
 	int estimate_ok = 0, estimate = 0;
 
@@ -736,12 +760,9 @@ rnd_ioctl(struct file *fp, u_long cmd, void *addr)
 		if (rctl->type != 0xff) {
 			while (kr != NULL) {
 				if (kr->type == rctl->type) {
-					kr->flags &= ~rctl->mask;
-
-					kr->flags |=
-					    (rctl->flags & rctl->mask);
+					krs_setflags(kr,
+						     rctl->flags, rctl->mask);
 				}
-
 				kr = kr->list.le_next;
 			}
 			mutex_spin_exit(&rndpool_mtx);
@@ -755,9 +776,7 @@ rnd_ioctl(struct file *fp, u_long cmd, void *addr)
 			if (strncmp(kr->name, rctl->name,
 				    MIN(sizeof(kr->name),
                                         sizeof(rctl->name))) == 0) {
-				kr->flags &= ~rctl->mask;
-				kr->flags |= (rctl->flags & rctl->mask);
-
+				krs_setflags(kr, rctl->flags, rctl->mask);
 				mutex_spin_exit(&rndpool_mtx);
 				return (0);
 			}
@@ -817,7 +836,7 @@ rnd_ioctl(struct file *fp, u_long cmd, void *addr)
 static int
 rnd_poll(struct file *fp, int events)
 {
-	struct rnd_ctx *const ctx = fp->f_data;
+	struct rnd_ctx *const ctx = fp->f_rndctx;
 	int revents;
 
 	/*
@@ -846,7 +865,7 @@ rnd_poll(struct file *fp, int events)
 static int
 rnd_stat(struct file *fp, struct stat *st)
 {
-	struct rnd_ctx *const ctx = fp->f_data;
+	struct rnd_ctx *const ctx = fp->f_rndctx;
 
 	/* XXX lock, if cprng allocated?  why? */
 	memset(st, 0, sizeof(*st));
@@ -863,11 +882,11 @@ rnd_stat(struct file *fp, struct stat *st)
 static int
 rnd_close(struct file *fp)
 {
-	struct rnd_ctx *const ctx = fp->f_data;
+	struct rnd_ctx *const ctx = fp->f_rndctx;
 
 	if (ctx->rc_cprng != NULL)
 		cprng_strong_destroy(ctx->rc_cprng);
-	fp->f_data = NULL;
+	fp->f_rndctx = NULL;
 	pool_cache_put(rnd_ctx_cache, ctx);
 
 	return 0;
@@ -876,7 +895,7 @@ rnd_close(struct file *fp)
 static int
 rnd_kqfilter(struct file *fp, struct knote *kn)
 {
-	struct rnd_ctx *const ctx = fp->f_data;
+	struct rnd_ctx *const ctx = fp->f_rndctx;
 
 	return cprng_strong_kqfilter(rnd_ctx_cprng(ctx), kn);
 }

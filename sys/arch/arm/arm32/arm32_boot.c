@@ -1,4 +1,4 @@
-/*	$NetBSD: arm32_boot.c,v 1.7 2014/03/28 21:39:09 matt Exp $	*/
+/*	$NetBSD: arm32_boot.c,v 1.11 2014/12/13 16:11:01 jmcneill Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003, 2005  Genetec Corporation.  All rights reserved.
@@ -123,10 +123,11 @@
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(1, "$NetBSD: arm32_boot.c,v 1.7 2014/03/28 21:39:09 matt Exp $");
+__KERNEL_RCSID(1, "$NetBSD: arm32_boot.c,v 1.11 2014/12/13 16:11:01 jmcneill Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
+#include "opt_multiprocessor.h"
 
 #include <sys/param.h>
 #include <sys/reboot.h>
@@ -148,6 +149,10 @@ __KERNEL_RCSID(1, "$NetBSD: arm32_boot.c,v 1.7 2014/03/28 21:39:09 matt Exp $");
 
 #ifdef KGDB
 #include <sys/kgdb.h>
+#endif
+
+#ifdef MULTIPROCESSOR
+static kmutex_t cpu_hatch_lock;
 #endif
 
 vaddr_t
@@ -299,6 +304,10 @@ initarm_common(vaddr_t kvm_base, vsize_t kvm_size,
 		Debugger();
 #endif
 
+#ifdef MULTIPROCESSOR
+	mutex_init(&cpu_hatch_lock, MUTEX_DEFAULT, IPL_HIGH);
+#endif
+
 #ifdef VERBOSE_INIT_ARM
 	printf("done.\n");
 #endif
@@ -351,13 +360,13 @@ cpu_hatch(struct cpu_info *ci, cpuid_t cpuid, void (*md_cpu_init)(struct cpu_inf
 	printf(" stacks");
 #endif
 	set_stackptr(PSR_FIQ32_MODE,
-	    fiqstack.pv_va + cpu_index(ci) * FIQ_STACK_SIZE * PAGE_SIZE);
+	    fiqstack.pv_va + (cpu_index(ci) + 1) * FIQ_STACK_SIZE * PAGE_SIZE);
 	set_stackptr(PSR_IRQ32_MODE,
-	    irqstack.pv_va + cpu_index(ci) * IRQ_STACK_SIZE * PAGE_SIZE);
+	    irqstack.pv_va + (cpu_index(ci) + 1) * IRQ_STACK_SIZE * PAGE_SIZE);
 	set_stackptr(PSR_ABT32_MODE,
-	    abtstack.pv_va + cpu_index(ci) * ABT_STACK_SIZE * PAGE_SIZE);
+	    abtstack.pv_va + (cpu_index(ci) + 1) * ABT_STACK_SIZE * PAGE_SIZE);
 	set_stackptr(PSR_UND32_MODE,
-	    undstack.pv_va + cpu_index(ci) * UND_STACK_SIZE * PAGE_SIZE);
+	    undstack.pv_va + (cpu_index(ci) + 1) * UND_STACK_SIZE * PAGE_SIZE);
 
 	ci->ci_lastlwp = NULL;
 	ci->ci_pmap_lastuser = NULL;
@@ -382,6 +391,8 @@ cpu_hatch(struct cpu_info *ci, cpuid_t cpuid, void (*md_cpu_init)(struct cpu_inf
 	}
 #endif
 
+	mutex_enter(&cpu_hatch_lock);
+
 	aprint_naive("%s", device_xname(ci->ci_dev));
 	aprint_normal("%s", device_xname(ci->ci_dev));
 	identify_arm_cpu(ci->ci_dev, ci);
@@ -389,6 +400,8 @@ cpu_hatch(struct cpu_info *ci, cpuid_t cpuid, void (*md_cpu_init)(struct cpu_inf
 	printf(" vfp");
 #endif
 	vfp_attach(ci);
+
+	mutex_exit(&cpu_hatch_lock);
 
 #ifdef VERBOSE_INIT_ARM
 	printf(" interrupts");
@@ -408,6 +421,7 @@ cpu_hatch(struct cpu_info *ci, cpuid_t cpuid, void (*md_cpu_init)(struct cpu_inf
 	printf(" done!\n");
 #endif
 	atomic_and_32(&arm_cpu_mbox, ~(1 << cpuid));
+	membar_producer();
 	__asm __volatile("sev; sev; sev");
 }
 #endif /* MULTIPROCESSOR */

@@ -1,4 +1,4 @@
-/*	$NetBSD: rf_netbsdkintf.c,v 1.312 2014/07/25 08:10:38 dholland Exp $	*/
+/*	$NetBSD: rf_netbsdkintf.c,v 1.316 2014/11/14 14:29:16 oster Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 2008-2011 The NetBSD Foundation, Inc.
@@ -101,7 +101,7 @@
  ***********************************************************/
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rf_netbsdkintf.c,v 1.312 2014/07/25 08:10:38 dholland Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rf_netbsdkintf.c,v 1.316 2014/11/14 14:29:16 oster Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_compat_netbsd.h"
@@ -1090,6 +1090,7 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	case DIOCWLABEL:
 	case DIOCAWEDGE:
 	case DIOCDWEDGE:
+	case DIOCMWEDGES:
 	case DIOCSSTRATEGY:
 		if ((flag & FWRITE) == 0)
 			return (EBADF);
@@ -1112,6 +1113,7 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	case DIOCAWEDGE:
 	case DIOCDWEDGE:
 	case DIOCLWEDGES:
+	case DIOCMWEDGES:
 	case DIOCCACHESYNC:
 	case RAIDFRAME_SHUTDOWN:
 	case RAIDFRAME_REWRITEPARITY:
@@ -1530,6 +1532,10 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		}
 		for (j = d_cfg->cols, i = 0; i < d_cfg->nspares; i++, j++) {
 			d_cfg->spares[i] = raidPtr->Disks[j];
+			if (d_cfg->spares[i].status == rf_ds_rebuilding_spare) {
+				/* XXX: raidctl(8) expects to see this as a used spare */
+				d_cfg->spares[i].status = rf_ds_used_spare;
+			}
 		}
 		retcode = copyout(d_cfg, *ucfgp, sizeof(RF_DeviceConfig_t));
 		RF_Free(d_cfg, sizeof(RF_DeviceConfig_t));
@@ -1917,6 +1923,9 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	case DIOCLWEDGES:
 		return dkwedge_list(&rs->sc_dkdev,
 		    (struct dkwedge_list *)data, l);
+	case DIOCMWEDGES:
+		dkwedge_discover(&rs->sc_dkdev);
+		return 0;
 	case DIOCCACHESYNC:
 		return rf_sync_component_caches(raidPtr);
 
@@ -2365,7 +2374,10 @@ raidgetdefaultlabel(RF_Raid_t *raidPtr, struct raid_softc *rs,
 	memset(lp, 0, sizeof(*lp));
 
 	/* fabricate a label... */
-	lp->d_secperunit = raidPtr->totalSectors;
+	if (raidPtr->totalSectors > UINT32_MAX)
+		lp->d_secperunit = UINT32_MAX;
+	else
+		lp->d_secperunit = raidPtr->totalSectors;
 	lp->d_secsize = raidPtr->bytesPerSector;
 	lp->d_nsectors = raidPtr->Layout.dataSectorsPerStripe;
 	lp->d_ntracks = 4 * raidPtr->numCol;
@@ -2381,7 +2393,7 @@ raidgetdefaultlabel(RF_Raid_t *raidPtr, struct raid_softc *rs,
 	lp->d_flags = 0;
 
 	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = raidPtr->totalSectors;
+	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
 	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 	lp->d_npartitions = RAW_PART + 1;
 
@@ -2437,17 +2449,21 @@ raidgetdisklabel(dev_t dev)
 		 * same components are used, and old disklabel may used
 		 * if that is found.
 		 */
-		if (lp->d_secperunit != rs->sc_size)
+		if (lp->d_secperunit < UINT32_MAX ?
+		    lp->d_secperunit != rs->sc_size :
+		    lp->d_secperunit > rs->sc_size)
 			printf("raid%d: WARNING: %s: "
-			    "total sector size in disklabel (%" PRIu32 ") != "
-			    "the size of raid (%" PRIu64 ")\n", unit, rs->sc_xname,
-			    lp->d_secperunit, rs->sc_size);
+			    "total sector size in disklabel (%ju) != "
+			    "the size of raid (%ju)\n", unit, rs->sc_xname,
+			    (uintmax_t)lp->d_secperunit,
+			    (uintmax_t)rs->sc_size);
 		for (i = 0; i < lp->d_npartitions; i++) {
 			pp = &lp->d_partitions[i];
 			if (pp->p_offset + pp->p_size > rs->sc_size)
 				printf("raid%d: WARNING: %s: end of partition `%c' "
-				       "exceeds the size of raid (%" PRIu64 ")\n",
-				       unit, rs->sc_xname, 'a' + i, rs->sc_size);
+				       "exceeds the size of raid (%ju)\n",
+				       unit, rs->sc_xname, 'a' + i,
+				       (uintmax_t)rs->sc_size);
 		}
 	}
 

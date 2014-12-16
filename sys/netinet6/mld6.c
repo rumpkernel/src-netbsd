@@ -1,4 +1,4 @@
-/*	$NetBSD: mld6.c,v 1.59 2014/07/26 22:21:16 joerg Exp $	*/
+/*	$NetBSD: mld6.c,v 1.61 2014/11/12 03:24:25 ozaki-r Exp $	*/
 /*	$KAME: mld6.c,v 1.25 2001/01/16 14:14:18 itojun Exp $	*/
 
 /*
@@ -102,7 +102,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mld6.c,v 1.59 2014/07/26 22:21:16 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mld6.c,v 1.61 2014/11/12 03:24:25 ozaki-r Exp $");
 
 #include "opt_inet.h"
 
@@ -195,6 +195,8 @@ mld_starttimer(struct in6_multi *in6m)
 {
 	struct timeval now;
 
+	KASSERT(in6m->in6m_timer != IN6M_TIMER_UNDEF);
+
 	microtime(&now);
 	in6m->in6m_timer_expire.tv_sec = now.tv_sec + in6m->in6m_timer / hz;
 	in6m->in6m_timer_expire.tv_usec = now.tv_usec +
@@ -227,6 +229,9 @@ mld_timeo(void *arg)
 	mutex_enter(softnet_lock);
 	KERNEL_LOCK(1, NULL);
 
+	if (in6m->in6m_timer == IN6M_TIMER_UNDEF)
+		goto out;
+
 	in6m->in6m_timer = IN6M_TIMER_UNDEF;
 
 	switch (in6m->in6m_state) {
@@ -238,6 +243,7 @@ mld_timeo(void *arg)
 		break;
 	}
 
+out:
 	KERNEL_UNLOCK_ONE(NULL);
 	mutex_exit(softnet_lock);
 }
@@ -657,7 +663,7 @@ in6_addmulti(struct in6_addr *maddr6, struct ifnet *ifp,
 			return (NULL);
 		}
 		in6m->in6m_ia = ia;
-		IFAREF(&ia->ia_ifa); /* gain a reference */
+		ifaref(&ia->ia_ifa); /* gain a reference */
 		LIST_INSERT_HEAD(&ia->ia6_multiaddrs, in6m, in6m_entry);
 
 		/*
@@ -669,7 +675,7 @@ in6_addmulti(struct in6_addr *maddr6, struct ifnet *ifp,
 		if (*errorp) {
 			LIST_REMOVE(in6m, in6m_entry);
 			free(in6m, M_IPMADDR);
-			IFAFREE(&ia->ia_ifa);
+			ifafree(&ia->ia_ifa);
 			splx(s);
 			return (NULL);
 		}
@@ -719,7 +725,7 @@ in6_delmulti(struct in6_multi *in6m)
 		 */
 		LIST_REMOVE(in6m, in6m_entry);
 		if (in6m->in6m_ia != NULL) {
-			IFAFREE(&in6m->in6m_ia->ia_ifa); /* release reference */
+			ifafree(&in6m->in6m_ia->ia_ifa); /* release reference */
 			in6m->in6m_ia = NULL;
 		}
 
@@ -741,7 +747,12 @@ in6_delmulti(struct in6_multi *in6m)
 		 */
 		sockaddr_in6_init(&sin6, &in6m->in6m_addr, 0, 0, 0);
 		if_mcast_op(in6m->in6m_ifp, SIOCDELMULTI, sin6tosa(&sin6));
+
+		/* Tell mld_timeo we're halting the timer */
+		in6m->in6m_timer = IN6M_TIMER_UNDEF;
+		callout_halt(&in6m->in6m_timer_ch, softnet_lock);
 		callout_destroy(&in6m->in6m_timer_ch);
+
 		free(in6m, M_IPMADDR);
 	}
 	splx(s);
@@ -798,8 +809,8 @@ in6_savemkludge(struct in6_ifaddr *oia)
 		KASSERT(ia != oia);
 		while ((in6m = LIST_FIRST(&oia->ia6_multiaddrs)) != NULL) {
 			LIST_REMOVE(in6m, in6m_entry);
-			IFAREF(&ia->ia_ifa);
-			IFAFREE(&in6m->in6m_ia->ia_ifa);
+			ifaref(&ia->ia_ifa);
+			ifafree(&in6m->in6m_ia->ia_ifa);
 			in6m->in6m_ia = ia;
 			LIST_INSERT_HEAD(&ia->ia6_multiaddrs, in6m, in6m_entry);
 		}
@@ -815,7 +826,7 @@ in6_savemkludge(struct in6_ifaddr *oia)
 
 		while ((in6m = LIST_FIRST(&oia->ia6_multiaddrs)) != NULL) {
 			LIST_REMOVE(in6m, in6m_entry);
-			IFAFREE(&in6m->in6m_ia->ia_ifa); /* release reference */
+			ifafree(&in6m->in6m_ia->ia_ifa); /* release reference */
 			in6m->in6m_ia = NULL;
 			LIST_INSERT_HEAD(&mk->mk_head, in6m, in6m_entry);
 		}
@@ -842,7 +853,7 @@ in6_restoremkludge(struct in6_ifaddr *ia, struct ifnet *ifp)
 	while ((in6m = LIST_FIRST(&mk->mk_head)) != NULL) {
 		LIST_REMOVE(in6m, in6m_entry);
 		in6m->in6m_ia = ia;
-		IFAREF(&ia->ia_ifa);
+		ifaref(&ia->ia_ifa);
 		LIST_INSERT_HEAD(&ia->ia6_multiaddrs, in6m, in6m_entry);
 	}
 }

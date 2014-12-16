@@ -1,4 +1,4 @@
-/* $NetBSD: hdaudio.c,v 1.22 2014/07/25 08:10:38 dholland Exp $ */
+/* $NetBSD: hdaudio.c,v 1.24 2014/09/21 14:30:22 christos Exp $ */
 
 /*
  * Copyright (c) 2009 Precedence Technologies Ltd <support@precedence.co.uk>
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hdaudio.c,v 1.22 2014/07/25 08:10:38 dholland Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hdaudio.c,v 1.24 2014/09/21 14:30:22 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -44,6 +44,7 @@ __KERNEL_RCSID(0, "$NetBSD: hdaudio.c,v 1.22 2014/07/25 08:10:38 dholland Exp $"
 #include "hdaudiovar.h"
 #include "hdaudioreg.h"
 #include "hdaudioio.h"
+#include "hdaudio_verbose.h"
 
 /* #define	HDAUDIO_DEBUG */
 
@@ -1629,3 +1630,5 @@ hdaudio_modcmd(modcmd_t cmd, void *opaque)
 		return ENOTTY;
 	}
 }
+
+DEV_VERBOSE_DEFINE(hdaudio);

@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.c,v 1.116 2014/07/25 18:29:45 nakayama Exp $ */
+/*	$NetBSD: cpu.c,v 1.121 2014/12/05 11:34:00 nakayama Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -52,7 +52,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.116 2014/07/25 18:29:45 nakayama Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.121 2014/12/05 11:34:00 nakayama Exp $");
 
 #include "opt_multiprocessor.h"
 
@@ -74,14 +74,10 @@ __KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.116 2014/07/25 18:29:45 nakayama Exp $");
 #include <machine/openfirm.h>
 
 #include <sparc64/sparc64/cache.h>
-#ifdef SUN4V
 #include <sparc64/hypervisor.h>
-#endif
 
-#ifdef SUN4V
 #define SUN4V_MONDO_QUEUE_SIZE	32
 #define SUN4V_QUEUE_ENTRY_SIZE	64
-#endif
 
 int ecache_min_line_size;
 
@@ -140,7 +136,6 @@ cpuid_from_node(u_int cpu_node)
 		id = prom_getpropint(cpu_node, "portid", -1);
 	if (id == -1)
 		id = prom_getpropint(cpu_node, "cpuid", -1);
-#ifdef SUN4V	
 	if (CPU_ISSUN4V) {
 		int reg[4];
 		int* regp=reg;
@@ -152,7 +147,6 @@ cpuid_from_node(u_int cpu_node)
 		/* cpuid in the lower 24 bits - sun4v hypervisor arch */
 		id = reg[0] & 0x0fffffff;
 	}
-#endif	
 	if (id == -1)
 		panic("failed to determine cpuid");
 	
@@ -210,10 +204,8 @@ alloc_cpuinfo(u_int cpu_node)
 	cpi->ci_spinup = NULL;
 	cpi->ci_paddr = pa0;
 	cpi->ci_self = cpi;
-#ifdef SUN4V
 	if (CPU_ISSUN4V)
 		cpi->ci_mmfsa = pa0;
-#endif
 	cpi->ci_node = cpu_node;
 	cpi->ci_idepth = -1;
 	memset(cpi->ci_intrpending, -1, sizeof(cpi->ci_intrpending));
@@ -284,7 +276,6 @@ cpu_attach(device_t parent, device_t dev, void *aux)
 	struct cpu_info *ci;
 	const char *sep;
 	register int i, l;
-	uint64_t ver;
 	int bigcache, cachesize;
 	char buf[100];
 	int 	totalsize = 0;
@@ -349,11 +340,10 @@ cpu_attach(device_t parent, device_t dev, void *aux)
 	aprint_normal(": %s, CPU id %d\n", buf, ci->ci_cpuid);
 	aprint_naive("\n");
 	if (CPU_ISSUN4U || CPU_ISSUN4US) {
-		ver = getver();
 		aprint_normal_dev(dev, "manuf %x, impl %x, mask %x\n",
-		    (u_int)((ver & VER_MANUF) >> VER_MANUF_SHIFT),
-		    (u_int)((ver & VER_IMPL) >> VER_IMPL_SHIFT),
-		    (u_int)((ver & VER_MASK) >> VER_MASK_SHIFT));
+		    (u_int)GETVER_CPU_MANUF(),
+		    (u_int)GETVER_CPU_IMPL(),
+		    (u_int)GETVER_CPU_MASK());
 	}
 
 	if (ci->ci_system_clockrate[0] != 0) {
@@ -461,7 +451,6 @@ cpu_attach(device_t parent, device_t dev, void *aux)
 	 * CPU specific ipi setup
 	 * Currently only necessary for SUN4V
 	 */
-#ifdef SUN4V	
 	if (CPU_ISSUN4V) {
 		paddr_t pa = ci->ci_paddr;
 		int err;
@@ -487,7 +476,6 @@ cpu_attach(device_t parent, device_t dev, void *aux)
 		ci->ci_cpuset = pa;
 		pa += 64;
 	}
-#endif	
 	
 }
 
@@ -495,20 +483,16 @@ int
 cpu_myid(void)
 {
 	char buf[32];
-	int impl;
 
-#ifdef SUN4V
 	if (CPU_ISSUN4V) {
 		uint64_t myid;
 		hv_cpu_myid(&myid);
 		return myid;
 	}
-#endif
 	if (OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0 &&
 	    strcmp(buf, "SUNW,Ultra-Enterprise-10000") == 0)
 		return lduwa(0x1fff40000d0UL, ASI_PHYS_NON_CACHED);
-	impl = (getver() & VER_IMPL) >> VER_IMPL_SHIFT;
-	switch (impl) {
+	switch (GETVER_CPU_IMPL()) {
 		case IMPL_OLYMPUS_C:
 		case IMPL_JUPITER:
 			return CPU_JUPITERID;
@@ -545,19 +529,24 @@ cpu_boot_secondary_processors(void)
 	}
 
 	for (ci = cpus; ci != NULL; ci = ci->ci_next) {
-		if (ci->ci_cpuid == CPU_UPAID)
+		if (ci->ci_cpuid == cpu_myid())
 			continue;
 
 		cpu_pmap_prepare(ci, false);
 		cpu_args->cb_node = ci->ci_node;
 		cpu_args->cb_cpuinfo = ci->ci_paddr;
+		cpu_args->cb_cputyp = cputyp;
 		membar_Sync();
 
 		/* Disable interrupts and start another CPU. */
 		pstate = getpstate();
 		setpstate(PSTATE_KERN);
 
-		prom_startcpu(ci->ci_node, (void *)cpu_spinup_trampoline, 0);
+		int rc = prom_startcpu_by_cpuid(ci->ci_cpuid,
+		    (void *)cpu_spinup_trampoline, 0);
+		if (rc == -1)
+			prom_startcpu(ci->ci_node,
+			    (void *)cpu_spinup_trampoline, 0);
 
 		for (i = 0; i < 2000; i++) {
 			membar_Sync();

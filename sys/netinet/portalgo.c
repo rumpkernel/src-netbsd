@@ -1,4 +1,4 @@
-/*	$NetBSD: portalgo.c,v 1.5 2013/06/01 11:01:48 pooka Exp $	*/
+/*	$NetBSD: portalgo.c,v 1.7 2014/12/02 20:25:47 christos Exp $	*/
 
 /*
  * Copyright 2011 Vlad Balan
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: portalgo.c,v 1.5 2013/06/01 11:01:48 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: portalgo.c,v 1.7 2014/12/02 20:25:47 christos Exp $");
 
 #include "opt_inet.h"
 
@@ -408,8 +408,8 @@ algo_bsd(int algo, uint16_t *port, struct inpcb_hdr *inp_hdr, kauth_cred_t cred)
 }
 
 /*
- * The straightforward algorithm that calls random() in order to
- * compute the increment to the next port number.
+ * The straightforward algorithm that increments the port number
+ * by a random amount.
  */
 static int
 algo_random_start(int algo, uint16_t *port, struct inpcb_hdr *inp_hdr,
@@ -687,7 +687,7 @@ algo_doublehash(int algo, uint16_t *port, struct inpcb_hdr *inp_hdr,
 	/* first time initialization */
 	if (dhtable[0] == 0)
 		for (size_t i = 0; i < __arraycount(dhtable); i++)
-			dhtable[i] = random() & 0xffff;
+			dhtable[i] = cprng_fast32() & 0xffff;
 
 	/* Ephemeral port selection function */
 	num_ephemeral = mymax - mymin + 1;
@@ -796,21 +796,24 @@ portalgo_randport(uint16_t *port, struct inpcb_hdr *inp_hdr, kauth_cred_t cred)
 	switch (inp_hdr->inph_af) {
 #ifdef INET
 	case AF_INET: {
+		char buf[INET_ADDRSTRLEN];
 		struct inpcb *inp = (struct inpcb *)(void *)inp_hdr;
-		DPRINTF("local addr: %s\n", inet_ntoa(inp->inp_laddr));
+		DPRINTF("local addr: %s\n", IN_PRINT(buf, &inp->inp_laddr));
 		DPRINTF("local port: %d\n", inp->inp_lport);
-		DPRINTF("foreign addr: %s\n", inet_ntoa(inp->inp_faddr));
+		DPRINTF("foreign addr: %s\n", IN_PRINT(buf, &inp->inp_faddr));
 		DPRINTF("foreign port: %d\n", inp->inp_fport);
 		break;
 	}
 #endif
 #ifdef INET6
 	case AF_INET6: {
+		char buf[INET6_ADDRSTRLEN];
 		struct in6pcb *in6p = (struct in6pcb *)(void *)inp_hdr;
 
-		DPRINTF("local addr: %s\n", ip6_sprintf(&in6p->in6p_laddr));
+		DPRINTF("local addr: %s\n", IN6_PRINT(buf, &in6p->in6p_laddr));
 		DPRINTF("local port: %d\n", in6p->in6p_lport);
-		DPRINTF("foreign addr: %s\n", ip6_sprintf(&in6p->in6p_faddr));
+		DPRINTF("foreign addr: %s\n", IN6_PRINT(buf,
+		    &in6p->in6p_laddr));
 		DPRINTF("foreign port: %d\n", in6p->in6p_fport);
 		break;
 	}

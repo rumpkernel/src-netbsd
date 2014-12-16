@@ -1,4 +1,4 @@
-/*	$NetBSD: pci_subr.c,v 1.124 2014/06/09 11:08:05 msaitoh Exp $	*/
+/*	$NetBSD: pci_subr.c,v 1.133 2014/11/24 07:53:43 msaitoh Exp $	*/
 
 /*
  * Copyright (c) 1997 Zubin D. Dittia.  All rights reserved.
@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pci_subr.c,v 1.124 2014/06/09 11:08:05 msaitoh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pci_subr.c,v 1.133 2014/11/24 07:53:43 msaitoh Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_pci.h"
@@ -62,6 +62,10 @@ __KERNEL_RCSID(0, "$NetBSD: pci_subr.c,v 1.124 2014/06/09 11:08:05 msaitoh Exp $
 #include <dev/pci/pcireg.h>
 #ifdef _KERNEL
 #include <dev/pci/pcivar.h>
+#else
+#include <dev/pci/pci_verbose.h>
+#include <dev/pci/pcidevs.h>
+#include <dev/pci/pcidevs_data.h>
 #endif
 
 /*
@@ -88,7 +92,7 @@ static const struct pci_class pci_subclass_prehistoric[] = {
 
 /*
  * Class 0x01.
- * Mass strage controller
+ * Mass storage controller
  */
 
 /* ATA programming interface */
@@ -100,7 +104,16 @@ static const struct pci_class pci_interface_ata[] = {
 
 /* SATA programming interface */
 static const struct pci_class pci_interface_sata[] = {
+	{ "vendor specific",	PCI_INTERFACE_SATA_VND,		NULL,	},
 	{ "AHCI 1.0",		PCI_INTERFACE_SATA_AHCI10,	NULL,	},
+	{ "Serial Storage Bus Interface", PCI_INTERFACE_SATA_SSBI, NULL, },
+	{ NULL,			0,				NULL,	},
+};
+
+/* Flash programming interface */
+static const struct pci_class pci_interface_nvm[] = {
+	{ "vendor specific",	PCI_INTERFACE_NVM_VND,		NULL,	},
+	{ "NVMHCI 1.0",		PCI_INTERFACE_NVM_NVMHCI10,	NULL,	},
 	{ NULL,			0,				NULL,	},
 };
 
@@ -116,7 +129,8 @@ static const struct pci_class pci_subclass_mass_storage[] = {
 	{ "SATA",		PCI_SUBCLASS_MASS_STORAGE_SATA,
 	  pci_interface_sata, },
 	{ "SAS",		PCI_SUBCLASS_MASS_STORAGE_SAS,	NULL,	},
-	{ "NVM",		PCI_SUBCLASS_MASS_STORAGE_NVM,	NULL,	},
+	{ "Flash",		PCI_SUBCLASS_MASS_STORAGE_NVM,
+	  pci_interface_nvm,	},
 	{ "miscellaneous",	PCI_SUBCLASS_MASS_STORAGE_MISC,	NULL,	},
 	{ NULL,			0,				NULL,	},
 };
@@ -165,7 +179,7 @@ static const struct pci_class pci_subclass_multimedia[] = {
 	{ "video",		PCI_SUBCLASS_MULTIMEDIA_VIDEO,	NULL,	},
 	{ "audio",		PCI_SUBCLASS_MULTIMEDIA_AUDIO,	NULL,	},
 	{ "telephony",		PCI_SUBCLASS_MULTIMEDIA_TELEPHONY, NULL,},
-	{ "HD audio",		PCI_SUBCLASS_MULTIMEDIA_HDAUDIO, NULL,	},
+	{ "mixed mode",		PCI_SUBCLASS_MULTIMEDIA_HDAUDIO, NULL, },
 	{ "miscellaneous",	PCI_SUBCLASS_MULTIMEDIA_MISC,	NULL,	},
 	{ NULL,			0,				NULL,	},
 };
@@ -193,10 +207,17 @@ static const struct pci_class pci_interface_pcibridge[] = {
 	{ NULL,			0,				NULL,	},
 };
 
-/* Semi-transparent PCI-toPCI bridge programming interface */
+/* Semi-transparent PCI-to-PCI bridge programming interface */
 static const struct pci_class pci_interface_stpci[] = {
 	{ "primary side facing host",	PCI_INTERFACE_STPCI_PRIMARY, NULL, },
 	{ "secondary side facing host",	PCI_INTERFACE_STPCI_SECONDARY, NULL, },
+	{ NULL,			0,				NULL,	},
+};
+
+/* Advanced Switching programming interface */
+static const struct pci_class pci_interface_advsw[] = {
+	{ "custom interface",	PCI_INTERFACE_ADVSW_CUSTOM, NULL, },
+	{ "ASI-SIG",		PCI_INTERFACE_ADVSW_ASISIG, NULL, },
 	{ NULL,			0,				NULL,	},
 };
 
@@ -215,6 +236,8 @@ static const struct pci_class pci_subclass_bridge[] = {
 	{ "Semi-transparent PCI", PCI_SUBCLASS_BRIDGE_STPCI,
 	  pci_interface_stpci,	},
 	{ "InfiniBand",		PCI_SUBCLASS_BRIDGE_INFINIBAND,	NULL,	},
+	{ "advanced switching",	PCI_SUBCLASS_BRIDGE_ADVSW,
+	  pci_interface_advsw,	},
 	{ "miscellaneous",	PCI_SUBCLASS_BRIDGE_MISC,	NULL,	},
 	{ NULL,			0,				NULL,	},
 };
@@ -226,7 +249,7 @@ static const struct pci_class pci_subclass_bridge[] = {
 
 /* Serial controller programming interface */
 static const struct pci_class pci_interface_serial[] = {
-	{ "genric XT-compat",	PCI_INTERFACE_SERIAL_XT,	NULL,	},
+	{ "generic XT-compat",	PCI_INTERFACE_SERIAL_XT,	NULL,	},
 	{ "16450-compat",	PCI_INTERFACE_SERIAL_16450,	NULL,	},
 	{ "16550-compat",	PCI_INTERFACE_SERIAL_16550,	NULL,	},
 	{ "16650-compat",	PCI_INTERFACE_SERIAL_16650,	NULL,	},
@@ -241,8 +264,8 @@ static const struct pci_class pci_interface_parallel[] = {
 	{ "",			PCI_INTERFACE_PARALLEL,			NULL,},
 	{ "bi-directional",	PCI_INTERFACE_PARALLEL_BIDIRECTIONAL,	NULL,},
 	{ "ECP 1.X-compat",	PCI_INTERFACE_PARALLEL_ECP1X,		NULL,},
-	{ "IEEE1284",		PCI_INTERFACE_PARALLEL_IEEE1284,	NULL,},
-	{ "IEE1284 target",	PCI_INTERFACE_PARALLEL_IEEE1284_TGT,	NULL,},
+	{ "IEEE1284 controller", PCI_INTERFACE_PARALLEL_IEEE1284_CNTRL,	NULL,},
+	{ "IEEE1284 target",	PCI_INTERFACE_PARALLEL_IEEE1284_TGT,	NULL,},
 	{ NULL,			0,					NULL,},
 };
 
@@ -278,7 +301,7 @@ static const struct pci_class pci_subclass_communications[] = {
 
 /* PIC programming interface */
 static const struct pci_class pci_interface_pic[] = {
-	{ "genric 8259",	PCI_INTERFACE_PIC_8259,		NULL,	},
+	{ "generic 8259",	PCI_INTERFACE_PIC_8259,		NULL,	},
 	{ "ISA PIC",		PCI_INTERFACE_PIC_ISA,		NULL,	},
 	{ "EISA PIC",		PCI_INTERFACE_PIC_EISA,		NULL,	},
 	{ "IO APIC",		PCI_INTERFACE_PIC_IOAPIC,	NULL,	},
@@ -288,7 +311,7 @@ static const struct pci_class pci_interface_pic[] = {
 
 /* DMA programming interface */
 static const struct pci_class pci_interface_dma[] = {
-	{ "genric 8237",	PCI_INTERFACE_DMA_8237,		NULL,	},
+	{ "generic 8237",	PCI_INTERFACE_DMA_8237,		NULL,	},
 	{ "ISA",		PCI_INTERFACE_DMA_ISA,		NULL,	},
 	{ "EISA",		PCI_INTERFACE_DMA_EISA,		NULL,	},
 	{ NULL,			0,				NULL,	},
@@ -296,9 +319,10 @@ static const struct pci_class pci_interface_dma[] = {
 
 /* Timer programming interface */
 static const struct pci_class pci_interface_tmr[] = {
-	{ "genric 8254",	PCI_INTERFACE_TIMER_8254,	NULL,	},
+	{ "generic 8254",	PCI_INTERFACE_TIMER_8254,	NULL,	},
 	{ "ISA",		PCI_INTERFACE_TIMER_ISA,	NULL,	},
 	{ "EISA",		PCI_INTERFACE_TIMER_EISA,	NULL,	},
+	{ "HPET",		PCI_INTERFACE_TIMER_HPET,	NULL,	},
 	{ NULL,			0,				NULL,	},
 };
 
@@ -369,6 +393,7 @@ static const struct pci_class pci_subclass_processor[] = {
 	{ "PowerPC",		PCI_SUBCLASS_PROCESSOR_POWERPC, NULL,	},
 	{ "MIPS",		PCI_SUBCLASS_PROCESSOR_MIPS,	NULL,	},
 	{ "Co-processor",	PCI_SUBCLASS_PROCESSOR_COPROC,	NULL,	},
+	{ "miscellaneous",	PCI_SUBCLASS_PROCESSOR_MISC,	NULL,	},
 	{ NULL,			0,				NULL,	},
 };
 
@@ -429,7 +454,7 @@ static const struct pci_class pci_subclass_serialbus[] = {
  */
 static const struct pci_class pci_subclass_wireless[] = {
 	{ "IrDA",		PCI_SUBCLASS_WIRELESS_IRDA,	NULL,	},
-	{ "Consumer IR",	PCI_SUBCLASS_WIRELESS_CONSUMERIR, NULL,	},
+	{ "Consumer IR",/*XXX*/	PCI_SUBCLASS_WIRELESS_CONSUMERIR, NULL,	},
 	{ "RF",			PCI_SUBCLASS_WIRELESS_RF,	NULL,	},
 	{ "bluetooth",		PCI_SUBCLASS_WIRELESS_BLUETOOTH, NULL,	},
 	{ "broadband",		PCI_SUBCLASS_WIRELESS_BROADBAND, NULL,	},
@@ -487,7 +512,7 @@ static const struct pci_class pci_subclass_crypto[] = {
  */
 static const struct pci_class pci_subclass_dasp[] = {
 	{ "DPIO",		PCI_SUBCLASS_DASP_DPIO,		NULL,	},
-	{ "Time and Frequency",	PCI_SUBCLASS_DASP_TIMEFREQ,	NULL,	},
+	{ "performance counters", PCI_SUBCLASS_DASP_TIMEFREQ,	NULL,	},
 	{ "synchronization",	PCI_SUBCLASS_DASP_SYNC,		NULL,	},
 	{ "management",		PCI_SUBCLASS_DASP_MGMT,		NULL,	},
 	{ "miscellaneous",	PCI_SUBCLASS_DASP_MISC,		NULL,	},
@@ -538,96 +563,34 @@ static const struct pci_class pci_class[] = {
 	    NULL,						},
 };
 
-void pci_load_verbose(void);
-
-#if defined(_KERNEL)
-/*
- * In kernel, these routines are provided and linked via the
- * pciverbose module.
- */
-const char *pci_findvendor_stub(pcireg_t);
-const char *pci_findproduct_stub(pcireg_t);
-
-const char *(*pci_findvendor)(pcireg_t) = pci_findvendor_stub;
-const char *(*pci_findproduct)(pcireg_t) = pci_findproduct_stub;
-const char *pci_unmatched = "";
-#else
-/*
- * For userland we just set the vectors here.
- */
-const char *(*pci_findvendor)(pcireg_t id_reg) = pci_findvendor_real;
-const char *(*pci_findproduct)(pcireg_t id_reg) = pci_findproduct_real;
-const char *pci_unmatched = "unmatched ";
-#endif
-
-int pciverbose_loaded = 0;
-
-#if defined(_KERNEL)
-/*
- * Routine to load the pciverbose kernel module as needed
- */
-void
-pci_load_verbose(void)
-{
-
-	if (pciverbose_loaded == 0)
-		module_autoload("pciverbose", MODULE_CLASS_MISC);
-}
-
-const char *
-pci_findvendor_stub(pcireg_t id_reg)
-{
-
-	pci_load_verbose();
-	if (pciverbose_loaded)
-		return pci_findvendor(id_reg);
-	else
-		return NULL;
-}
-
-const char *
-pci_findproduct_stub(pcireg_t id_reg)
-{
-
-	pci_load_verbose();
-	if (pciverbose_loaded)
-		return pci_findproduct(id_reg);
-	else
-		return NULL;
-}
-#endif
+DEV_VERBOSE_DEFINE(pci);
 
 void
 pci_devinfo(pcireg_t id_reg, pcireg_t class_reg, int showclass, char *cp,
     size_t l)
 {
-	pci_vendor_id_t vendor;
-	pci_product_id_t product;
-	pci_class_t class;
+	pci_class_t pciclass;
 	pci_subclass_t subclass;
 	pci_interface_t interface;
 	pci_revision_t revision;
-	const char *unmatched = pci_unmatched;
-	const char *vendor_namep, *product_namep;
+	char vendor[PCI_VENDORSTR_LEN], product[PCI_PRODUCTSTR_LEN];
 	const struct pci_class *classp, *subclassp, *interfacep;
 	char *ep;
 
 	ep = cp + l;
 
-	vendor = PCI_VENDOR(id_reg);
-	product = PCI_PRODUCT(id_reg);
-
-	class = PCI_CLASS(class_reg);
+	pciclass = PCI_CLASS(class_reg);
 	subclass = PCI_SUBCLASS(class_reg);
 	interface = PCI_INTERFACE(class_reg);
 	revision = PCI_REVISION(class_reg);
 
-	vendor_namep = pci_findvendor(id_reg);
-	product_namep = pci_findproduct(id_reg);
+	pci_findvendor(vendor, sizeof(vendor), PCI_VENDOR(id_reg));
+	pci_findproduct(product, sizeof(product), PCI_VENDOR(id_reg),
+	    PCI_PRODUCT(id_reg));
 
 	classp = pci_class;
 	while (classp->name != NULL) {
-		if (class == classp->val)
+		if (pciclass == classp->val)
 			break;
 		classp++;
 	}
@@ -647,20 +610,12 @@ pci_devinfo(pcireg_t id_reg, pcireg_t class_reg, int showclass, char *cp,
 		interfacep++;
 	}
 
-	if (vendor_namep == NULL)
-		cp += snprintf(cp, ep - cp, "%svendor 0x%04x product 0x%04x",
-		    unmatched, vendor, product);
-	else if (product_namep != NULL)
-		cp += snprintf(cp, ep - cp, "%s %s", vendor_namep,
-		    product_namep);
-	else
-		cp += snprintf(cp, ep - cp, "%s product 0x%04x",
-		    vendor_namep, product);
+	cp += snprintf(cp, ep - cp, "%s %s", vendor, product);
 	if (showclass) {
 		cp += snprintf(cp, ep - cp, " (");
 		if (classp->name == NULL)
 			cp += snprintf(cp, ep - cp,
-			    "class 0x%02x, subclass 0x%02x", class, subclass);
+			    "class 0x%02x, subclass 0x%02x", pciclass, subclass);
 		else {
 			if (subclassp == NULL || subclassp->name == NULL)
 				cp += snprintf(cp, ep - cp,
@@ -735,17 +690,20 @@ pci_conf_print_common(
 {
 	const char *name;
 	const struct pci_class *classp, *subclassp;
+	char vendor[PCI_VENDORSTR_LEN];
+	char product[PCI_PRODUCTSTR_LEN];
 	pcireg_t rval;
 	unsigned int num;
 
 	rval = regs[o2i(PCI_ID_REG)];
-	name = pci_findvendor(rval);
+	name = pci_findvendor(vendor, sizeof(vendor), PCI_VENDOR(rval));
 	if (name)
 		printf("    Vendor Name: %s (0x%04x)\n", name,
 		    PCI_VENDOR(rval));
 	else
 		printf("    Vendor ID: 0x%04x\n", PCI_VENDOR(rval));
-	name = pci_findproduct(rval);
+	name = pci_findproduct(product, sizeof(product), PCI_VENDOR(rval),
+	    PCI_PRODUCT(rval));
 	if (name)
 		printf("    Device Name: %s (0x%04x)\n", name,
 		    PCI_PRODUCT(rval));
@@ -1009,6 +967,20 @@ pci_conf_print_regs(const pcireg_t *regs, int first, int pastlast)
 	}
 	if (neednl)
 		printf("\n");
+}
+
+static void
+pci_conf_print_agp_cap(const pcireg_t *regs, int capoff)
+{
+	pcireg_t rval;
+
+	printf("\n  AGP Capabilities Register\n");
+
+	rval = regs[o2i(capoff)];
+	printf("    Revision: %d.%d\n",
+	    PCI_CAP_AGP_MAJOR(rval), PCI_CAP_AGP_MINOR(rval));
+
+	/* XXX need more */
 }
 
 static const char *
@@ -1401,8 +1373,7 @@ pci_conf_print_pcie_cap(const pcireg_t *regs, int capoff)
 		printf("unknown\n");
 		break;
 	}
-	if (check_slot && (reg & PCIE_XCAP_SI) != 0)
-		printf("      Slot implemented\n");
+	onoff("Slot implemented", reg, PCIE_XCAP_SI);
 	printf("      Interrupt Message Number: %x\n",
 	    (unsigned int)((reg & PCIE_XCAP_IRQ) >> 27));
 
@@ -1663,6 +1634,7 @@ pci_conf_print_pcie_cap(const pcireg_t *regs, int capoff)
 		/* Root Capability Register */
 		printf("    Root Capability Register: %04x\n",
 		    reg >> 16);
+		onoff("CRS Software Visibility", reg, PCIE_RCR_CRS_SV);
 
 		/* Root Status Register */
 		reg = regs[o2i(capoff + PCIE_RSR)];
@@ -1839,6 +1811,35 @@ pci_conf_print_pciaf_cap(const pcireg_t *regs, int capoff)
 	onoff("Transaction Pending", reg, PCI_AFSR_TP);
 }
 
+static struct {
+	pcireg_t cap;
+	const char *name;
+	void (*printfunc)(const pcireg_t *, int);
+} pci_captab[] = {
+	{ PCI_CAP_RESERVED0,	"reserved",	NULL },
+	{ PCI_CAP_PWRMGMT,	"Power Management", pci_conf_print_pcipm_cap },
+	{ PCI_CAP_AGP,		"AGP",		pci_conf_print_agp_cap },
+	{ PCI_CAP_VPD,		"VPD",		NULL },
+	{ PCI_CAP_SLOTID,	"SlotID",	NULL },
+	{ PCI_CAP_MSI,		"MSI",		pci_conf_print_msi_cap }, 
+	{ PCI_CAP_CPCI_HOTSWAP,	"CompactPCI Hot-swapping", NULL },
+	{ PCI_CAP_PCIX,		"PCI-X",	pci_conf_print_pcix_cap },
+	{ PCI_CAP_LDT,		"HyperTransport", NULL },
+	{ PCI_CAP_VENDSPEC,	"Vendor-specific",
+	  pci_conf_print_vendspec_cap },
+	{ PCI_CAP_DEBUGPORT,	"Debug Port",	pci_conf_print_debugport_cap },
+	{ PCI_CAP_CPCI_RSRCCTL, "CompactPCI Resource Control", NULL },
+	{ PCI_CAP_HOTPLUG,	"Hot-Plug",	NULL },
+	{ PCI_CAP_SUBVENDOR,	"Subsystem vendor ID",
+	  pci_conf_print_subsystem_cap },
+	{ PCI_CAP_AGP8,		"AGP 8x",	NULL },
+	{ PCI_CAP_SECURE,	"Secure Device", NULL },
+	{ PCI_CAP_PCIEXPRESS,	"PCI Express",	pci_conf_print_pcie_cap },
+	{ PCI_CAP_MSIX,		"MSI-X",	pci_conf_print_msix_cap },
+	{ PCI_CAP_SATA,		"SATA",		NULL },
+	{ PCI_CAP_PCIAF,	"Advanced Features", pci_conf_print_pciaf_cap }
+};
+
 static void
 pci_conf_print_caplist(
 #ifdef _KERNEL
@@ -1847,11 +1848,16 @@ pci_conf_print_caplist(
     const pcireg_t *regs, int capoff)
 {
 	int off;
+	pcireg_t foundcap;
 	pcireg_t rval;
-	int pcie_off = -1, pcipm_off = -1, msi_off = -1, pcix_off = -1;
-	int vendspec_off = -1, msix_off = -1;
-	int debugport_off = -1, subsystem_off = -1, pciaf_off = -1;
+	bool foundtable[__arraycount(pci_captab)];
+	unsigned int i;
 
+	/* Clear table */
+	for (i = 0; i < __arraycount(pci_captab); i++)
+		foundtable[i] = false;
+
+	/* Print capability register's offset and the type first */
 	for (off = PCI_CAPLIST_PTR(regs[o2i(capoff)]);
 	     off != 0;
 	     off = PCI_CAPLIST_NEXT(regs[o2i(off)])) {
@@ -1859,113 +1865,39 @@ pci_conf_print_caplist(
 		printf("  Capability register at 0x%02x\n", off);
 
 		printf("    type: 0x%02x (", PCI_CAPLIST_CAP(rval));
-		switch (PCI_CAPLIST_CAP(rval)) {
-		case PCI_CAP_RESERVED0:
-			printf("reserved");
-			break;
-		case PCI_CAP_PWRMGMT:
-			printf("Power Management, rev. %s",
-			    pci_conf_print_pcipm_cap_pmrev(
-				    (rval >> 0) & 0x07));
-			pcipm_off = off;
-			break;
-		case PCI_CAP_AGP:
-			printf("AGP, rev. %d.%d",
-				PCI_CAP_AGP_MAJOR(rval),
-				PCI_CAP_AGP_MINOR(rval));
-			break;
-		case PCI_CAP_VPD:
-			printf("VPD");
-			break;
-		case PCI_CAP_SLOTID:
-			printf("SlotID");
-			break;
-		case PCI_CAP_MSI:
-			printf("MSI");
-			msi_off = off;
-			break;
-		case PCI_CAP_CPCI_HOTSWAP:
-			printf("CompactPCI Hot-swapping");
-			break;
-		case PCI_CAP_PCIX:
-			pcix_off = off;
-			printf("PCI-X");
-			break;
-		case PCI_CAP_LDT:
-			printf("LDT");
-			break;
-		case PCI_CAP_VENDSPEC:
-			vendspec_off = off;
-			printf("Vendor-specific");
-			break;
-		case PCI_CAP_DEBUGPORT:
-			printf("Debug Port");
-			debugport_off = off;
-			break;
-		case PCI_CAP_CPCI_RSRCCTL:
-			printf("CompactPCI Resource Control");
-			break;
-		case PCI_CAP_HOTPLUG:
-			printf("Hot-Plug");
-			break;
-		case PCI_CAP_SUBVENDOR:
-			printf("Subsystem ID");
-			subsystem_off = off;
-			break;
-		case PCI_CAP_AGP8:
-			printf("AGP 8x");
-			break;
-		case PCI_CAP_SECURE:
-			printf("Secure Device");
-			break;
-		case PCI_CAP_PCIEXPRESS:
-			printf("PCI Express");
-			pcie_off = off;
-			break;
-		case PCI_CAP_MSIX:
-			printf("MSI-X");
-			msix_off = off;
-			break;
-		case PCI_CAP_SATA:
-			printf("SATA");
-			break;
-		case PCI_CAP_PCIAF:
-			printf("Advanced Features");
-			pciaf_off = off;
-			break;
-		default:
-			printf("unknown");
-		}
-		printf(")\n");
+		foundcap = PCI_CAPLIST_CAP(rval);
+		if (foundcap < __arraycount(pci_captab)) {
+			printf("%s)\n", pci_captab[foundcap].name);
+			/* Mark as found */
+			foundtable[foundcap] = true;
+		} else
+			printf("unknown)\n");
 	}
-	if (pcipm_off != -1)
-		pci_conf_print_pcipm_cap(regs, pcipm_off);
-	/* XXX AGP */
-	/* XXX VPD */
-	/* XXX SLOTID */
-	if (msi_off != -1)
-		pci_conf_print_msi_cap(regs, msi_off);
-	/* XXX CPCI_HOTSWAP */
-	if (pcix_off != -1)
-		pci_conf_print_pcix_cap(regs, pcix_off);
-	/* XXX LDT */
-	if (vendspec_off != -1)
-		pci_conf_print_vendspec_cap(regs, vendspec_off);
-	if (debugport_off != -1)
-		pci_conf_print_debugport_cap(regs, debugport_off);
-	/* XXX CPCI_RSRCCTL */
-	/* XXX HOTPLUG */
-	if (subsystem_off != -1)
-		pci_conf_print_subsystem_cap(regs, subsystem_off);
-	/* XXX AGP8 */
-	/* XXX SECURE */
-	if (pcie_off != -1)
-		pci_conf_print_pcie_cap(regs, pcie_off);
-	if (msix_off != -1)
-		pci_conf_print_msix_cap(regs, msix_off);
-	/* XXX SATA */
-	if (pciaf_off != -1)
-		pci_conf_print_pciaf_cap(regs, pciaf_off);
+
+	/*
+	 * And then, print the detail of each capability registers
+	 * in capability value's order.
+	 */
+	for (i = 0; i < __arraycount(pci_captab); i++) {
+		if (foundtable[i] == false)
+			continue;
+
+		/*
+		 * The type was found. Search capability list again and
+		 * print all capabilities that the capabiliy type is
+		 * the same. This is required because some capabilities
+		 * appear multiple times (e.g. HyperTransport capability).
+		 */
+		for (off = PCI_CAPLIST_PTR(regs[o2i(capoff)]);
+		     off != 0;
+		     off = PCI_CAPLIST_NEXT(regs[o2i(off)])) {
+			rval = regs[o2i(off)];
+			foundcap = PCI_CAPLIST_CAP(rval);
+			if ((i == foundcap)
+			    && (pci_captab[foundcap].printfunc != NULL))
+				pci_captab[foundcap].printfunc(regs, off);
+		}
+	}
 }
 
 /* Print the Secondary Status Register. */
@@ -2375,13 +2307,13 @@ pci_conf_print(
 {
 	pcireg_t regs[o2i(256)];
 	int off, capoff, endoff, hdrtype;
-	const char *typename;
+	const char *type_name;
 #ifdef _KERNEL
-	void (*typeprintfn)(pci_chipset_tag_t, pcitag_t, const pcireg_t *,
+	void (*type_printfn)(pci_chipset_tag_t, pcitag_t, const pcireg_t *,
 	    int);
 	int sizebars;
 #else
-	void (*typeprintfn)(const pcireg_t *);
+	void (*type_printfn)(const pcireg_t *);
 #endif
 
 	printf("PCI configuration registers:\n");
@@ -2420,43 +2352,43 @@ pci_conf_print(
 	switch (hdrtype) {		/* XXX make a table, eventually */
 	case 0:
 		/* Standard device header */
-		typename = "\"normal\" device";
-		typeprintfn = &pci_conf_print_type0;
+		type_name = "\"normal\" device";
+		type_printfn = &pci_conf_print_type0;
 		capoff = PCI_CAPLISTPTR_REG;
 		endoff = 64;
 		break;
 	case 1:
 		/* PCI-PCI bridge header */
-		typename = "PCI-PCI bridge";
-		typeprintfn = &pci_conf_print_type1;
+		type_name = "PCI-PCI bridge";
+		type_printfn = &pci_conf_print_type1;
 		capoff = PCI_CAPLISTPTR_REG;
 		endoff = 64;
 		break;
 	case 2:
 		/* PCI-CardBus bridge header */
-		typename = "PCI-CardBus bridge";
-		typeprintfn = &pci_conf_print_type2;
+		type_name = "PCI-CardBus bridge";
+		type_printfn = &pci_conf_print_type2;
 		capoff = PCI_CARDBUS_CAPLISTPTR_REG;
 		endoff = 72;
 		break;
 	default:
-		typename = NULL;
-		typeprintfn = 0;
+		type_name = NULL;
+		type_printfn = 0;
 		capoff = -1;
 		endoff = 64;
 		break;
 	}
 	printf("  Type %d ", hdrtype);
-	if (typename != NULL)
-		printf("(%s) ", typename);
+	if (type_name != NULL)
+		printf("(%s) ", type_name);
 	printf("header:\n");
 	pci_conf_print_regs(regs, 16, endoff);
 	printf("\n");
-	if (typeprintfn) {
+	if (type_printfn) {
 #ifdef _KERNEL
-		(*typeprintfn)(pc, tag, regs, sizebars);
+		(*type_printfn)(pc, tag, regs, sizebars);
 #else
-		(*typeprintfn)(regs);
+		(*type_printfn)(regs);
 #endif
 	} else
 		printf("    Don't know how to pretty-print type %d header.\n",

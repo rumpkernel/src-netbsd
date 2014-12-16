@@ -1,4 +1,4 @@
-/*	$NetBSD: bus_dma.c,v 1.86 2014/04/10 02:44:05 matt Exp $	*/
+/*	$NetBSD: bus_dma.c,v 1.89 2014/11/09 09:18:07 skrll Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -35,7 +35,7 @@
 #include "opt_arm_bus_space.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.86 2014/04/10 02:44:05 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.89 2014/11/09 09:18:07 skrll Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -832,11 +832,13 @@ _bus_dmamap_sync_segment(vaddr_t va, paddr_t pa, vsize_t len, int ops, bool read
 	 */
 	case BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE:
 		STAT_INCR(sync_postreadwrite);
+		__asm __volatile("dmb" ::: "memory");;
 		cpu_dcache_inv_range(va, len);
 		cpu_sdcache_inv_range(va, pa, len);
 		break;
 	case BUS_DMASYNC_POSTREAD:
 		STAT_INCR(sync_postread);
+		__asm __volatile("dmb" ::: "memory");;
 		cpu_dcache_inv_range(va, len);
 		cpu_sdcache_inv_range(va, pa, len);
 		break;
@@ -1305,6 +1307,19 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 			}
 		}
 
+#ifdef PMAP_NEED_ALLOC_POOLPAGE
+		/*
+		 * The page can only be direct mapped if was allocated out
+		 * of the arm poolpage vm freelist.  
+		 */
+		int lcv = vm_physseg_find(atop(pa), NULL);
+		KASSERT(lcv != -1);
+		if (direct_mapable) {
+			direct_mapable =
+			    (arm_poolpage_vmfreelist == VM_PHYSMEM_PTR(lcv)->free_list);
+		}
+#endif
+
 		if (direct_mapable) {
 			*kvap = (void *)PMAP_MAP_POOLPAGE(pa);
 #ifdef DEBUG_DMA
@@ -1388,7 +1403,7 @@ _bus_dmamem_unmap(bus_dma_tag_t t, void *kva, size_t size)
 
 #ifdef __HAVE_MM_MD_DIRECT_MAPPED_PHYS
 	/*
-	 * Check to see if this used direct mapped memory.  Get it's physical
+	 * Check to see if this used direct mapped memory.  Get its physical
 	 * address and try to map it.  If the resultant matches the kva, then
 	 * it was and so we can just return since we have notice to free up.
 	 */

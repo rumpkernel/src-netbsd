@@ -1,4 +1,4 @@
-/*	$NetBSD: micphy.c,v 1.1 2014/02/26 04:13:44 ozaki-r Exp $	*/
+/*	$NetBSD: micphy.c,v 1.3 2014/09/26 08:05:00 ryo Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999, 2000 The NetBSD Foundation, Inc.
@@ -59,7 +59,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: micphy.c,v 1.1 2014/02/26 04:13:44 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: micphy.c,v 1.3 2014/09/26 08:05:00 ryo Exp $");
 
 #include "opt_mii.h"
 
@@ -219,7 +219,7 @@ micphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 
 static void micphy_writexreg(struct mii_softc *sc, uint32_t reg, uint32_t wval)
 {
-	int rval;
+	int rval __debugused;
 
 	PHY_WRITE(sc, XREG_CONTROL, XREG_CTL_SEL_WRITE | reg);
 	PHY_WRITE(sc, XREG_WRITE, wval);
