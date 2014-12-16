@@ -1,4 +1,4 @@
-# $NetBSD: suffixes.mk,v 1.1 2014/08/23 15:05:40 christos Exp $
+# $NetBSD: suffixes.mk,v 1.3 2014/08/30 22:21:08 sjg Exp $
 
 # Issues from PR 49086
 
@@ -42,43 +42,48 @@ all: issue10.e
 #
 # issue11.j should depend on issue11.i and issue11.second and issue11.i
 # should depend on issue11.h and issue11.first.  The bug was that
-# the dynamic sources were expanded before $(.PREFIX) and $(.TARGET) were
+# the dynamic sources were expanded before ${.PREFIX} and ${.TARGET} were
 # available, so they would have expanded to a null string.
 all: issue11.j
+
+# we need to clean for repeatable results
+.BEGIN: clean
+clean:
+	@rm -f issue* .[ab]*
 
 .SUFFIXES: .a .b .c
 
 .a .a.b .b.a:
-	@echo 'There should be no text after the colon: $(.IMPSRC)'
-	touch $(.TARGET)
+	@echo 'There should be no text after the colon: ${.IMPSRC}'
+	touch ${.TARGET}
 
 .c.d .d.c .d .d.e .e.d:
 	@echo 'first set'
-	cp $(.IMPSRC) $(.TARGET)
+	cp ${.IMPSRC} ${.TARGET}
 
 .SUFFIXES:
 .SUFFIXES: .c .d .e .f .g
 
 .e .e.f .f.e:
 	@echo 'second set'
-	cp $(.IMPSRC) $(.TARGET)
+	cp ${.IMPSRC} ${.TARGET}
 
 issue3.a:
 	@echo 'There is a bug if you see this.'
-	touch $(.TARGET)
+	touch ${.TARGET}
 
 issue5a.c issue5b.d issue5c.d issue5d.d issue5e.e issue10.d issue10.f:
-	touch $(.TARGET)
+	touch ${.TARGET}
 
 .SUFFIXES: .h .i .j
 
-.h.i: $(.PREFIX).first
-	@echo '.ALLSRC: $(.ALLSRC)'
-	cp $(.IMPSRC) $(.TARGET)
+.h.i: ${.PREFIX}.first
+	@echo '.ALLSRC: ${.ALLSRC}'
+	cp ${.IMPSRC} ${.TARGET}
 
-.i.j: $(.PREFIX).second
-	@echo '.ALLSRC: $(.ALLSRC)'
-	cp $(.IMPSRC) $(.TARGET)
+.i.j: ${.PREFIX}.second
+	@echo '.ALLSRC: ${.ALLSRC}'
+	cp ${.IMPSRC} ${.TARGET}
 
 issue11.h issue11.first issue11.second:
-	touch $(.TARGET)
+	touch ${.TARGET}

@@ -1,4 +1,4 @@
-/*	$NetBSD: pcap-bt-linux.c,v 1.1.1.4 2013/12/31 16:57:28 christos Exp $	*/
+/*	$NetBSD: pcap-bt-linux.c,v 1.2 2014/11/19 19:33:30 christos Exp $	*/
 
 /*
  * Copyright (c) 2006 Paolo Abeni (Italy)
@@ -33,11 +33,10 @@
  * By Paolo Abeni <paolo.abeni@email.it>
  *
  */
-#ifndef lint
-static const char rcsid[] _U_ =
-    "@(#) Header: /tcpdump/master/libpcap/pcap-bt-linux.c,v 1.15 2008-07-01 07:05:54 guy Exp  (LBL)";
-#endif
  
+#include <sys/cdefs.h>
+__RCSID("$NetBSD: pcap-bt-linux.c,v 1.2 2014/11/19 19:33:30 christos Exp $");
+
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif

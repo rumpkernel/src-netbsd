@@ -1,7 +1,7 @@
-#	$NetBSD: files,v 1.1102 2014/08/24 20:23:38 joerg Exp $
+#	$NetBSD: files,v 1.1121 2014/10/31 07:38:36 uebayasi Exp $
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
 
-version 	20140824
+version 	20141030
 
 #
 # device classes
@@ -153,6 +153,9 @@ defflag				COMPAT_VAX1K
 defflag				COMPAT_43
 defflag	opt_compat_netbsd.h	COMPAT_NOMID
 
+define	machdep
+defflag	opt_machdep.h		MACHDEP
+
 #
 # Cryptography support.  Include this early, since several things
 # use it.
@@ -294,9 +297,6 @@ include "conf/majors"
 
 # generic attributes
 #
-define	audiobus	{ }
-define	midibus		{ }
-define	midisyn
 define	videobus	{ }
 define	ata	        {[channel = -1]}
 define	sata
@@ -314,22 +314,10 @@ define 	pckbport	{[slot = -1]}
 define	pckbport_machdep_cnattach
 define	firmload
 
-# audio device attributes
-#
-define	mulaw
-define	auconv
-define	aurateconv
+include "dev/files.audio"
 
-# audio and midi devices, attaches to audio hardware driver
-#
-device	audio: audiodev
-attach	audio at audiobus
-device	midi
-attach	midi at midibus
-
-# console bell via audio device
-#
-define	audiobell
+# Base verbose vendor/product printing support
+file	dev/dev_verbose.c
 
 # video devices, attaches to video hardware driver
 #
@@ -704,6 +692,11 @@ file	dev/ic/hme.c			hme
 #
 device	gem: arp, ether, ifnet, mii
 file	dev/ic/gem.c			gem
+
+# Synopsis Designware GMAC core, as found on allwinner a20
+# and other SoCs
+device	awge: arp, ether, ifnet, mii
+file	dev/ic/dwc_gmac.c		awge
 
 # 8390-family Ethernet controllers
 #
@@ -1241,6 +1234,7 @@ device	xhci: usbus, usbroothub, usb_dma
 file	dev/usb/xhci.c			xhci			needs-flag
 
 # Mentor graphics OTG IP
+defflag	opt_motg.h	MOTG_ALLWINNER
 device	motg: usbus, usbroothub, usb_dma
 file	dev/usb/motg.c			motg			needs-flag
 
@@ -1477,298 +1471,9 @@ include "uvm/files.uvm"
 #
 include "secmodel/files.secmodel"
 
-#
-# kernel sources
-#
-file	compat/common/compat_mod.c	compat_netbsd | compat_netbsd32
-file	conf/debugsyms.c
-file	dev/auconv.c			auconv | mulaw
-file	dev/audio.c			audio | midi | midibus	needs-flag
-file	dev/audiobell.c			audiobell
-file	dev/aurateconv.c		aurateconv		needs-flag
-file	dev/bio.c			bio			needs-flag
-file	dev/ccd.c			ccd
-file	dev/cgd.c			cgd
-file	dev/cgd_crypto.c		cgd
-file	dev/clock_subr.c
-file	dev/clockctl.c			clockctl
-file	dev/dksubr.c			cgd | xbd | ccd | raid | dm
-file	dev/dkwedge/dk.c
-file	dev/dkwedge/dkwedge_apple.c	dkwedge_method_apple
-file	dev/dkwedge/dkwedge_bsdlabel.c	dkwedge_method_bsdlabel
-file	dev/dkwedge/dkwedge_gpt.c	dkwedge_method_gpt
-file	dev/dkwedge/dkwedge_mbr.c	dkwedge_method_mbr
-file	dev/firmload.c			firmload
-file	dev/fss.c			fss
-file	dev/keylock.c			keylock
-file	dev/lockstat.c			lockstat		needs-flag
-file	dev/md.c			md
-file	dev/midi.c			midi | midibus		needs-flag
-file	dev/midictl.c			midisyn
-file	dev/midisyn.c			midisyn
-file	dev/mm.c
-file	dev/mulaw.c			mulaw			needs-flag
-file	dev/nullcons_subr.c		nullcons		needs-flag
-file	dev/radio.c			radio			needs-flag
-file	dev/rndpseudo.c			rnd			needs-flag
-file	dev/sequencer.c			sequencer		needs-flag
-file	dev/video.c			video			needs-flag
-file	dev/vnd.c			vnd
-file	kern/bufq_disksort.c		bufq_disksort
-file	kern/bufq_fcfs.c		bufq_fcfs
-file	kern/bufq_priocscan.c		bufq_priocscan
-file	kern/bufq_readprio.c		bufq_readprio | new_bufq_strategy
-file	kern/core_elf32.c		exec_elf32
-file	kern/core_elf64.c		exec_elf64
-file	kern/core_netbsd.c		exec_aout | exec_coff | exec_ecoff
-file	kern/cnmagic.c
-file	kern/exec_aout.c		exec_aout
-file	kern/exec_ecoff.c		exec_ecoff
-file	kern/exec_elf32.c		exec_elf32
-file	kern/exec_elf64.c		exec_elf64
-file	kern/exec_script.c		exec_script
-file	kern/exec_subr.c
-file	kern/init_main.c
-file	kern/init_sysctl.c
-file	kern/init_sysctl_base.c
-file	kern/init_sysent.c
-file	kern/kern_acct.c
-file	kern/kern_auth.c
-file	kern/kern_cfglock.c
-file	kern/kern_clock.c
-file	kern/kern_condvar.c
-file	kern/kern_core.c		coredump
-file	kern/kern_cpu.c
-file	kern/kern_ctf.c			kdtrace_hooks
-file	kern/kern_descrip.c
-file	kern/kern_event.c
-file	kern/kern_exec.c
-file	kern/kern_exit.c
-file	kern/kern_fork.c
-file	kern/kern_idle.c
-file	kern/kern_hook.c
-file	kern/kern_kthread.c
-file	kern/kern_ktrace.c		ktrace
-file	kern/kern_ktrace_vfs.c		ktrace
-file	kern/kern_ksyms.c		ksyms | ddb | modular needs-flag
-file	kern/kern_lock.c
-file	kern/kern_lwp.c
-file	kern/kern_malloc.c
-file	kern/kern_module.c
-file	kern/kern_module_vfs.c
-file	kern/kern_mutex.c
-file	kern/kern_mutex_obj.c
-file	kern/kern_fileassoc.c		fileassoc
-file	kern/kern_ntptime.c
-file	kern/kern_pax.c			pax_mprotect | pax_segvguard | pax_aslr
-file	kern/kern_physio.c
-file	kern/kern_pmf.c
-file	kern/kern_proc.c
-file	kern/kern_prot.c
-file	kern/kern_ras.c
-file	kern/kern_rate.c
-file	kern/kern_resource.c
-file	kern/kern_rndpool.c
-file	kern/kern_rndq.c
-file	kern/kern_rndsink.c
-file	kern/kern_runq.c
-file	kern/kern_rwlock.c
-file	kern/kern_rwlock_obj.c
-file	kern/kern_sdt.c			kdtrace_hooks
-file	kern/kern_sig.c
-file	kern/kern_sleepq.c
-file	kern/kern_softint.c
-file	kern/kern_ssp.c
-file	kern/kern_stub.c
-file	kern/kern_subr.c
-file	kern/kern_synch.c
-file	kern/kern_syscall.c
-file	kern/kern_sysctl.c
-file	kern/kern_tc.c
-file	kern/kern_time.c
-file	kern/kern_timeout.c
-file	kern/kern_turnstile.c
-file	kern/kern_todr.c
-file	kern/kern_uidinfo.c
-file	kern/kern_uuid.c
-file	kern/kern_xxx.c
-file	kern/kgdb_stub.c		kgdb
-file	kern/sched_4bsd.c		sched_4bsd
-file	kern/sched_m2.c			sched_m2
-file	kern/subr_autoconf.c
-file	kern/subr_blist.c		vmswap
-file	kern/subr_bufq.c
-file	kern/subr_callback.c
-file	kern/subr_cprng.c
-file	kern/subr_cpufreq.c
-file	kern/subr_copy.c
-file	kern/subr_debug.c		debug
-file	kern/subr_device.c
-file	kern/subr_devsw.c
-file	kern/subr_disk.c
-file	kern/subr_disk_open.c
-file	kern/subr_evcnt.c
-file	kern/subr_exec_fd.c
-file	kern/subr_extent.c
-file	kern/subr_hash.c
-file	kern/subr_humanize.c
-file	kern/subr_iostat.c
-file	kern/subr_ipi.c
-file	kern/subr_kcpuset.c
-file	kern/subr_kmem.c
-file	kern/subr_kobj.c
-file	kern/subr_kobj_vfs.c
-file	kern/subr_lockdebug.c
-file	kern/subr_log.c
-file	kern/subr_lwp_specificdata.c
-file	kern/subr_once.c
-file	kern/subr_optstr.c
-file	kern/subr_pcq.c
-file	kern/subr_pcu.c
-file	kern/subr_percpu.c
-file	kern/subr_pool.c
-file	kern/subr_prf.c
-file	kern/subr_prof.c
-file	kern/subr_pserialize.c
-file	kern/subr_specificdata.c
-file	kern/subr_tftproot.c		tftproot
-file	kern/subr_time.c
-file	kern/subr_userconf.c		userconf
-file	kern/subr_vmem.c
-file	kern/subr_workqueue.c
-file	kern/subr_xcall.c
-file	kern/sys_aio.c			aio
-file	kern/sys_descrip.c
-file	kern/sys_generic.c
-file	kern/sys_module.c
-file	kern/sys_mqueue.c		mqueue
-file	kern/sys_lwp.c
-file	kern/sys_pipe.c			!pipe_socketpair
-file	kern/sys_pmc.c
-file	kern/sys_process.c		ptrace | ktrace
-file	kern/sys_pset.c
-file	kern/sys_select.c
-file	kern/sys_sig.c
-file	kern/sys_sched.c
-file	kern/sys_socket.c
-file	kern/syscalls.c			syscall_debug
-file	kern/sysv_ipc.c			sysvshm | sysvsem | sysvmsg
-file	kern/sysv_msg.c			sysvmsg
-file	kern/sysv_sem.c			sysvsem
-file	kern/sysv_shm.c			sysvshm
-file	kern/tty.c
-file	kern/tty_conf.c
-file	kern/tty_bsdpty.c		compat_bsdpty
-file	kern/tty_pty.c			pty 			needs-flag
-file	kern/tty_ptm.c			pty
-file	kern/tty_subr.c
-file	kern/tty_tty.c
-file	kern/uipc_accf.c
-file	kern/uipc_domain.c
-file	kern/uipc_mbuf.c
-file	kern/uipc_mbuf2.c
-file	net/link_proto.c
-file	kern/uipc_proto.c
-file	kern/uipc_sem.c
-file	kern/uipc_socket.c
-file	kern/uipc_socket2.c
-file	kern/uipc_syscalls.c
-file	kern/uipc_usrreq.c
-file	kern/vfs_bio.c
-file	kern/vfs_cache.c
-file	kern/vfs_cwd.c
-file	kern/vfs_dirhash.c
-file	kern/vfs_getcwd.c
-file	kern/vfs_hooks.c
-file	kern/vfs_init.c
-file	kern/vfs_lockf.c
-file	kern/vfs_lookup.c
-file	kern/vfs_mount.c
-file	kern/vfs_quotactl.c
-file	kern/vfs_subr.c
-file	kern/vfs_syscalls.c
-file	kern/vfs_trans.c
-file	kern/vfs_vnode.c
-file	kern/vfs_vnops.c
-file	kern/vfs_wapbl.c		wapbl
-file	kern/vfs_xattr.c
-file	kern/vnode_if.c
-file	miscfs/deadfs/dead_vfsops.c
-file	miscfs/deadfs/dead_vnops.c
-file	miscfs/fifofs/fifo_vnops.c
-file	miscfs/genfs/genfs_io.c
-file	miscfs/genfs/genfs_rename.c
-file	miscfs/genfs/genfs_vfsops.c
-file	miscfs/genfs/genfs_vnops.c
-file	miscfs/genfs/layer_subr.c	nullfs | overlay | umapfs
-file	miscfs/genfs/layer_vfsops.c	nullfs | overlay | umapfs
-file	miscfs/genfs/layer_vnops.c	nullfs | overlay | umapfs
-file	miscfs/specfs/spec_vnops.c
-file	miscfs/syncfs/sync_subr.c
-file	miscfs/syncfs/sync_vnops.c
+include "kern/files.kern"
 
-file	net/bpf.c			bpfilter
-file	net/bpf_filter.c		bpf_filter
-file	net/bpf_stub.c
-file	net/bsd-comp.c			ppp & ppp_bsdcomp
-file	net/if.c
-file	net/if_arcsubr.c		arcnet			needs-flag
-file	net/if_atmsubr.c		atm
-file	net/if_bridge.c			bridge			needs-flag
-file	net/bridgestp.c			bridge
-file	net/if_ecosubr.c		eco
-file	net/if_etherip.c		etherip			needs-flag
-file	net/if_ethersubr.c		ether | fddi | netatalk | token |
-					    wlan		needs-flag
-file	net/if_faith.c			faith & (inet | inet6)	needs-flag
-file	net/if_fddisubr.c		fddi			needs-flag
-file	net/if_gif.c			gif			needs-flag
-file	net/if_gre.c			gre			needs-flag
-file	net/if_hippisubr.c		hippi			needs-flag
-file	net/if_ieee1394subr.c		ieee1394
-file	net/if_loop.c			loop
-file	net/if_media.c
-file	net/if_mpls.c			ifmpls			needs-flag
-file	net/if_ppp.c			ppp			needs-flag
-file	net/if_srt.c			srt
-file	net/if_stf.c			stf & inet & inet6	needs-flag
-file	net/if_sl.c			sl			needs-flag
-file	net/if_spppsubr.c		sppp
-file	net/if_strip.c			strip			needs-flag
-file	net/if_tokensubr.c		token			needs-flag
-file	net/if_tap.c			tap
-file	net/if_tun.c			tun
-file	net/if_vlan.c			vlan			needs-flag
-file	net/if_pppoe.c			pppoe			needs-flag
-file	net/pfil.c
-file	net/ppp-deflate.c		ppp & ppp_deflate
-file	net/ppp_tty.c			ppp
-file	net/pktqueue.c
-file	net/net_stats.c
-file	net/radix.c
-file	net/raw_cb.c
-file	net/raw_usrreq.c
-file	net/route.c
-file	net/rtbl.c
-file	net/rtsock.c
-file	net/slcompress.c		sl | ppp | strip | (irip & irip_vj)
-file	net/zlib.c			(ppp & ppp_deflate) | opencrypto | vnd_compression | kdtrace_hooks
-file	netinet/accf_data.c		accf_data
-file	netinet/accf_http.c		accf_http
-file	netinet/cpu_in_cksum.c		(inet | inet6) & !cpu_in_cksum
-file	netinet/if_arp.c		arp | netatalk		needs-flag
-file	netinet/if_atm.c		atm
-file	netinet/in4_cksum.c		inet
-file	netinet/in_cksum.c		inet
-file	netinet/in_gif.c		gif & inet
-file	netinet/ip_carp.c		carp & (inet | inet6)	needs-flag
-file	netinet/ip_ecn.c		ipsec | gif | stf
-file	netinet/ip_encap.c		inet | inet6
-file	netinet/ip_etherip.c		etherip & inet
-file	netinet6/ip6_etherip.c		etherip & inet6
-file	netinet6/in6_gif.c		gif & inet6
-
-include "netisdn/files.i4b"
+include "net/files.net"
 
 # Game adapter (joystick)
 device	joy
@@ -1779,8 +1484,6 @@ file	dev/ic/joy.c			joy needs-flag
 defpseudo filemon
 file	dev/filemon/filemon.c		filemon
 file	dev/filemon/filemon_wrapper.c	filemon
-
-include	"net/agr/files.agr"
 
 #
 # General Purpose Input/Output framework
@@ -1830,14 +1533,7 @@ include "dev/nor/files.nor"
 #
 include "dev/iscsi/files.iscsi"
 
-# Atheros AR9k (802.11a/g/n) driver
-defflag opt_athn.h	ATHN_DEBUG
-device	athn: arp, ether, ifnet, wlan
-file	dev/ic/athn.c			athn
-file	dev/ic/arn5008.c		athn
-file	dev/ic/arn5416.c		athn
-file	dev/ic/arn9003.c		athn
-file	dev/ic/arn9280.c		athn
-file	dev/ic/arn9285.c		athn
-file	dev/ic/arn9287.c		athn
-file	dev/ic/arn9380.c		athn
+#
+# athn
+#
+include "dev/ic/files.athn"

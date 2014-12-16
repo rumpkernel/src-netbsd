@@ -1,4 +1,4 @@
-# $NetBSD: Makefile,v 1.48 2014/08/24 17:17:24 apb Exp $
+# $NetBSD: Makefile,v 1.51 2014/10/20 23:21:11 sjg Exp $
 #
 # Unit tests for make(1)
 # The main targets are:
@@ -24,7 +24,6 @@ TESTNAMES= \
 	comment \
 	cond1 \
 	error \
-	escape \
 	export \
 	export-all \
 	export-env \
@@ -33,7 +32,6 @@ TESTNAMES= \
 	forloop \
 	forsubst \
 	hash \
-	impsrc \
 	misc \
 	moderrs \
 	modmatch \
@@ -42,11 +40,8 @@ TESTNAMES= \
 	modts \
 	modword \
 	order \
-	phony-end \
 	posix \
-	posix1 \
 	qequals \
-	suffixes \
 	sunshcmd \
 	sysv \
 	ternary \
@@ -55,6 +50,14 @@ TESTNAMES= \
 	varcmd \
 	varmisc \
 	varshell
+
+# these tests were broken by referting POSIX chanegs
+STRICT_POSIX_TESTS = \
+	escape \
+	impsrc \
+	phony-end \
+	posix1 \
+	suffixes
 
 # Override make flags for certain tests
 flags.doterror=
@@ -66,7 +69,7 @@ all: ${OUTFILES}
 
 CLEANFILES += *.rawout *.out *.status *.tmp *.core *.tmp
 CLEANFILES += obj*.[och] lib*.a		# posix1.mk
-CLEANFILES += issue*			# suffixes.mk
+CLEANFILES += issue* .[ab]*		# suffixes.mk
 CLEANRECURSIVE += dir dummy		# posix1.mk
 
 clean:
@@ -126,5 +129,9 @@ accept:
 	  || { echo "Replacing $${test}.exp" ; \
 	       cp $${test}.out ${UNIT_TESTS}/$${test}.exp ; } \
 	done
+
+.if exists(${TEST_MAKE})
+${TESTNAMES:S/$/.rawout/}: ${TEST_MAKE}
+.endif
 
 .-include <bsd.obj.mk>

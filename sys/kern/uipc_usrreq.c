@@ -1,4 +1,4 @@
-/*	$NetBSD: uipc_usrreq.c,v 1.169 2014/08/09 05:33:00 rtr Exp $	*/
+/*	$NetBSD: uipc_usrreq.c,v 1.172 2014/10/08 16:13:02 taca Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2000, 2004, 2008, 2009 The NetBSD Foundation, Inc.
@@ -96,7 +96,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uipc_usrreq.c,v 1.169 2014/08/09 05:33:00 rtr Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uipc_usrreq.c,v 1.172 2014/10/08 16:13:02 taca Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -927,8 +927,6 @@ makeun(struct mbuf *nam, size_t *addrlen) {
 	sun = malloc(*addrlen, M_SONAME, M_WAITOK);
 	m_copydata(nam, 0, nam->m_len, (void *)sun);
 	*(((char *)sun) + nam->m_len) = '\0';
-	sun->sun_len = strlen(sun->sun_path) +
-	    offsetof(struct sockaddr_un, sun_path);
 	return sun;
 }
 
@@ -1408,7 +1406,7 @@ unp_externalize(struct mbuf *rights, struct lwp *l, int flags)
 		 * to access.
 		 */
 		if (p->p_cwdi->cwdi_rdir != NULL && fp->f_type == DTYPE_VNODE) {
-			vnode_t *vp = (vnode_t *)fp->f_data;
+			vnode_t *vp = fp->f_vnode;
 			if ((vp->v_type == VDIR) &&
 			    !vn_isunder(vp, p->p_cwdi->cwdi_rdir, l)) {
 				error = EPERM;
@@ -1645,7 +1643,7 @@ unp_gc(file_t *dp)
 	extern	struct domain unixdomain;
 	file_t *fp, *np;
 	struct socket *so, *so1;
-	u_int i, old, new;
+	u_int i, oflags, rflags;
 	bool didwork;
 
 	KASSERT(curlwp == unp_thread_lwp);
@@ -1679,10 +1677,10 @@ unp_gc(file_t *dp)
 	 */
 	unp_defer = 0;
 	LIST_FOREACH(fp, &filehead, f_list) {
-		for (old = fp->f_flag;; old = new) {
-			new = atomic_cas_uint(&fp->f_flag, old,
-			    (old | FSCAN) & ~(FMARK|FDEFER));
-			if (__predict_true(old == new)) {
+		for (oflags = fp->f_flag;; oflags = rflags) {
+			rflags = atomic_cas_uint(&fp->f_flag, oflags,
+			    (oflags | FSCAN) & ~(FMARK|FDEFER));
+			if (__predict_true(oflags == rflags)) {
 				break;
 			}
 		}
@@ -1717,7 +1715,7 @@ unp_gc(file_t *dp)
 			atomic_or_uint(&fp->f_flag, FMARK);
 
 			if (fp->f_type != DTYPE_SOCKET ||
-			    (so = fp->f_data) == NULL ||
+			    (so = fp->f_socket) == NULL ||
 			    so->so_proto->pr_domain != &unixdomain ||
 			    (so->so_proto->pr_flags & PR_RIGHTS) == 0) {
 				mutex_exit(&fp->f_lock);
@@ -1798,7 +1796,7 @@ unp_gc(file_t *dp)
 		 * This will cause files referenced only by the
 		 * socket to be queued for close.
 		 */
-		so = fp->f_data;
+		so = fp->f_socket;
 		solock(so);
 		sorflush(so);
 		sounlock(so);

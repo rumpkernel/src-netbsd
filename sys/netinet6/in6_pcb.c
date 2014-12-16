@@ -1,4 +1,4 @@
-/*	$NetBSD: in6_pcb.c,v 1.128 2014/08/05 05:24:27 rtr Exp $	*/
+/*	$NetBSD: in6_pcb.c,v 1.134 2014/11/25 19:09:13 seanb Exp $	*/
 /*	$KAME: in6_pcb.c,v 1.84 2001/02/08 18:02:08 itojun Exp $	*/
 
 /*
@@ -62,14 +62,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: in6_pcb.c,v 1.128 2014/08/05 05:24:27 rtr Exp $");
+__KERNEL_RCSID(0, "$NetBSD: in6_pcb.c,v 1.134 2014/11/25 19:09:13 seanb Exp $");
 
 #include "opt_inet.h"
 #include "opt_ipsec.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
@@ -229,9 +228,12 @@ in6_pcbbind_addr(struct in6pcb *in6p, struct sockaddr_in6 *sin6, struct lwp *l)
 			sin.sin_family = AF_INET;
 			bcopy(&sin6->sin6_addr.s6_addr32[3],
 			    &sin.sin_addr, sizeof(sin.sin_addr));
-			if (ifa_ifwithaddr((struct sockaddr *)&sin) == 0)
+			if (!IN_MULTICAST(sin.sin_addr.s_addr) &&
+			    ifa_ifwithaddr((struct sockaddr *)&sin) == 0)
 				return EADDRNOTAVAIL;
 		}
+	} else if (IN6_IS_ADDR_MULTICAST(&sin6->sin6_addr)) {
+		// succeed
 	} else if (!IN6_IS_ADDR_UNSPECIFIED(&sin6->sin6_addr)) {
 		struct ifaddr *ia = NULL;
 
@@ -305,7 +307,7 @@ in6_pcbbind_port(struct in6pcb *in6p, struct sockaddr_in6 *sin6, struct lwp *l)
 		 * and a multicast address is bound on both
 		 * new and duplicated sockets.
 		 */
-		if (so->so_options & SO_REUSEADDR)
+		if (so->so_options & (SO_REUSEADDR | SO_REUSEPORT))
 			reuseport = SO_REUSEADDR|SO_REUSEPORT;
 	}
 
@@ -617,9 +619,10 @@ in6_pcbdetach(struct in6pcb *in6p)
 		free(in6p->in6p_outputopts, M_IP6OPT);
 	}
 	rtcache_free(&in6p->in6p_route);
+	ip6_freemoptions(in6p->in6p_moptions);
+	ip_freemoptions(in6p->in6p_v4moptions);
 	sofree(so);				/* drops the socket's lock */
 
-	ip6_freemoptions(in6p->in6p_moptions);
 	pool_put(&in6pcb_pool, in6p);
 	mutex_enter(softnet_lock);		/* reacquire it */
 }
@@ -845,6 +848,7 @@ in6_pcbpurgeif0(struct inpcbtable *table, struct ifnet *ifp)
 				}
 			}
 		}
+		in_purgeifmcast(in6p->in6p_v4moptions, ifp);
 	}
 }
 

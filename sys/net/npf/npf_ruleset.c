@@ -1,4 +1,4 @@
-/*	$NetBSD: npf_ruleset.c,v 1.37 2014/08/11 01:54:12 rmind Exp $	*/
+/*	$NetBSD: npf_ruleset.c,v 1.40 2014/11/30 01:37:53 rmind Exp $	*/
 
 /*-
  * Copyright (c) 2009-2013 The NetBSD Foundation, Inc.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: npf_ruleset.c,v 1.37 2014/08/11 01:54:12 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: npf_ruleset.c,v 1.40 2014/11/30 01:37:53 rmind Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -216,6 +216,9 @@ npf_ruleset_lookup(npf_ruleset_t *rlset, const char *name)
 	return rl;
 }
 
+/*
+ * npf_ruleset_add: insert dynamic rule into the (active) ruleset.
+ */
 int
 npf_ruleset_add(npf_ruleset_t *rlset, const char *rname, npf_rule_t *rl)
 {
@@ -273,6 +276,9 @@ npf_ruleset_add(npf_ruleset_t *rlset, const char *rname, npf_rule_t *rl)
 	return 0;
 }
 
+/*
+ * npf_ruleset_remove: remove the dynamic rule given the rule ID.
+ */
 int
 npf_ruleset_remove(npf_ruleset_t *rlset, const char *rname, uint64_t id)
 {
@@ -294,6 +300,9 @@ npf_ruleset_remove(npf_ruleset_t *rlset, const char *rname, uint64_t id)
 	return ENOENT;
 }
 
+/*
+ * npf_ruleset_remkey: remove the dynamic rule given the rule key.
+ */
 int
 npf_ruleset_remkey(npf_ruleset_t *rlset, const char *rname,
     const void *key, size_t len)
@@ -320,6 +329,9 @@ npf_ruleset_remkey(npf_ruleset_t *rlset, const char *rname,
 	return ENOENT;
 }
 
+/*
+ * npf_ruleset_list: serialise and return the dynamic rules.
+ */
 prop_dictionary_t
 npf_ruleset_list(npf_ruleset_t *rlset, const char *rname)
 {
@@ -363,6 +375,10 @@ npf_ruleset_list(npf_ruleset_t *rlset, const char *rname)
 	return rgdict;
 }
 
+/*
+ * npf_ruleset_flush: flush the dynamic rules in the ruleset by inserting
+ * them into the G/C list.
+ */
 int
 npf_ruleset_flush(npf_ruleset_t *rlset, const char *rname)
 {
@@ -379,6 +395,23 @@ npf_ruleset_flush(npf_ruleset_t *rlset, const char *rname)
 	return 0;
 }
 
+/*
+ * npf_ruleset_gc: destroy the rules in G/C list.
+ */
+void
+npf_ruleset_gc(npf_ruleset_t *rlset)
+{
+	npf_rule_t *rl;
+
+	while ((rl = LIST_FIRST(&rlset->rs_gc)) != NULL) {
+		LIST_REMOVE(rl, r_aentry);
+		npf_rule_free(rl);
+	}
+}
+
+/*
+ * npf_ruleset_export: serialise and return the static rules.
+ */
 int
 npf_ruleset_export(const npf_ruleset_t *rlset, prop_array_t rules)
 {
@@ -409,41 +442,14 @@ npf_ruleset_export(const npf_ruleset_t *rlset, prop_array_t rules)
 	return error;
 }
 
-void
-npf_ruleset_gc(npf_ruleset_t *rlset)
-{
-	npf_rule_t *rl;
-
-	while ((rl = LIST_FIRST(&rlset->rs_gc)) != NULL) {
-		LIST_REMOVE(rl, r_aentry);
-		npf_rule_free(rl);
-	}
-}
-
-/*
- * npf_ruleset_cmpnat: find a matching NAT policy in the ruleset.
- */
-static inline npf_rule_t *
-npf_ruleset_cmpnat(npf_ruleset_t *rlset, npf_natpolicy_t *mnp)
-{
-	npf_rule_t *rl;
-
-	/* Find a matching NAT policy in the old ruleset. */
-	LIST_FOREACH(rl, &rlset->rs_all, r_aentry) {
-		if (rl->r_natp && npf_nat_cmppolicy(rl->r_natp, mnp))
-			break;
-	}
-	return rl;
-}
-
 /*
  * npf_ruleset_reload: prepare the new ruleset by scanning the active
- * ruleset and 1) sharing the dynamic rules 2) sharing NAT policies.
+ * ruleset and: 1) sharing the dynamic rules 2) sharing NAT policies.
  *
  * => The active (old) ruleset should be exclusively locked.
  */
 void
-npf_ruleset_reload(npf_ruleset_t *newset, npf_ruleset_t *oldset)
+npf_ruleset_reload(npf_ruleset_t *newset, npf_ruleset_t *oldset, bool load)
 {
 	npf_rule_t *rg, *rl;
 	uint64_t nid = 0;
@@ -480,6 +486,14 @@ npf_ruleset_reload(npf_ruleset_t *newset, npf_ruleset_t *oldset)
 	}
 
 	/*
+	 * If performing the load of connections then NAT policies may
+	 * already have translated connections associated with them and
+	 * we should not share or inherit anything.
+	 */
+	if (load)
+		return;
+
+	/*
 	 * Scan all rules in the new ruleset and share NAT policies.
 	 * Also, assign a unique ID for each policy here.
 	 */
@@ -492,18 +506,30 @@ npf_ruleset_reload(npf_ruleset_t *newset, npf_ruleset_t *oldset)
 			continue;
 		}
 
+		/*
+		 * First, try to share the active port map.  If this
+		 * policy will be unused, npf_nat_freepolicy() will
+		 * drop the reference.
+		 */
+		npf_ruleset_sharepm(oldset, np);
+
 		/* Does it match with any policy in the active ruleset? */
-		if ((actrl = npf_ruleset_cmpnat(oldset, np)) == NULL) {
+		LIST_FOREACH(actrl, &oldset->rs_all, r_aentry) {
+			if (!actrl->r_natp)
+				continue;
+			if ((actrl->r_attr & NPF_RULE_KEEPNAT) != 0)
+				continue;
+			if (npf_nat_cmppolicy(actrl->r_natp, np))
+				break;
+		}
+		if (!actrl) {
+			/* No: just set the ID and continue. */
 			npf_nat_setid(np, ++nid);
 			continue;
 		}
 
-		/*
-		 * Inherit the matching NAT policy and check other ones
-		 * in the new ruleset for sharing the portmap.
-		 */
+		/* Yes: inherit the matching NAT policy. */
 		rl->r_natp = actrl->r_natp;
-		npf_ruleset_sharepm(newset, rl->r_natp);
 		npf_nat_setid(rl->r_natp, ++nid);
 
 		/*
@@ -519,19 +545,23 @@ npf_ruleset_reload(npf_ruleset_t *newset, npf_ruleset_t *oldset)
 	newset->rs_idcnt = oldset->rs_idcnt;
 }
 
+/*
+ * npf_ruleset_sharepm: attempt to share the active NAT portmap.
+ */
 npf_rule_t *
 npf_ruleset_sharepm(npf_ruleset_t *rlset, npf_natpolicy_t *mnp)
 {
 	npf_natpolicy_t *np;
 	npf_rule_t *rl;
 
-	/* Find a matching NAT policy in the old ruleset. */
+	/*
+	 * Scan the NAT policies in the ruleset and match with the
+	 * given policy based on the translation IP address.  If they
+	 * match - adjust the given NAT policy to use the active NAT
+	 * portmap.  In such case the reference on the old portmap is
+	 * dropped and acquired on the active one.
+	 */
 	LIST_FOREACH(rl, &rlset->rs_all, r_aentry) {
-		/*
-		 * NAT policy might not yet be set during the creation of
-		 * the ruleset (in such case, rule is for our policy), or
-		 * policies might be equal due to rule exchange on reload.
-		 */
 		np = rl->r_natp;
 		if (np == NULL || np == mnp)
 			continue;

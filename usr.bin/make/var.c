@@ -1,4 +1,4 @@
-/*	$NetBSD: var.c,v 1.187 2014/08/23 14:50:24 christos Exp $	*/
+/*	$NetBSD: var.c,v 1.191 2014/09/14 02:32:51 dholland Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -69,14 +69,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: var.c,v 1.187 2014/08/23 14:50:24 christos Exp $";
+static char rcsid[] = "$NetBSD: var.c,v 1.191 2014/09/14 02:32:51 dholland Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)var.c	8.3 (Berkeley) 3/19/94";
 #else
-__RCSID("$NetBSD: var.c,v 1.187 2014/08/23 14:50:24 christos Exp $");
+__RCSID("$NetBSD: var.c,v 1.191 2014/09/14 02:32:51 dholland Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -3599,15 +3599,13 @@ Var_Parse(const char *str, GNode *ctxt, Boolean errnum, int *lengthPtr,
 				 * expanding it in a non-local context. This
 				 * is done to support dynamic sources. The
 				 * result is just the invocation, unaltered */
-    Var_Parse_State parsestate; /* Flags passed to helper functions */
+    const char     *extramodifiers; /* extra modifiers to apply first */
     char	  name[2];
 
     *freePtr = NULL;
-    nstr = NULL;
+    extramodifiers = NULL;
     dynamic = FALSE;
     start = str;
-    parsestate.oneBigWord = FALSE;
-    parsestate.varSpace = ' ';	/* word separator */
 
     startc = str[1];
     if (startc != PROPEN && startc != BROPEN) {
@@ -3744,26 +3742,12 @@ Var_Parse(const char *str, GNode *ctxt, Boolean errnum, int *lengthPtr,
 	    v = VarFind(name, ctxt, 0);
 
 	    if (v != NULL) {
-		/*
-		 * No need for nested expansion or anything, as we're
-		 * the only one who sets these things and we sure don't
-		 * put nested invocations in them...
-		 */
-		nstr = Buf_GetAll(&v->val, NULL);
-
 		if (str[1] == 'D') {
-		    nstr = VarModify(ctxt, &parsestate, nstr, VarHead,
-				    NULL);
-		} else {
-		    nstr = VarModify(ctxt, &parsestate, nstr, VarTail,
-				    NULL);
+			extramodifiers = "H:";
 		}
-		/*
-		 * Resulting string is dynamically allocated, so
-		 * tell caller to free it.  Can't return yet, there
-		 * might be modifiers.
-		 */
-		*freePtr = nstr;
+		else { /* F */
+			extramodifiers = "T:";
+		}
 	    }
 	}
 
@@ -3835,45 +3819,52 @@ Var_Parse(const char *str, GNode *ctxt, Boolean errnum, int *lengthPtr,
 	    Buf_Destroy(&buf, TRUE);
     }
 
-    if (nstr == NULL) {
-	/*
-	 * D and F modified versions of the short forms of local variables
-	 * are already expanded.  Expand others.
-	 */
-	if (v->flags & VAR_IN_USE) {
-	    Fatal("Variable %s is recursive.", v->name);
-	    /*NOTREACHED*/
-	} else {
-	    v->flags |= VAR_IN_USE;
-	}
-	/*
-	 * Before doing any modification, we have to make sure the value
-	 * has been fully expanded. If it looks like recursion might be
-	 * necessary (there's a dollar sign somewhere in the variable's value)
-	 * we just call Var_Subst to do any other substitutions that are
-	 * necessary. Note that the value returned by Var_Subst will have
-	 * been dynamically-allocated, so it will need freeing when we
-	 * return.
-	 */
-	nstr = Buf_GetAll(&v->val, NULL);
-	if (strchr(nstr, '$') != NULL) {
-	    nstr = Var_Subst(NULL, nstr, ctxt, errnum);
-	    *freePtr = nstr;
-	}
-
-	v->flags &= ~VAR_IN_USE;
+    if (v->flags & VAR_IN_USE) {
+	Fatal("Variable %s is recursive.", v->name);
+	/*NOTREACHED*/
+    } else {
+	v->flags |= VAR_IN_USE;
+    }
+    /*
+     * Before doing any modification, we have to make sure the value
+     * has been fully expanded. If it looks like recursion might be
+     * necessary (there's a dollar sign somewhere in the variable's value)
+     * we just call Var_Subst to do any other substitutions that are
+     * necessary. Note that the value returned by Var_Subst will have
+     * been dynamically-allocated, so it will need freeing when we
+     * return.
+     */
+    nstr = Buf_GetAll(&v->val, NULL);
+    if (strchr(nstr, '$') != NULL) {
+	nstr = Var_Subst(NULL, nstr, ctxt, errnum);
+	*freePtr = nstr;
     }
 
-    if ((nstr != NULL) && haveModifier) {
-	int used;
-	/*
-	 * Skip initial colon.
-	 */
-	tstr++;
+    v->flags &= ~VAR_IN_USE;
 
-	nstr = ApplyModifiers(nstr, tstr, startc, endc,
-			      v, ctxt, errnum, &used, freePtr);
-	tstr += used;
+    if ((nstr != NULL) && (haveModifier || extramodifiers != NULL)) {
+	void *extraFree;
+	int used;
+
+	extraFree = NULL;
+	if (extramodifiers != NULL) {
+		nstr = ApplyModifiers(nstr, extramodifiers, '(', ')',
+				      v, ctxt, errnum, &used, &extraFree);
+	}
+
+	if (haveModifier) {
+		/* Skip initial colon. */
+		tstr++;
+
+		nstr = ApplyModifiers(nstr, tstr, startc, endc,
+				      v, ctxt, errnum, &used, freePtr);
+		tstr += used;
+		if (extraFree) {
+			free(extraFree);
+		}
+	} else {
+		*freePtr = extraFree;
+	}
     }
     if (*tstr) {
 	*lengthPtr = tstr - start + 1;

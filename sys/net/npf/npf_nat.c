@@ -1,4 +1,4 @@
-/*	$NetBSD: npf_nat.c,v 1.34 2014/08/24 20:36:30 rmind Exp $	*/
+/*	$NetBSD: npf_nat.c,v 1.37 2014/11/30 01:37:53 rmind Exp $	*/
 
 /*-
  * Copyright (c) 2014 Mindaugas Rasiukevicius <rmind at netbsd org>
@@ -71,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: npf_nat.c,v 1.34 2014/08/24 20:36:30 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: npf_nat.c,v 1.37 2014/11/30 01:37:53 rmind Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -252,6 +252,7 @@ npf_nat_newpolicy(prop_dictionary_t natdict, npf_ruleset_t *rset)
 		np->n_portmap = pm;
 	} else {
 		KASSERT(np->n_portmap != NULL);
+		KASSERT(np->n_portmap->p_refcnt > 0);
 	}
 	return np;
 err:
@@ -313,9 +314,10 @@ npf_nat_freepolicy(npf_natpolicy_t *np)
 		kpause("npfgcnat", false, 1, NULL);
 	}
 	KASSERT(LIST_EMPTY(&np->n_nat_list));
+	KASSERT(pm == NULL || pm->p_refcnt > 0);
 
 	/* Destroy the port map, on last reference. */
-	if (pm && --pm->p_refcnt == 0) {
+	if (pm && atomic_dec_uint_nv(&pm->p_refcnt) == 0) {
 		KASSERT((np->n_flags & NPF_NAT_PORTMAP) != 0);
 		kmem_free(pm, PORTMAP_MEM_SIZE);
 	}
@@ -362,6 +364,8 @@ npf_nat_sharepm(npf_natpolicy_t *np, npf_natpolicy_t *mnp)
 	npf_portmap_t *pm, *mpm;
 
 	KASSERT(np && mnp && np != mnp);
+	KASSERT(LIST_EMPTY(&mnp->n_nat_list));
+	KASSERT(mnp->n_refcnt == 0);
 
 	/* Using port map and having equal translation address? */
 	if ((np->n_flags & mnp->n_flags & NPF_NAT_PORTMAP) == 0) {
@@ -373,17 +377,21 @@ npf_nat_sharepm(npf_natpolicy_t *np, npf_natpolicy_t *mnp)
 	if (memcmp(&np->n_taddr, &mnp->n_taddr, np->n_alen) != 0) {
 		return false;
 	}
-	/* If NAT policy has an old port map - drop the reference. */
 	mpm = mnp->n_portmap;
-	if (mpm) {
-		/* Note: at this point we cannot hold a last reference. */
-		KASSERT(mpm->p_refcnt > 1);
-		mpm->p_refcnt--;
+	KASSERT(mpm == NULL || mpm->p_refcnt > 0);
+
+	/*
+	 * If NAT policy has an old port map - drop the reference
+	 * and destroy the port map if it was the last.
+	 */
+	if (mpm && atomic_dec_uint_nv(&mpm->p_refcnt) == 0) {
+		kmem_free(mpm, PORTMAP_MEM_SIZE);
 	}
+
 	/* Share the port map. */
 	pm = np->n_portmap;
+	atomic_inc_uint(&pm->p_refcnt);
 	mnp->n_portmap = pm;
-	pm->p_refcnt++;
 	return true;
 }
 
@@ -411,6 +419,9 @@ npf_nat_getport(npf_natpolicy_t *np)
 	npf_portmap_t *pm = np->n_portmap;
 	u_int n = PORTMAP_SIZE, idx, bit;
 	uint32_t map, nmap;
+
+	KASSERT((np->n_flags & NPF_NAT_PORTMAP) != 0);
+	KASSERT(pm->p_refcnt > 0);
 
 	idx = cprng_fast32() % PORTMAP_SIZE;
 	for (;;) {
@@ -445,6 +456,9 @@ npf_nat_takeport(npf_natpolicy_t *np, in_port_t port)
 	uint32_t map, nmap;
 	u_int idx, bit;
 
+	KASSERT((np->n_flags & NPF_NAT_PORTMAP) != 0);
+	KASSERT(pm->p_refcnt > 0);
+
 	port = ntohs(port) - PORTMAP_FIRST;
 	idx = port >> PORTMAP_SHIFT;
 	bit = port & PORTMAP_MASK;
@@ -468,6 +482,9 @@ npf_nat_putport(npf_natpolicy_t *np, in_port_t port)
 	npf_portmap_t *pm = np->n_portmap;
 	uint32_t map, nmap;
 	u_int idx, bit;
+
+	KASSERT((np->n_flags & NPF_NAT_PORTMAP) != 0);
+	KASSERT(pm->p_refcnt > 0);
 
 	port = ntohs(port) - PORTMAP_FIRST;
 	idx = port >> PORTMAP_SHIFT;
@@ -681,7 +698,7 @@ npf_do_nat(npf_cache_t *npc, npf_conn_t *con, const int di)
 	 * Determines whether the stream is "forwards" or "backwards".
 	 * Note: no need to lock, since reference on connection is held.
 	 */
-	if (con && (nt = npf_conn_retnat(con, di, &forw)) != NULL) {
+	if (con && (nt = npf_conn_getnat(con, di, &forw)) != NULL) {
 		np = nt->nt_natpolicy;
 		goto translate;
 	}
@@ -869,10 +886,12 @@ npf_nat_import(prop_dictionary_t natdict, npf_ruleset_t *natlist,
 	prop_dictionary_get_uint16(natdict, "tport", &nt->nt_tport);
 
 	/* Take a specific port from port-map. */
-	if (!npf_nat_takeport(np, nt->nt_tport)) {
+	if ((np->n_flags & NPF_NAT_PORTMAP) != 0 && nt->nt_tport &
+	    !npf_nat_takeport(np, nt->nt_tport)) {
 		pool_cache_put(nat_cache, nt);
 		return NULL;
 	}
+	npf_stats_inc(NPF_STAT_NAT_CREATE);
 
 	/*
 	 * Associate, take a reference and insert.  Unlocked since

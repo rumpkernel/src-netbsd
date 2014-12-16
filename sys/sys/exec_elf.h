@@ -1,4 +1,4 @@
-/*	$NetBSD: exec_elf.h,v 1.143 2014/08/25 20:40:52 joerg Exp $	*/
+/*	$NetBSD: exec_elf.h,v 1.145 2014/10/23 08:55:32 martin Exp $	*/
 
 /*-
  * Copyright (c) 1994 The NetBSD Foundation, Inc.
@@ -45,6 +45,11 @@
 #else
 #include <inttypes.h>
 #endif /* _KERNEL || _STANDALONE */
+
+#ifdef   _BSD_SIZE_T_
+typedef  _BSD_SIZE_T_    size_t;
+#undef   _BSD_SIZE_T_
+#endif
 
 #if HAVE_NBTOOL_CONFIG_H
 #include <nbinclude/machine/elf_machdep.h>
@@ -301,6 +306,7 @@ typedef struct {
 #define EM_ARCA		109	/* Arca RISC microprocessor */
 #define EM_UNICORE	110	/* UNICORE from PKU-Unity Ltd. and MPRC Peking University */
 #define EM_AARCH64	183	/* AArch64 64-bit ARM microprocessor */
+#define EM_RISCV	243	/* RISCV */
 
 /* Unofficial machine types follow */
 #define EM_AVR32	6317	/* used by NetBSD/avr32 */

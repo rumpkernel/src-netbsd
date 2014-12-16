@@ -1,4 +1,4 @@
-/*	$NetBSD: if_smsc.c,v 1.19 2014/08/10 16:44:36 tls Exp $	*/
+/*	$NetBSD: if_smsc.c,v 1.22 2014/09/20 15:07:06 jmcneill Exp $	*/
 
 /*	$OpenBSD: if_smsc.c,v 1.4 2012/09/27 12:38:11 jsg Exp $	*/
 /* $FreeBSD: src/sys/dev/usb/net/if_smsc.c,v 1.1 2012/08/15 04:03:55 gonzo Exp $ */
@@ -61,6 +61,7 @@
  */
 
 #ifdef _KERNEL_OPT
+#include "opt_usb.h"
 #include "opt_inet.h"
 #endif
 
@@ -1091,7 +1092,7 @@ smsc_attach(device_t parent, device_t self, void *aux)
 		sc->sc_enaddr[0] = (uint8_t)((mac_l) & 0xff);
 	}
 
-	aprint_normal_dev(self, " Ethernet address %s\n", ether_sprintf(sc->sc_enaddr));
+	aprint_normal_dev(self, "Ethernet address %s\n", ether_sprintf(sc->sc_enaddr));
 
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -1302,6 +1303,13 @@ smsc_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		pktlen = (uint16_t)SMSC_RX_STAT_FRM_LENGTH(rxhdr);
 		smsc_dbg_printf(sc, "rxeof total_len %d pktlen %d rxhdr "
 		    "0x%08x\n", total_len, pktlen, rxhdr);
+
+		if (pktlen < ETHER_HDR_LEN) {
+			smsc_dbg_printf(sc, "pktlen %d < ETHER_HDR_LEN %d\n",
+			    pktlen, ETHER_HDR_LEN);
+			ifp->if_ierrors++;
+			goto done;
+		}
 
 		pktlen += ETHER_ALIGN;
 

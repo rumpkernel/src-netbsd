@@ -1,4 +1,4 @@
-/*	$NetBSD: mp_subr.S,v 1.6 2014/06/08 17:33:24 palle Exp $	*/
+/*	$NetBSD: mp_subr.S,v 1.8 2014/11/02 19:40:06 palle Exp $	*/
 
 /*
  * Copyright (c) 2006-2010 Matthew R. Green
@@ -214,28 +214,48 @@ ENTRY(sparc64_ipi_flush_pte_sun4v)
 	.text
 	.align 32
 1:	rd	%pc, %l0
-	LDULNG	[%l0 + (4f-1b)], %l1
-	add	%l0, (6f-1b), %l2
+	LDULNG	[%l0 + (4f-1b)], %l1	! Load tlb slot count
+	LDULNG	[%l0 + (7f-1b)], %g2	! Load cpu_args address.
+	add	%l0, (6f-1b), %l2	! tlb slots
+	ld	[%g2 + CBA_CPUTYP], %g3 ! Load cputype
 	clr	%l3
 2:	cmp	%l3, %l1
 	be	CCCR, 3f
 	 nop
 	ldx	[%l2 + TTE_VPN], %l4
 	ldx	[%l2 + TTE_DATA], %l5
+#ifdef SUN4V	
+	cmp	%g3, CPU_SUN4V
+	bne,pt	%icc, 8f
+	 nop
+	! sun4v
+	mov	%l4, %o0			! vaddr
+	clr	%o1				! reserved
+	mov	%l5, %o2			! tte
+	mov	MAP_DTLB|MAP_ITLB, %o3		! flags
+	mov	FT_MMU_MAP_PERM_ADDR, %o5	! hv fast trap function
+	ta	ST_FAST_TRAP
+	cmp	%o0, 0
+	be,pt	%icc, 9f
+	 nop
+	sir					! crash if mapping fails
+8:
+#endif	
+	! sun4u
 	wr	%g0, ASI_DMMU, %asi
 	stxa	%l4, [%g0 + TLB_TAG_ACCESS] %asi
 	stxa	%l5, [%g0] ASI_DMMU_DATA_IN
 	wr	%g0, ASI_IMMU, %asi
 	stxa	%l4, [%g0 + TLB_TAG_ACCESS] %asi
 	stxa	%l5, [%g0] ASI_IMMU_DATA_IN
+9:		
 	membar	#Sync
 	flush	%l4
 	add	%l2, PTE_SIZE, %l2
 	add	%l3, 1, %l3
 	ba	%xcc, 2b
 	 nop
-3:	LDULNG	[%l0 + (5f-1b)], %l1
-	LDULNG	[%l0 + (7f-1b)], %g2	! Load cpu_info address.
+3:	LDULNG	[%l0 + (5f-1b)], %l1	! Load function
 	jmpl	%l1, %g0
 	 nop
 
@@ -369,9 +389,10 @@ ENTRY(sparc64_ipi_drop_fpstate)
 	 nop
 
 /*
- * IPI handler to drop the current FPU state.
+ * Flush data cache page.
  * void sparc64_ipi_dcache_flush_page_usiii(paddr_t pa, int line_size)
  * void sparc64_ipi_dcache_flush_page_us(paddr_t pa, int line_size)
+ * void sparc64_ipi_dcache_flush_page_sun4v(paddr_t pa, int line_size)
  *
  * On entry:
  *	%g2 = pa
@@ -427,4 +448,21 @@ ENTRY(sparc64_ipi_dcache_flush_page_us)
 	ba,a	ret_from_intr_vector
 	 nop
 
+#ifdef SUN4V
+ENTRY(sparc64_ipi_dcache_flush_page_sun4v)
+	set	NBPG, %o1
+	call	hv_mem_sync
+	 mov	%g2, %o0
+	cmp	%o0, 0
+	be,pt	%icc, 1f
+	 nop
+	sir				! crash if hv-call fails
+1:
+	sethi	%hi(KERNBASE), %g5
+	flush	%g5
+	membar	#Sync
+	ba,a	ret_from_intr_vector
+	 nop
+#endif
+		
 #endif

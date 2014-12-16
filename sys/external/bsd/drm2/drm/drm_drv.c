@@ -1,4 +1,4 @@
-/*	$NetBSD: drm_drv.c,v 1.9 2014/07/26 21:15:45 riastradh Exp $	*/
+/*	$NetBSD: drm_drv.c,v 1.12 2014/12/14 23:48:58 chs Exp $	*/
 
 /*-
  * Copyright (c) 2013 The NetBSD Foundation, Inc.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: drm_drv.c,v 1.9 2014/07/26 21:15:45 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: drm_drv.c,v 1.12 2014/12/14 23:48:58 chs Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -72,11 +72,12 @@ static int	drm_poll(struct file *, int);
 static int	drm_kqfilter(struct file *, struct knote *);
 static int	drm_stat(struct file *, struct stat *);
 static int	drm_ioctl(struct file *, unsigned long, void *);
+static int	drm_fop_mmap(struct file *, off_t *, size_t, int, int *, int *,
+			     struct uvm_object **, int *);
 static int	drm_version_string(char *, size_t *, const char *);
 static paddr_t	drm_mmap(dev_t, off_t, int);
 
 static drm_ioctl_t	drm_version;
-static drm_ioctl_t	drm_mmap_ioctl;
 
 #define	DRM_IOCTL_DEF(IOCTL, FUNC, FLAGS)				\
 	[DRM_IOCTL_NR(IOCTL)] = {					\
@@ -215,10 +216,6 @@ static const struct drm_ioctl_desc drm_ioctls[] = {
 	DRM_IOCTL_DEF(DRM_IOCTL_MODE_OBJ_GETPROPERTIES, drm_mode_obj_get_properties_ioctl, DRM_CONTROL_ALLOW|DRM_UNLOCKED),
 	DRM_IOCTL_DEF(DRM_IOCTL_MODE_OBJ_SETPROPERTY, drm_mode_obj_set_property_ioctl, DRM_MASTER|DRM_CONTROL_ALLOW|DRM_UNLOCKED),
 	DRM_IOCTL_DEF(DRM_IOCTL_MODE_CURSOR2, drm_mode_cursor2_ioctl, DRM_MASTER|DRM_CONTROL_ALLOW|DRM_UNLOCKED),
-
-#ifdef __NetBSD__
-	DRM_IOCTL_DEF(DRM_IOCTL_MMAP, drm_mmap_ioctl, DRM_UNLOCKED),
-#endif
 };
 
 const struct cdevsw drm_cdevsw = {
@@ -234,8 +231,7 @@ const struct cdevsw drm_cdevsw = {
 	.d_kqfilter = nokqfilter,
 	.d_discard = nodiscard,
 	/* XXX was D_TTY | D_NEGOFFSAFE */
-	/* XXX Add D_MPSAFE some day... */
-	.d_flag = D_NEGOFFSAFE,
+	.d_flag = D_NEGOFFSAFE | D_MPSAFE,
 };
 
 static const struct fileops drm_fileops = {
@@ -248,6 +244,7 @@ static const struct fileops drm_fileops = {
 	.fo_close = drm_close,
 	.fo_kqfilter = drm_kqfilter,
 	.fo_restart = fnullop_restart,
+	.fo_mmap = drm_fop_mmap,
 };
 
 static int
@@ -394,7 +391,7 @@ drm_lastclose(struct drm_device *dev)
 		drm_irq_uninstall(dev);
 
 	mutex_lock(&dev->struct_mutex);
-	drm_agp_clear(dev);
+	drm_agp_clear_hook(dev);
 	drm_legacy_sg_cleanup(dev);
 	list_for_each_entry_safe(vma, vma_temp, &dev->vmalist, head) {
 		list_del(&vma->head);
@@ -670,6 +667,22 @@ drm_ioctl(struct file *fp, unsigned long cmd, void *data)
 }
 
 static int
+drm_fop_mmap(struct file *fp, off_t *offp, size_t len, int prot, int *flagsp,
+	     int *advicep, struct uvm_object **uobjp, int *maxprotp)
+{
+	struct drm_file *const file = fp->f_data;
+	struct drm_device *const dev = file->minor->dev;
+	int error;
+
+	KASSERT(fp == file->filp);
+	error = (*dev->driver->mmap_object)(dev, *offp, len, prot, uobjp,
+	    offp, file->filp);
+	*maxprotp = prot;
+	*advicep = UVM_ADV_RANDOM;
+	return -error;
+}
+
+static int
 drm_version_string(char *target, size_t *lenp, const char *source)
 {
 	const size_t len = strlen(source);
@@ -723,66 +736,6 @@ drm_mmap(dev_t d, off_t offset, int prot)
 	return paddr;
 }
 
-static int
-drm_mmap_ioctl(struct drm_device *dev, void *data, struct drm_file *file)
-{
-	struct drm_mmap *const args = data;
-	void *addr = args->dnm_addr;
-	const size_t size = args->dnm_size;
-	const int prot = args->dnm_prot;
-	const int flags = args->dnm_flags;
-	const off_t offset = args->dnm_offset;
-	struct uvm_object *uobj;
-	voff_t uoffset;
-	const vm_prot_t vm_maxprot = (VM_PROT_READ | VM_PROT_WRITE);
-	vm_prot_t vm_prot;
-	int uvmflag;
-	vaddr_t align, vaddr;
-	int ret;
-
-	/* XXX Copypasta from drm_gem_mmap.  */
-	if (drm_device_is_unplugged(dev))
-		return -ENODEV;
-
-	if (prot != (prot & (PROT_READ | PROT_WRITE)))
-		return -EACCES;
-	if (flags != MAP_SHARED)
-		return -EINVAL;
-	if (offset != (offset & ~(PAGE_SIZE-1)))
-		return -EINVAL;
-	if (size != (size & ~(PAGE_SIZE-1)))
-		return -EINVAL;
-	(void)addr;		/* XXX ignore -- no MAP_FIXED for now */
-
-	ret = (*dev->driver->mmap_object)(dev, offset, size, prot, &uobj,
-	    &uoffset, file->filp);
-	if (ret)
-		return ret;
-	if (uobj == NULL)
-		return -EINVAL;
-
-	vm_prot = ((ISSET(prot, PROT_READ)? VM_PROT_READ : 0) |
-	    (ISSET(prot, PROT_WRITE)? VM_PROT_WRITE : 0));
-	KASSERT(vm_prot == (vm_prot & vm_maxprot));
-	uvmflag = UVM_MAPFLAG(vm_prot, vm_maxprot, UVM_INH_COPY,
-	    UVM_ADV_RANDOM, 0);
-
-	align = 0;		/* XXX */
-	vaddr = (*curproc->p_emul->e_vm_default_addr)(curproc,
-	    (vaddr_t)curproc->p_vmspace->vm_daddr, size);
-	/* XXX errno NetBSD->Linux */
-	ret = -uvm_map(&curproc->p_vmspace->vm_map, &vaddr, size, uobj,
-	    uoffset, align, uvmflag);
-	if (ret) {
-		(*uobj->pgops->pgo_detach)(uobj);
-		return ret;
-	}
-
-	/* Success!  */
-	args->dnm_addr = (void *)vaddr;
-	return 0;
-}
-
 static const struct drm_agp_hooks *volatile drm_current_agp_hooks;
 
 int
@@ -807,23 +760,37 @@ drm_agp_deregister(const struct drm_agp_hooks *hooks)
 		    hooks, drm_current_agp_hooks);
 }
 
+static void __dead
+drm_noagp_panic(struct drm_device *dev)
+{
+	if ((dev != NULL) &&
+	    (dev->control != NULL) &&
+	    (dev->control->kdev != NULL))
+		panic("%s: no agp loaded", device_xname(dev->control->kdev));
+	else
+		panic("drm_device %p: no agp loaded", dev);
+}
+
 int
 drm_agp_release_hook(struct drm_device *dev)
 {
 	const struct drm_agp_hooks *const hooks = drm_current_agp_hooks;
 
-	if (hooks == NULL) {
-		if ((dev != NULL) &&
-		    (dev->control != NULL) &&
-		    (dev->control->kdev != NULL))
-			panic("drm_agp_release(%s): no agp loaded",
-			    device_xname(dev->control->kdev));
-		else
-			panic("drm_agp_release(drm_device %p): no agp loaded",
-			    dev);
-	}
+	if (hooks == NULL)
+		drm_noagp_panic(dev);
 	membar_consumer();
 	return (*hooks->agph_release)(dev);
+}
+
+void
+drm_agp_clear_hook(struct drm_device *dev)
+{
+	const struct drm_agp_hooks *const hooks = drm_current_agp_hooks;
+
+	if (hooks == NULL)
+		drm_noagp_panic(dev);
+	membar_consumer();
+	(*hooks->agph_clear)(dev);
 }
 
 #define	DEFINE_AGP_HOOK_IOCTL(NAME, HOOK)				      \

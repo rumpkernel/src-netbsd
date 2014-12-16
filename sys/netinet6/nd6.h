@@ -1,4 +1,4 @@
-/*	$NetBSD: nd6.h,v 1.59 2014/06/05 16:06:49 roy Exp $	*/
+/*	$NetBSD: nd6.h,v 1.61 2014/12/16 11:42:27 roy Exp $	*/
 /*	$KAME: nd6.h,v 1.95 2002/06/08 11:31:06 itojun Exp $	*/
 
 /*
@@ -272,17 +272,22 @@ struct	nd_defrouter {
 };
 
 struct nd_prefixctl {
-	struct ifnet *ndpr_ifp;
+	struct ifnet *ndprc_ifp;
 
 	/* prefix */
-	struct sockaddr_in6 ndpr_prefix;
-	u_char	ndpr_plen;
+	struct sockaddr_in6 ndprc_prefix;
+	u_char	ndprc_plen;
 
-	u_int32_t ndpr_vltime;	/* advertised valid lifetime */
-	u_int32_t ndpr_pltime;	/* advertised preferred lifetime */
+	u_int32_t ndprc_vltime;	/* advertised valid lifetime */
+	u_int32_t ndprc_pltime;	/* advertised preferred lifetime */
 
-	struct prf_ra ndpr_flags;
+	struct prf_ra ndprc_flags;
 };
+
+#define ndprc_raf		ndprc_flags
+#define ndprc_raf_onlink	ndprc_flags.onlink
+#define ndprc_raf_auto		ndprc_flags.autonomous
+#define ndprc_raf_router	ndprc_flags.router
 
 struct nd_prefix {
 	struct ifnet *ndpr_ifp;
@@ -408,6 +413,7 @@ void nd6_option_init(void *, int, union nd_opts *);
 struct nd_opt_hdr *nd6_option(union nd_opts *);
 int nd6_options(union nd_opts *);
 struct	rtentry *nd6_lookup(const struct in6_addr *, int, struct ifnet *);
+void nd6_rtmsg(int, struct rtentry *);
 void nd6_setmtu(struct ifnet *);
 void nd6_llinfo_settimer(struct llinfo_nd6 *, long);
 void nd6_timer(void *);

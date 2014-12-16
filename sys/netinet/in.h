@@ -1,4 +1,4 @@
-/*	$NetBSD: in.h,v 1.92 2014/06/05 23:48:16 rmind Exp $	*/
+/*	$NetBSD: in.h,v 1.95 2014/12/02 20:25:47 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -276,6 +276,7 @@ struct ip_opts {
 #define	IP_MULTICAST_IF		9    /* in_addr; set/get IP multicast i/f  */
 #define	IP_MULTICAST_TTL	10   /* u_char; set/get IP multicast ttl */
 #define	IP_MULTICAST_LOOP	11   /* u_char; set/get IP multicast loopback */
+/* The add and drop membership option numbers need to match with the v6 ones */
 #define	IP_ADD_MEMBERSHIP	12   /* ip_mreq; add an IP group membership */
 #define	IP_DROP_MEMBERSHIP	13   /* ip_mreq; drop an IP group membership */
 #define	IP_PORTALGO		18   /* int; port selection algo (rfc6056) */
@@ -614,5 +615,11 @@ sockaddr_in_alloc(const struct in_addr *addr, in_port_t port, int flags)
 	return sa;
 }
 #endif /* _KERNEL */
+
+#if defined(_KERNEL) || defined(_TEST)
+int	in_print(char *, size_t, const struct in_addr *);
+#define IN_PRINT(b, a)	(in_print((b), sizeof(b), a), (b))
+int	sin_print(char *, size_t, const void *);
+#endif
 
 #endif /* !_NETINET_IN_H_ */

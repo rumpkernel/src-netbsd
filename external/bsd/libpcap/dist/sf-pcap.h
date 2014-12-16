@@ -1,4 +1,4 @@
-/*	$NetBSD: sf-pcap.h,v 1.1.1.3 2013/12/31 16:57:25 christos Exp $	*/
+/*	$NetBSD: sf-pcap.h,v 1.2 2014/11/19 19:33:30 christos Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994, 1995, 1996, 1997

@@ -1,12 +1,14 @@
-# $NetBSD: files.hdaudio,v 1.5 2011/02/12 15:15:34 jmcneill Exp $
+# $NetBSD: files.hdaudio,v 1.7 2014/11/09 20:14:01 nonaka Exp $
 
 #
 # Intel High Definition Audio (Revision 1.0)
 #
+defflag	HDAUDIOVERBOSE
+
 define	hdaudiobus	{[nid = -1]}
 device	hdaudio: hdaudiobus
-file	dev/pci/hdaudio/hdaudio.c	hdaudio
-file	dev/pci/hdaudio/hdaudio_ids.c	hdaudio
+file	dev/pci/hdaudio/hdaudio.c		hdaudio
+file	dev/pci/hdaudio/hdaudio_verbose.c	hdaudio & hdaudioverbose
 
 device	hdafg: audiobus, auconv, aurateconv, mulaw
 attach	hdafg at hdaudiobus

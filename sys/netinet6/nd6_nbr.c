@@ -1,4 +1,4 @@
-/*	$NetBSD: nd6_nbr.c,v 1.100 2014/07/01 07:51:29 ozaki-r Exp $	*/
+/*	$NetBSD: nd6_nbr.c,v 1.103 2014/12/16 11:42:27 roy Exp $	*/
 /*	$KAME: nd6_nbr.c,v 1.61 2001/02/10 16:06:14 jinmei Exp $	*/
 
 /*
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nd6_nbr.c,v 1.100 2014/07/01 07:51:29 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nd6_nbr.c,v 1.103 2014/12/16 11:42:27 roy Exp $");
 
 #include "opt_inet.h"
 #include "opt_ipsec.h"
@@ -567,6 +567,7 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 	struct sockaddr_dl *sdl;
 	union nd_opts ndopts;
 	struct sockaddr_in6 ssin6;
+	int rt_announce;
 
 	if (ip6->ip6_hlim != 255) {
 		nd6log((LOG_ERR,
@@ -669,6 +670,7 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 	   ((sdl = satosdl(rt->rt_gateway)) == NULL))
 		goto freeit;
 
+	rt_announce = 0;
 	if (ln->ln_state == ND6_LLINFO_INCOMPLETE) {
 		/*
 		 * If the link-layer has address, and no lladdr option came,
@@ -682,6 +684,7 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 		 */
 		(void)sockaddr_dl_setaddr(sdl, sdl->sdl_len, lladdr,
 		    ifp->if_addrlen);
+		rt_announce = 1;
 		if (is_solicited) {
 			ln->ln_state = ND6_LLINFO_REACHABLE;
 			ln->ln_byhint = 0;
@@ -712,11 +715,11 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 		else {
 			if (sdl->sdl_alen) {
 				if (memcmp(lladdr, CLLADDR(sdl), ifp->if_addrlen))
-					llchange = 1;
+					llchange = rt_announce = 1;
 				else
 					llchange = 0;
 			} else
-				llchange = 1;
+				llchange = rt_announce = 1;
 		}
 
 		/*
@@ -819,6 +822,8 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 	rt->rt_flags &= ~RTF_REJECT;
 	ln->ln_asked = 0;
 	nd6_llinfo_release_pkts(ln, ifp, rt);
+	if (rt_announce) /* tell user process about any new lladdr */
+		nd6_rtmsg(RTM_CHANGE, rt);
 
  freeit:
 	m_freem(m);
@@ -1072,23 +1077,10 @@ nd6_newaddrmsg(struct ifaddr *ifa)
 	int e;
 
 	sockaddr_in6_init(&all1_sa, &in6mask128, 0, 0, 0);
-
 	e = rtrequest(RTM_GET, ifa->ifa_addr, ifa->ifa_addr,
-	    (struct sockaddr *)&all1_sa, RTF_UP|RTF_HOST|RTF_LLINFO, &nrt);
-	if (e != 0) {
-		log(LOG_ERR, "nd6_newaddrmsg: "
-		    "RTM_GET operation failed for %s (errno=%d)\n",
-		    ip6_sprintf(&((struct in6_ifaddr *)ifa)->ia_addr.sin6_addr),
-		    e);
-	}
-
+	    (struct sockaddr *)&all1_sa, RTF_UP | RTF_HOST | RTF_LLINFO, &nrt);
 	if (nrt) {
 		rt_newaddrmsg(RTM_ADD, ifa, e, nrt);
-#if 0
-		log(LOG_DEBUG, "nd6_newaddrmsg: announced %s\n",
-		    ip6_sprintf(&((struct in6_ifaddr *)ifa)->ia_addr.sin6_addr)
-		);
-#endif
 		nrt->rt_refcnt--;
 	}
 }
@@ -1162,7 +1154,7 @@ nd6_dad_start(struct ifaddr *ifa, int xtick)
 	 * (re)initialization.
 	 */
 	dp->dad_ifa = ifa;
-	IFAREF(ifa);	/* just for safety */
+	ifaref(ifa);	/* just for safety */
 	dp->dad_count = ip6_dad_count;
 	dp->dad_ns_icount = dp->dad_na_icount = 0;
 	dp->dad_ns_ocount = dp->dad_ns_tcount = 0;
@@ -1195,7 +1187,7 @@ nd6_dad_stop(struct ifaddr *ifa)
 	TAILQ_REMOVE(&dadq, dp, dad_list);
 	free(dp, M_IP6NDP);
 	dp = NULL;
-	IFAFREE(ifa);
+	ifafree(ifa);
 }
 
 static void
@@ -1240,7 +1232,7 @@ nd6_dad_timer(struct ifaddr *ifa)
 		TAILQ_REMOVE(&dadq, dp, dad_list);
 		free(dp, M_IP6NDP);
 		dp = NULL;
-		IFAFREE(ifa);
+		ifafree(ifa);
 		goto done;
 	}
 
@@ -1294,7 +1286,7 @@ nd6_dad_timer(struct ifaddr *ifa)
 			TAILQ_REMOVE(&dadq, dp, dad_list);
 			free(dp, M_IP6NDP);
 			dp = NULL;
-			IFAFREE(ifa);
+			ifafree(ifa);
 		}
 	}
 
@@ -1373,7 +1365,7 @@ nd6_dad_duplicated(struct ifaddr *ifa)
 	TAILQ_REMOVE(&dadq, dp, dad_list);
 	free(dp, M_IP6NDP);
 	dp = NULL;
-	IFAFREE(ifa);
+	ifafree(ifa);
 }
 
 static void

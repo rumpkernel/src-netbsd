@@ -1,4 +1,4 @@
-/*	$NetBSD: if.c,v 1.290 2014/08/09 05:33:01 rtr Exp $	*/
+/*	$NetBSD: if.c,v 1.307 2014/12/15 06:52:25 ozaki-r Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001, 2008 The NetBSD Foundation, Inc.
@@ -90,7 +90,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if.c,v 1.290 2014/08/09 05:33:01 rtr Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if.c,v 1.307 2014/12/15 06:52:25 ozaki-r Exp $");
 
 #include "opt_inet.h"
 
@@ -164,10 +164,9 @@ static u_int			if_index = 1;
 static size_t			if_indexlim = 0;
 static uint64_t			index_gen;
 static kmutex_t			index_gen_mtx;
+static kmutex_t			if_clone_mtx;
 
 static struct ifaddr **		ifnet_addrs = NULL;
-
-static callout_t		if_slowtimo_ch;
 
 struct ifnet *lo0ifp;
 int	ifqmaxlen = IFQ_MAXLEN;
@@ -193,6 +192,12 @@ static void ifnet_lock_exit(struct ifnet_lock *);
 static void if_detach_queues(struct ifnet *, struct ifqueue *);
 static void sysctl_sndq_setup(struct sysctllog **, const char *,
     struct ifaltq *);
+static void if_slowtimo(void *);
+static void if_free_sadl(struct ifnet *);
+static void if_attachdomain1(struct ifnet *);
+static int ifconf(u_long, void *);
+static int if_clone_create(const char *);
+static int if_clone_destroy(const char *);
 
 #if defined(INET) || defined(INET6)
 static void sysctl_net_pktq_setup(struct sysctllog **, int);
@@ -234,9 +239,6 @@ ifinit(void)
 	sysctl_net_pktq_setup(NULL, PF_INET6);
 #endif
 
-	callout_init(&if_slowtimo_ch, 0);
-	if_slowtimo(NULL);
-
 	if_listener = kauth_listen_scope(KAUTH_SCOPE_NETWORK,
 	    if_listener_cb, NULL);
 
@@ -252,6 +254,7 @@ void
 ifinit1(void)
 {
 	mutex_init(&index_gen_mtx, MUTEX_DEFAULT, IPL_NONE);
+	mutex_init(&if_clone_mtx, MUTEX_DEFAULT, IPL_NONE);
 	TAILQ_INIT(&ifnet_list);
 	if_indexlim = 8;
 
@@ -335,7 +338,7 @@ if_nullstop(struct ifnet *ifp, int disable)
 }
 
 void
-if_nullwatchdog(struct ifnet *ifp)
+if_nullslowtimo(struct ifnet *ifp)
 {
 
 	/* Nothing. */
@@ -362,7 +365,7 @@ if_set_sadl(struct ifnet *ifp, const void *lla, u_char addrlen, bool factory)
 	(void)sockaddr_dl_setaddr(sdl, sdl->sdl_len, lla, ifp->if_addrlen);
 	if (factory) {
 		ifp->if_hwdl = ifp->if_dl;
-		IFAREF(ifp->if_hwdl);
+		ifaref(ifp->if_hwdl);
 	}
 	/* TBD routing socket */
 }
@@ -402,9 +405,9 @@ if_sadl_setrefs(struct ifnet *ifp, struct ifaddr *ifa)
 {
 	const struct sockaddr_dl *sdl;
 	ifnet_addrs[ifp->if_index] = ifa;
-	IFAREF(ifa);
+	ifaref(ifa);
 	ifp->if_dl = ifa;
-	IFAREF(ifa);
+	ifaref(ifa);
 	sdl = satosdl(ifa->ifa_addr);
 	ifp->if_sadl = sdl;
 }
@@ -447,9 +450,9 @@ if_deactivate_sadl(struct ifnet *ifp)
 	ifp->if_sadl = NULL;
 
 	ifnet_addrs[ifp->if_index] = NULL;
-	IFAFREE(ifa);
+	ifafree(ifa);
 	ifp->if_dl = NULL;
-	IFAFREE(ifa);
+	ifafree(ifa);
 }
 
 void
@@ -470,10 +473,9 @@ if_activate_sadl(struct ifnet *ifp, struct ifaddr *ifa,
 
 /*
  * Free the link level name for the specified interface.  This is
- * a detach helper.  This is called from if_detach() or from
- * link layer type specific detach functions.
+ * a detach helper.  This is called from if_detach().
  */
-void
+static void
 if_free_sadl(struct ifnet *ifp)
 {
 	struct ifaddr *ifa;
@@ -494,7 +496,7 @@ if_free_sadl(struct ifnet *ifp)
 	ifa_remove(ifp, ifa);
 	if_deactivate_sadl(ifp);
 	if (ifp->if_hwdl == ifa) {
-		IFAFREE(ifa);
+		ifafree(ifa);
 		ifp->if_hwdl = NULL;
 	}
 	splx(s);
@@ -580,19 +582,21 @@ skip:
 }
 
 /*
- * Attach an interface to the list of "active" interfaces.
+ * Initialize an interface and assign an index for it.
+ *
+ * It must be called prior to a device specific attach routine
+ * (e.g., ether_ifattach and ieee80211_ifattach) or if_alloc_sadl,
+ * and be followed by if_register:
+ *
+ *     if_initialize(ifp);
+ *     ether_ifattach(ifp, enaddr);
+ *     if_register(ifp);
  */
 void
-if_attach(ifnet_t *ifp)
+if_initialize(ifnet_t *ifp)
 {
 	KASSERT(if_indexlim > 0);
 	TAILQ_INIT(&ifp->if_addrlist);
-	TAILQ_INSERT_TAIL(&ifnet_list, ifp, if_list);
-
-	if (ifioctl_attach(ifp) != 0)
-		panic("%s: ifioctl_attach() failed", __func__);
-
-	if_getindex(ifp);
 
 	/*
 	 * Link level name is allocated later by a separate call to
@@ -601,8 +605,6 @@ if_attach(ifnet_t *ifp)
 
 	if (ifp->if_snd.ifq_maxlen == 0)
 		ifp->if_snd.ifq_maxlen = ifqmaxlen;
-
-	sysctl_sndq_setup(&ifp->if_sysctl_log, ifp->if_xname, &ifp->if_snd);
 
 	ifp->if_broadcastaddr = 0; /* reliably crash if used uninitialized */
 
@@ -630,11 +632,46 @@ if_attach(ifnet_t *ifp)
 	(void)pfil_run_hooks(if_pfil,
 	    (struct mbuf **)PFIL_IFNET_ATTACH, ifp, PFIL_IFNET);
 
+	if_getindex(ifp);
+}
+
+/*
+ * Register an interface to the list of "active" interfaces.
+ */
+void
+if_register(ifnet_t *ifp)
+{
+	if (ifioctl_attach(ifp) != 0)
+		panic("%s: ifioctl_attach() failed", __func__);
+
+	sysctl_sndq_setup(&ifp->if_sysctl_log, ifp->if_xname, &ifp->if_snd);
+
 	if (!STAILQ_EMPTY(&domains))
 		if_attachdomain1(ifp);
 
 	/* Announce the interface. */
 	rt_ifannouncemsg(ifp, IFAN_ARRIVAL);
+
+	if (ifp->if_slowtimo != NULL) {
+		ifp->if_slowtimo_ch =
+		    kmem_zalloc(sizeof(*ifp->if_slowtimo_ch), KM_SLEEP);
+		callout_init(ifp->if_slowtimo_ch, 0);
+		callout_setfunc(ifp->if_slowtimo_ch, if_slowtimo, ifp);
+		if_slowtimo(ifp);
+	}
+
+	TAILQ_INSERT_TAIL(&ifnet_list, ifp, if_list);
+}
+
+/*
+ * Deprecated. Use if_initialize and if_register instead.
+ * See the above comment of if_initialize.
+ */
+void
+if_attach(ifnet_t *ifp)
+{
+	if_initialize(ifp);
+	if_register(ifp);
 }
 
 void
@@ -649,7 +686,7 @@ if_attachdomain(void)
 	splx(s);
 }
 
-void
+static void
 if_attachdomain1(struct ifnet *ifp)
 {
 	struct domain *dp;
@@ -685,7 +722,7 @@ if_deactivate(struct ifnet *ifp)
 	ifp->if_ioctl	 = if_nullioctl;
 	ifp->if_init	 = if_nullinit;
 	ifp->if_stop	 = if_nullstop;
-	ifp->if_watchdog = if_nullwatchdog;
+	ifp->if_slowtimo = if_nullslowtimo;
 	ifp->if_drain	 = if_nulldrain;
 
 	/* No more packets may be enqueued. */
@@ -733,6 +770,13 @@ if_detach(struct ifnet *ifp)
 	memset(&so, 0, sizeof(so));
 
 	s = splnet();
+
+	if (ifp->if_slowtimo != NULL) {
+		ifp->if_slowtimo = NULL;
+		callout_halt(ifp->if_slowtimo_ch, NULL);
+		callout_destroy(ifp->if_slowtimo_ch);
+		kmem_free(ifp->if_slowtimo_ch, sizeof(*ifp->if_slowtimo_ch));
+	}
 
 	/*
 	 * Do an if_down() to give protocols a chance to do something.
@@ -889,7 +933,8 @@ again:
 	pktq_barrier(ip_pktq);
 #endif
 #ifdef INET6
-	pktq_barrier(ip6_pktq);
+	if (in6_present)
+		pktq_barrier(ip6_pktq);
 #endif
 	xc = xc_broadcast(0, (xcfunc_t)nullop, NULL, NULL);
 	xc_wait(xc);
@@ -955,7 +1000,7 @@ if_rt_walktree(struct rtentry *rt, void *v)
 /*
  * Create a clone network interface.
  */
-int
+static int
 if_clone_create(const char *name)
 {
 	struct if_clone *ifc;
@@ -974,7 +1019,7 @@ if_clone_create(const char *name)
 /*
  * Destroy a clone network interface.
  */
-int
+static int
 if_clone_destroy(const char *name)
 {
 	struct if_clone *ifc;
@@ -1101,11 +1146,28 @@ if_clone_list(struct if_clonereq *ifcr)
 }
 
 void
+ifaref(struct ifaddr *ifa)
+{
+	ifa->ifa_refcnt++;
+}
+
+void
+ifafree(struct ifaddr *ifa)
+{
+	KASSERT(ifa != NULL);
+	KASSERT(ifa->ifa_refcnt > 0);
+
+	if (--ifa->ifa_refcnt == 0) {
+		free(ifa, M_IFADDR);
+	}
+}
+
+void
 ifa_insert(struct ifnet *ifp, struct ifaddr *ifa)
 {
 	ifa->ifa_ifp = ifp;
 	TAILQ_INSERT_TAIL(&ifp->if_addrlist, ifa, ifa_list);
-	IFAREF(ifa);
+	ifaref(ifa);
 }
 
 void
@@ -1113,7 +1175,7 @@ ifa_remove(struct ifnet *ifp, struct ifaddr *ifa)
 {
 	KASSERT(ifa->ifa_ifp == ifp);
 	TAILQ_REMOVE(&ifp->if_addrlist, ifa, ifa_list);
-	IFAFREE(ifa);
+	ifafree(ifa);
 }
 
 static inline int
@@ -1473,24 +1535,29 @@ if_up(struct ifnet *ifp)
 }
 
 /*
- * Handle interface watchdog timer routines.  Called
- * from softclock, we decrement timers (if set) and
+ * Handle interface slowtimo timer routine.  Called
+ * from softclock, we decrement timer (if set) and
  * call the appropriate interface routine on expiration.
  */
-void
+static void
 if_slowtimo(void *arg)
 {
-	struct ifnet *ifp;
-	int s = splnet();
+	void (*slowtimo)(struct ifnet *);
+	struct ifnet *ifp = arg;
+	int s;
 
-	IFNET_FOREACH(ifp) {
-		if (ifp->if_timer == 0 || --ifp->if_timer)
-			continue;
-		if (ifp->if_watchdog != NULL)
-			(*ifp->if_watchdog)(ifp);
-	}
+	slowtimo = ifp->if_slowtimo;
+	if (__predict_false(slowtimo == NULL))
+		return;
+
+	s = splnet();
+	if (ifp->if_timer != 0 && --ifp->if_timer == 0)
+		(*slowtimo)(ifp);
+
 	splx(s);
-	callout_reset(&if_slowtimo_ch, hz / IFNET_SLOWHZ, if_slowtimo, NULL);
+
+	if (__predict_true(ifp->if_slowtimo != NULL))
+		callout_schedule(ifp->if_slowtimo_ch, hz / IFNET_SLOWHZ);
 }
 
 /*
@@ -1833,6 +1900,7 @@ doifioctl(struct socket *so, u_long cmd, void *data, struct lwp *l)
 	struct ifreq ifrb;
 	struct oifreq *oifr = NULL;
 #endif
+	int r;
 
 	switch (cmd) {
 #ifdef COMPAT_OIFREQ
@@ -1874,9 +1942,12 @@ doifioctl(struct socket *so, u_long cmd, void *data, struct lwp *l)
 			if (error != 0)
 				return error;
 		}
-		return (cmd == SIOCIFCREATE) ?
+		mutex_enter(&if_clone_mtx);
+		r = (cmd == SIOCIFCREATE) ?
 			if_clone_create(ifr->ifr_name) :
 			if_clone_destroy(ifr->ifr_name);
+		mutex_exit(&if_clone_mtx);
+		return r;
 
 	case SIOCIFGCLONERS:
 		return if_clone_list((struct if_clonereq *)data);
@@ -2076,20 +2147,22 @@ ifioctl_detach(struct ifnet *ifp)
  * would have been written had there been adequate space.
  */
 /*ARGSUSED*/
-int
+static int
 ifconf(u_long cmd, void *data)
 {
 	struct ifconf *ifc = (struct ifconf *)data;
 	struct ifnet *ifp;
 	struct ifaddr *ifa;
-	struct ifreq ifr, *ifrp;
-	int space, error = 0;
+	struct ifreq ifr, *ifrp = NULL;
+	int space = 0, error = 0;
 	const int sz = (int)sizeof(struct ifreq);
+	const bool docopy = ifc->ifc_req != NULL;
 
-	if ((ifrp = ifc->ifc_req) == NULL)
-		space = 0;
-	else
+	if (docopy) {
 		space = ifc->ifc_len;
+		ifrp = ifc->ifc_req;
+	}
+
 	IFNET_FOREACH(ifp) {
 		(void)strncpy(ifr.ifr_name, ifp->if_xname,
 		    sizeof(ifr.ifr_name));
@@ -2098,7 +2171,7 @@ ifconf(u_long cmd, void *data)
 		if (IFADDR_EMPTY(ifp)) {
 			/* Interface with no addresses - send zero sockaddr. */
 			memset(&ifr.ifr_addr, 0, sizeof(ifr.ifr_addr));
-			if (ifrp == NULL) {
+			if (!docopy) {
 				space += sz;
 				continue;
 			}
@@ -2116,7 +2189,7 @@ ifconf(u_long cmd, void *data)
 			/* all sockaddrs must fit in sockaddr_storage */
 			KASSERT(sa->sa_len <= sizeof(ifr.ifr_ifru));
 
-			if (ifrp == NULL) {
+			if (!docopy) {
 				space += sz;
 				continue;
 			}
@@ -2129,7 +2202,7 @@ ifconf(u_long cmd, void *data)
 			}
 		}
 	}
-	if (ifrp != NULL) {
+	if (docopy) {
 		KASSERT(0 <= space && space <= ifc->ifc_len);
 		ifc->ifc_len -= space;
 	} else {

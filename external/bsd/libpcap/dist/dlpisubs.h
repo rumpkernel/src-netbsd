@@ -1,8 +1,4 @@
-/*	$NetBSD: dlpisubs.h,v 1.1.1.4 2013/12/31 16:57:25 christos Exp $	*/
-
-/*
- * @(#) Header: /tcpdump/master/libpcap/dlpisubs.h,v 1.2 2008-04-04 19:37:45 guy Exp 
- */
+/*	$NetBSD: dlpisubs.h,v 1.2 2014/11/19 19:33:30 christos Exp $	*/
 
 #ifndef dlpisubs_h
 #define	dlpisubs_h

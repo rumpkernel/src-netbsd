@@ -1,4 +1,4 @@
-/*	$NetBSD: if_wmvar.h,v 1.20 2014/08/24 21:15:35 msaitoh Exp $	*/
+/*	$NetBSD: if_wmvar.h,v 1.23 2014/11/27 11:42:02 msaitoh Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002, 2003, 2004 Wasabi Systems, Inc.
@@ -95,7 +95,23 @@
 #define WM_F_HAS_MANAGE		0x00100000
 #define WM_F_WOL		0x00200000
 #define WM_F_EEE		0x00400000 /* Energy Efficiency Ethernet */
-#define WM_F_ATTACHED		0x00800000 /* attach() fininsed successfully */
+#define WM_F_ATTACHED		0x00800000 /* attach() finished successfully */
+
+
+/*
+ * Variations of Intel gigabit Ethernet controller:
+ *
+ *  +-- 82542
+ *  |  +-- 82543 - 82544
+ *  |  |  +-- 82540 - 82545 - 82546
+ *  |  |  |  +-- 82541 - 82547
+ *  |  |  |  |  +---------- 82571 - 82572 - 82573 - 82574 - 82583
+ *  |  |  |  |  |  +--------- 82575 - 82576 - 82580 - I350 - I354 - I210 - I211
+ *  |  |  |  |  |  |  +-- 80003
+ *  |  |  |  |  |  |  |  +-- ICH8 - ICH9 - ICH10 - PCH - PCH2 - PCH_LPT
+ *  |  |  |  |  |  |  |  |
+ * -+--+--+--+--+--+--+--+----------------------------------------------->
+ */
 
 typedef enum {
 	WM_T_unknown		= 0,
@@ -120,7 +136,6 @@ typedef enum {
 	WM_T_82575,			/* i82575 */
 	WM_T_82576,			/* i82576 */
 	WM_T_82580,			/* i82580 */
-	WM_T_82580ER,			/* i82580ER */
 	WM_T_I350,			/* I350 */
 	WM_T_I354,			/* I354 */
 	WM_T_I210,			/* I210 */
