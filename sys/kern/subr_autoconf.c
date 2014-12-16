@@ -1,4 +1,4 @@
-/* $NetBSD: subr_autoconf.c,v 1.231 2014/08/10 16:44:36 tls Exp $ */
+/* $NetBSD: subr_autoconf.c,v 1.233 2014/11/06 08:46:04 uebayasi Exp $ */
 
 /*
  * Copyright (c) 1996, 2000 Christopher G. Demetriou
@@ -77,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_autoconf.c,v 1.231 2014/08/10 16:44:36 tls Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_autoconf.c,v 1.233 2014/11/06 08:46:04 uebayasi Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_ddb.h"
@@ -707,11 +707,12 @@ config_stdsubmatch(device_t parent, cfdata_t cf, const int *locs, void *aux)
 	KASSERT(!nlocs || locs);
 	for (i = 0; i < nlocs; i++) {
 		cl = &ci->ci_locdesc[i];
-		/* !cld_defaultstr means no default value */
-		if ((!(cl->cld_defaultstr)
-		     || (cf->cf_loc[i] != cl->cld_default))
-		    && cf->cf_loc[i] != locs[i])
-			return 0;
+		if (cl->cld_defaultstr != NULL &&
+		    cf->cf_loc[i] == cl->cld_default)
+			continue;
+		if (cf->cf_loc[i] == locs[i])
+			continue;
+		return 0;
 	}
 
 	return config_match(parent, cf, aux);
@@ -1123,26 +1124,26 @@ number(char *ep, int n)
 static void
 config_makeroom(int n, struct cfdriver *cd)
 {
-	int old, new;
+	int ondevs, nndevs;
 	device_t *osp, *nsp;
 
 	alldevs_nwrite++;
 
-	for (new = MAX(4, cd->cd_ndevs); new <= n; new += new)
+	for (nndevs = MAX(4, cd->cd_ndevs); nndevs <= n; nndevs += nndevs)
 		;
 
 	while (n >= cd->cd_ndevs) {
 		/*
 		 * Need to expand the array.
 		 */
-		old = cd->cd_ndevs;
+		ondevs = cd->cd_ndevs;
 		osp = cd->cd_devs;
 
 		/* Release alldevs_mtx around allocation, which may
 		 * sleep.
 		 */
 		mutex_exit(&alldevs_mtx);
-		nsp = kmem_alloc(sizeof(device_t[new]), KM_SLEEP);
+		nsp = kmem_alloc(sizeof(device_t[nndevs]), KM_SLEEP);
 		if (nsp == NULL)
 			panic("%s: could not expand cd_devs", __func__);
 		mutex_enter(&alldevs_mtx);
@@ -1152,20 +1153,20 @@ config_makeroom(int n, struct cfdriver *cd)
 		 */
 		if (cd->cd_devs != osp) {
 			mutex_exit(&alldevs_mtx);
-			kmem_free(nsp, sizeof(device_t[new]));
+			kmem_free(nsp, sizeof(device_t[nndevs]));
 			mutex_enter(&alldevs_mtx);
 			continue;
 		}
 
-		memset(nsp + old, 0, sizeof(device_t[new - old]));
-		if (old != 0)
-			memcpy(nsp, cd->cd_devs, sizeof(device_t[old]));
+		memset(nsp + ondevs, 0, sizeof(device_t[nndevs - ondevs]));
+		if (ondevs != 0)
+			memcpy(nsp, cd->cd_devs, sizeof(device_t[ondevs]));
 
-		cd->cd_ndevs = new;
+		cd->cd_ndevs = nndevs;
 		cd->cd_devs = nsp;
-		if (old != 0) {
+		if (ondevs != 0) {
 			mutex_exit(&alldevs_mtx);
-			kmem_free(osp, sizeof(device_t[old]));
+			kmem_free(osp, sizeof(device_t[ondevs]));
 			mutex_enter(&alldevs_mtx);
 		}
 	}

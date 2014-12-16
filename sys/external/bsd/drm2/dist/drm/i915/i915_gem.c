@@ -58,6 +58,7 @@
 #include <linux/time.h>
 #include <linux/err.h>
 #include <linux/bitops.h>
+#include <linux/printk.h>
 #include <asm/param.h>
 #include <asm/page.h>
 
@@ -809,6 +810,7 @@ i915_gem_pread_ioctl(struct drm_device *dev, void *data,
 		     struct drm_file *file)
 {
 	struct drm_i915_gem_pread *args = data;
+	struct drm_gem_object *gobj;
 	struct drm_i915_gem_object *obj;
 	int ret = 0;
 
@@ -824,11 +826,12 @@ i915_gem_pread_ioctl(struct drm_device *dev, void *data,
 	if (ret)
 		return ret;
 
-	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
-	if (&obj->base == NULL) {
+	gobj = drm_gem_object_lookup(dev, file, args->handle);
+	if (gobj == NULL) {
 		ret = -ENOENT;
 		goto unlock;
 	}
+	obj = to_intel_bo(gobj);
 
 	/* Bounds check source.  */
 	if (args->offset > obj->base.size ||
@@ -1201,6 +1204,7 @@ i915_gem_pwrite_ioctl(struct drm_device *dev, void *data,
 		      struct drm_file *file)
 {
 	struct drm_i915_gem_pwrite *args = data;
+	struct drm_gem_object *gobj;
 	struct drm_i915_gem_object *obj;
 	int ret;
 
@@ -1225,11 +1229,12 @@ i915_gem_pwrite_ioctl(struct drm_device *dev, void *data,
 	if (ret)
 		return ret;
 
-	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
-	if (&obj->base == NULL) {
+	gobj = drm_gem_object_lookup(dev, file, args->handle);
+	if (gobj == NULL) {
 		ret = -ENOENT;
 		goto unlock;
 	}
+	obj = to_intel_bo(gobj);
 
 	/* Bounds check destination. */
 	if (args->offset > obj->base.size ||
@@ -1387,6 +1392,8 @@ __wait_seqno(struct intel_ring_buffer *ring, u32 seqno, unsigned reset_counter,
 
 	if (timeout)
 		ticks = mstohz(timespec_to_ns(timeout) / 1000000);
+	else
+		ticks = 1;
 
 	if (INTEL_INFO(dev)->gen >= 6 && can_wait_boost(file_priv)) {
 		gen6_rps_boost(dev_priv);
@@ -1661,6 +1668,7 @@ i915_gem_set_domain_ioctl(struct drm_device *dev, void *data,
 			  struct drm_file *file)
 {
 	struct drm_i915_gem_set_domain *args = data;
+	struct drm_gem_object *gobj;
 	struct drm_i915_gem_object *obj;
 	uint32_t read_domains = args->read_domains;
 	uint32_t write_domain = args->write_domain;
@@ -1683,11 +1691,12 @@ i915_gem_set_domain_ioctl(struct drm_device *dev, void *data,
 	if (ret)
 		return ret;
 
-	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
-	if (&obj->base == NULL) {
+	gobj = drm_gem_object_lookup(dev, file, args->handle);
+	if (gobj == NULL) {
 		ret = -ENOENT;
 		goto unlock;
 	}
+	obj = to_intel_bo(gobj);
 
 	/* Try to flush the object off the GPU without holding the lock.
 	 * We will repeat the flush holding the lock in the normal manner
@@ -1727,6 +1736,7 @@ i915_gem_sw_finish_ioctl(struct drm_device *dev, void *data,
 			 struct drm_file *file)
 {
 	struct drm_i915_gem_sw_finish *args = data;
+	struct drm_gem_object *gobj;
 	struct drm_i915_gem_object *obj;
 	int ret = 0;
 
@@ -1734,11 +1744,12 @@ i915_gem_sw_finish_ioctl(struct drm_device *dev, void *data,
 	if (ret)
 		return ret;
 
-	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
-	if (&obj->base == NULL) {
+	gobj = drm_gem_object_lookup(dev, file, args->handle);
+	if (gobj == NULL) {
 		ret = -ENOENT;
 		goto unlock;
 	}
+	obj = to_intel_bo(gobj);
 
 	/* Pinned buffers may be scanout, so flush the cache */
 	if (obj->pin_display)
@@ -2266,6 +2277,7 @@ i915_gem_mmap_gtt(struct drm_file *file,
 		  uint64_t *offset)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct drm_gem_object *gobj;
 	struct drm_i915_gem_object *obj;
 	int ret;
 
@@ -2273,11 +2285,12 @@ i915_gem_mmap_gtt(struct drm_file *file,
 	if (ret)
 		return ret;
 
-	obj = to_intel_bo(drm_gem_object_lookup(dev, file, handle));
-	if (&obj->base == NULL) {
+	gobj = drm_gem_object_lookup(dev, file, handle);
+	if (gobj == NULL) {
 		ret = -ENOENT;
 		goto unlock;
 	}
+	obj = to_intel_bo(gobj);
 
 	if (obj->base.size > dev_priv->gtt.mappable_end) {
 		ret = -E2BIG;
@@ -2826,10 +2839,18 @@ void i915_vma_move_to_active(struct i915_vma *vma,
 static void
 i915_gem_object_move_to_inactive(struct drm_i915_gem_object *obj)
 {
-	struct drm_i915_private *dev_priv = obj->base.dev->dev_private;
+	struct drm_device *dev = obj->base.dev;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct i915_address_space *vm;
 	struct i915_vma *vma;
 
+	if ((obj->base.write_domain & I915_GEM_DOMAIN_GTT) != 0) {
+#if 0
+		printk(KERN_ERR "%s: %p 0x%x flushing gtt\n", __func__, obj,
+			obj->base.write_domain);
+#endif
+		i915_gem_object_flush_gtt_write_domain(obj);
+	}
 	BUG_ON(obj->base.write_domain & ~I915_GEM_GPU_DOMAINS);
 	BUG_ON(!obj->active);
 
@@ -3356,6 +3377,7 @@ i915_gem_wait_ioctl(struct drm_device *dev, void *data, struct drm_file *file)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct drm_i915_gem_wait *args = data;
+	struct drm_gem_object *gobj;
 	struct drm_i915_gem_object *obj;
 	struct intel_ring_buffer *ring = NULL;
 	struct timespec timeout_stack, *timeout = NULL;
@@ -3372,11 +3394,12 @@ i915_gem_wait_ioctl(struct drm_device *dev, void *data, struct drm_file *file)
 	if (ret)
 		return ret;
 
-	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->bo_handle));
-	if (&obj->base == NULL) {
+	gobj = drm_gem_object_lookup(dev, file, args->bo_handle);
+	if (gobj == NULL) {
 		mutex_unlock(&dev->struct_mutex);
 		return -ENOENT;
 	}
+	obj = to_intel_bo(gobj);
 
 	/* Need to make sure the object gets inactive eventually. */
 	ret = i915_gem_object_flush_active(obj);
@@ -3934,7 +3957,7 @@ static void i915_gem_verify_gtt(struct drm_device *dev)
 	struct drm_i915_gem_object *obj;
 	int err = 0;
 
-	list_for_each_entry(obj, &dev_priv->mm.gtt_list, global_list) {
+	list_for_each_entry(obj, &dev_priv->mm.bound_list, global_list) {
 		if (obj->gtt_space == NULL) {
 			printk(KERN_ERR "object found on GTT list with no space reserved\n");
 			err++;
@@ -4319,6 +4342,7 @@ int i915_gem_get_caching_ioctl(struct drm_device *dev, void *data,
 			       struct drm_file *file)
 {
 	struct drm_i915_gem_caching *args = data;
+	struct drm_gem_object *gobj;
 	struct drm_i915_gem_object *obj;
 	int ret;
 
@@ -4326,11 +4350,12 @@ int i915_gem_get_caching_ioctl(struct drm_device *dev, void *data,
 	if (ret)
 		return ret;
 
-	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
-	if (&obj->base == NULL) {
+	gobj = drm_gem_object_lookup(dev, file, args->handle);
+	if (gobj == NULL) {
 		ret = -ENOENT;
 		goto unlock;
 	}
+	obj = to_intel_bo(gobj);
 
 	switch (obj->cache_level) {
 	case I915_CACHE_LLC:
@@ -4357,6 +4382,7 @@ int i915_gem_set_caching_ioctl(struct drm_device *dev, void *data,
 			       struct drm_file *file)
 {
 	struct drm_i915_gem_caching *args = data;
+	struct drm_gem_object *gobj;
 	struct drm_i915_gem_object *obj;
 	enum i915_cache_level level;
 	int ret;
@@ -4379,11 +4405,12 @@ int i915_gem_set_caching_ioctl(struct drm_device *dev, void *data,
 	if (ret)
 		return ret;
 
-	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
-	if (&obj->base == NULL) {
+	gobj = drm_gem_object_lookup(dev, file, args->handle);
+	if (gobj == NULL) {
 		ret = -ENOENT;
 		goto unlock;
 	}
+	obj = to_intel_bo(gobj);
 
 	ret = i915_gem_object_set_cache_level(obj, level);
 
@@ -4689,6 +4716,7 @@ i915_gem_pin_ioctl(struct drm_device *dev, void *data,
 		   struct drm_file *file)
 {
 	struct drm_i915_gem_pin *args = data;
+	struct drm_gem_object *gobj;
 	struct drm_i915_gem_object *obj;
 	int ret;
 
@@ -4699,11 +4727,12 @@ i915_gem_pin_ioctl(struct drm_device *dev, void *data,
 	if (ret)
 		return ret;
 
-	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
-	if (&obj->base == NULL) {
+	gobj = drm_gem_object_lookup(dev, file, args->handle);
+	if (gobj == NULL) {
 		ret = -ENOENT;
 		goto unlock;
 	}
+	obj = to_intel_bo(gobj);
 
 	if (obj->madv != I915_MADV_WILLNEED) {
 		DRM_DEBUG("Attempting to pin a purgeable buffer\n");
@@ -4745,6 +4774,7 @@ i915_gem_unpin_ioctl(struct drm_device *dev, void *data,
 		     struct drm_file *file)
 {
 	struct drm_i915_gem_pin *args = data;
+	struct drm_gem_object *gobj;
 	struct drm_i915_gem_object *obj;
 	int ret;
 
@@ -4752,11 +4782,12 @@ i915_gem_unpin_ioctl(struct drm_device *dev, void *data,
 	if (ret)
 		return ret;
 
-	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
-	if (&obj->base == NULL) {
+	gobj = drm_gem_object_lookup(dev, file, args->handle);
+	if (gobj == NULL) {
 		ret = -ENOENT;
 		goto unlock;
 	}
+	obj = to_intel_bo(gobj);
 
 	if (obj->pin_filp != file) {
 		DRM_DEBUG("Not pinned by caller in i915_gem_pin_ioctl(): %d\n",
@@ -4782,6 +4813,7 @@ i915_gem_busy_ioctl(struct drm_device *dev, void *data,
 		    struct drm_file *file)
 {
 	struct drm_i915_gem_busy *args = data;
+	struct drm_gem_object *gobj;
 	struct drm_i915_gem_object *obj;
 	int ret;
 
@@ -4789,11 +4821,12 @@ i915_gem_busy_ioctl(struct drm_device *dev, void *data,
 	if (ret)
 		return ret;
 
-	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
-	if (&obj->base == NULL) {
+	gobj = drm_gem_object_lookup(dev, file, args->handle);
+	if (gobj == NULL) {
 		ret = -ENOENT;
 		goto unlock;
 	}
+	obj = to_intel_bo(gobj);
 
 	/* Count all active objects as busy, even if they are currently not used
 	 * by the gpu. Users of this interface expect objects to eventually
@@ -4826,6 +4859,7 @@ i915_gem_madvise_ioctl(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv)
 {
 	struct drm_i915_gem_madvise *args = data;
+	struct drm_gem_object *gobj;
 	struct drm_i915_gem_object *obj;
 	int ret;
 
@@ -4841,11 +4875,12 @@ i915_gem_madvise_ioctl(struct drm_device *dev, void *data,
 	if (ret)
 		return ret;
 
-	obj = to_intel_bo(drm_gem_object_lookup(dev, file_priv, args->handle));
-	if (&obj->base == NULL) {
+	gobj = drm_gem_object_lookup(dev, file_priv, args->handle);
+	if (gobj == NULL) {
 		ret = -ENOENT;
 		goto unlock;
 	}
+	obj = to_intel_bo(gobj);
 
 	if (i915_gem_obj_is_pinned(obj)) {
 		ret = -EINVAL;

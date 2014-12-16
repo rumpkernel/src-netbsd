@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_rndsink.c,v 1.8 2014/03/01 14:15:15 riastradh Exp $	*/
+/*	$NetBSD: kern_rndsink.c,v 1.10 2014/10/26 18:22:32 tls Exp $	*/
 
 /*-
  * Copyright (c) 2013 The NetBSD Foundation, Inc.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_rndsink.c,v 1.8 2014/03/01 14:15:15 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_rndsink.c,v 1.10 2014/10/26 18:22:32 tls Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -43,15 +43,17 @@ __KERNEL_RCSID(0, "$NetBSD: kern_rndsink.c,v 1.8 2014/03/01 14:15:15 riastradh E
 
 #include <dev/rnd_private.h>	/* XXX provisional, for rnd_extract_data */
 
+enum rsink_state {
+	RNDSINK_IDLE,		/* no callback in progress */
+	RNDSINK_QUEUED,		/* queued for callback */
+	RNDSINK_IN_FLIGHT,	/* callback called */
+	RNDSINK_REQUEUED,	/* queued again before callback done */
+	RNDSINK_DEAD,		/* destroyed */
+};
+
 struct rndsink {
 	/* Callback state.  */
-	enum {
-		RNDSINK_IDLE,		/* no callback in progress */
-		RNDSINK_QUEUED,		/* queued for callback */
-		RNDSINK_IN_FLIGHT,	/* callback called */
-		RNDSINK_REQUEUED,	/* queued again before callback done */
-		RNDSINK_DEAD,		/* destroyed */
-	}			rsink_state;
+	enum rsink_state	rsink_state;
 
 	/* Entry on the queue of rndsinks, iff in the RNDSINK_QUEUED state.  */
 	TAILQ_ENTRY(rndsink)	rsink_entry;
@@ -214,15 +216,17 @@ rndsinks_enqueue(struct rndsink *rndsink)
 	 * XXX This should request only rndsink->rs_bytes bytes of
 	 * entropy, but that might get buffered up indefinitely because
 	 * kern_rndq has no bound on the duration before it will
-	 * process queued entropy samples.  For now, request refilling
-	 * the pool altogether so that the buffer will fill up and get
-	 * processed.  Later, we ought to (a) bound the duration before
+	 * process queued entropy samples.  To work around this, we are
+	 * a little too incestuous with kern_rndq: we avoid marking polled
+	 * sources "fast" there, and know here that for non-fast sources,
+	 * that code will buffer two ints worth of data per source.
+	 * Later, we ought to (a) bound the duration before
 	 * queued entropy samples get processed, and (b) add a target
 	 * or something -- as soon as we get that much from the entropy
 	 * sources, distribute it.
 	 */
 	mutex_spin_enter(&rndpool_mtx);
-	rnd_getmore(RND_POOLBITS / NBBY);
+	rnd_getmore(MAX(rndsink->rsink_bytes, 2 * sizeof(uint32_t)));
 	mutex_spin_exit(&rndpool_mtx);
 
 	switch (rndsink->rsink_state) {

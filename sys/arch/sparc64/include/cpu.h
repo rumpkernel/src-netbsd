@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.111 2014/06/08 17:33:24 palle Exp $ */
+/*	$NetBSD: cpu.h,v 1.113 2014/09/24 18:32:10 palle Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -70,6 +70,9 @@
 #if defined(_KERNEL)
 #include <machine/cpuset.h>
 #include <sparc64/sparc64/intreg.h>
+#endif
+#ifdef SUN4V
+#include <sparc64/hypervisor.h>
 #endif
 
 #include <sys/cpu_data.h>
@@ -174,6 +177,9 @@ struct cpu_info {
 	pte_t			*ci_tsb_dmmu;
 	pte_t			*ci_tsb_immu;
 
+	/* TSB description (sun4v). */
+	struct tsb_desc         *ci_tsb_desc;
+	
 	/* MMU Fault Status Area (sun4v).
 	 * Will be initialized to the physical address of the bottom of
 	 * the interrupt stack.
@@ -217,6 +223,7 @@ struct cpu_bootargs {
 	vaddr_t cb_ekdata;
 
 	paddr_t	cb_cpuinfo;
+	int cb_cputyp;
 };
 
 extern struct cpu_bootargs *cpu_args;

@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.own.mk,v 1.833 2014/08/23 02:26:36 matt Exp $
+#	$NetBSD: bsd.own.mk,v 1.838 2014/12/16 06:04:10 mrg Exp $
 
 # This needs to be before bsd.init.mk
 .if defined(BSD_MK_COMPAT_FILE)
@@ -14,7 +14,7 @@ MAKECONF?=	/etc/mk.conf
 #
 # CPU model, derived from MACHINE_ARCH
 #
-MACHINE_CPU=	${MACHINE_ARCH:C/mipse[bl]/mips/:C/mips64e[bl]/mips/:C/sh3e[bl]/sh3/:S/coldfire/m68k/:S/m68000/m68k/:C/arm.*/arm/:C/earm.*/arm/:S/earm/arm/:S/powerpc64/powerpc/:S/aarch64eb/aarch64/}
+MACHINE_CPU=	${MACHINE_ARCH:C/mipse[bl]/mips/:C/mips64e[bl]/mips/:C/sh3e[bl]/sh3/:S/coldfire/m68k/:S/m68000/m68k/:C/arm.*/arm/:C/earm.*/arm/:S/earm/arm/:S/powerpc64/powerpc/:S/aarch64eb/aarch64/:S/or1knd/or1k/:C/riscv../riscv/}
 
 #
 # Subdirectory used below ${RELEASEDIR} when building a release
@@ -98,7 +98,7 @@ _LIBC_COMPILER_RT.powerpc=	yes
 _LIBC_COMPILER_RT.powerpc64=	yes
 _LIBC_COMPILER_RT.x86_64=	yes
 
-.if ${MKLLVM:Uno} == "yes" && ${_LIBC_COMPILER_RT.${MACHINE_ARCH}:Uno} == "yes"
+.if ${HAVE_LLVM:Uno} == "yes" && ${_LIBC_COMPILER_RT.${MACHINE_ARCH}:Uno} == "yes"
 HAVE_LIBGCC?=	no
 .else
 HAVE_LIBGCC?=	yes
@@ -106,7 +106,7 @@ HAVE_LIBGCC?=	yes
 
 
 # ia64 is not support
-.if ${MKLLVM:Uno} == "yes" || !empty(MACHINE_ARCH:Mearm*)
+.if ${HAVE_LLVM:Uno} == "yes" || !empty(MACHINE_ARCH:Mearm*)
 HAVE_LIBGCC_EH?=	no
 .else
 HAVE_LIBGCC_EH?=	yes
@@ -537,8 +537,10 @@ MACHINES.m68k=		amiga atari cesfic hp300 luna68k mac68k \
 			news68k next68k sun3 x68k
 MACHINES.mips=		arc cobalt algor cobalt emips evbmips ews4800mips \
 			hpcmips mipsco newsmips pmax sbmips sgimips
+MACHINES.or1k=		or1k
 MACHINES.powerpc=	amigappc bebox evbppc ibmnws macppc mvmeppc \
 			ofppc prep rs6000 sandpoint
+MACHINES.riscv=		riscv
 MACHINES.sh3=		dreamcast evbsh3 hpcsh landisk mmeye
 MACHINES.sparc=		sparc sparc64
 MACHINES.sparc64=	sparc64
@@ -574,6 +576,7 @@ OBJCOPY_ELF2AOUT_FLAGS?=	\
 	-R .debug_loc		\
 	-R .debug_pubnames	\
 	-R .debug_pubtypes	\
+	-R .debug_ranges	\
 	-R .debug_str		\
 	-R .eh_frame		\
 	-R .note.netbsd.ident
@@ -711,6 +714,19 @@ MKGCC:= no
 
 # No GDB support for aarch64
 MKGDB.aarch64=	no
+MKGDB.or1k=	no
+MKGDB.riscv32=	no
+MKGDB.riscv64=	no
+
+# No kernel modules for or1k (yet)
+MKKMOD.or1k=	no
+MKKMOD.riscv32=	no
+MKKMOD.riscv64=	no
+
+# No profiling for or1k (yet)
+MKPROFILE.or1k=	no
+MKPROFILE.riscv32=no
+MKPROFILE.riscv64=no
 
 #
 # The m68000 port is incomplete.
@@ -880,7 +896,8 @@ MK${var}:=	yes
 #
 .if ${MACHINE_ARCH} == "x86_64" || ${MACHINE_ARCH} == "sparc64" \
     || ${MACHINE_ARCH} == "mips64eb" || ${MACHINE_ARCH} == "mips64el" \
-    || ${MACHINE_ARCH} == "powerpc64" || ${MACHINE_CPU} == "aarch64"
+    || ${MACHINE_ARCH} == "powerpc64" || ${MACHINE_CPU} == "aarch64" \
+    || ${MACHINE_ARCH} == "riscv64"
 MKCOMPAT?=	yes
 .elif !empty(MACHINE_ARCH:Mearm*)
 MKCOMPAT?=	no
@@ -901,10 +918,11 @@ MKCOMPATMODULES:=	no
 # arm is always softfloat unless it isn't
 # emips is always softfloat.
 # coldfire is always softfloat
+# or1k is always softfloat
 #
 .if ${MACHINE_ARCH} == "mips64eb" || ${MACHINE_ARCH} == "mips64el" || \
     (${MACHINE_CPU} == "arm" && ${MACHINE_ARCH:M*hf*} == "") || \
-    ${MACHINE_ARCH} == "coldfire" || \
+    ${MACHINE_ARCH} == "coldfire" || ${MACHINE_CPU} == "or1k" || \
     ${MACHINE} == "emips"
 MKSOFTFLOAT?=	yes
 .endif
@@ -1250,8 +1268,9 @@ X11SRCDIR.${_proto}proto?=		${X11SRCDIRMIT}/${_proto}proto/dist
 	xtrans fontconfig expat freetype evieext mkfontscale bdftopcf \
 	xkbcomp xorg-cf-files imake xorg-server xbiff xkbdata xkeyboard-config \
 	xbitmaps appres xeyes xev xedit sessreg pixman \
-	beforelight bitmap editres makedepend fonttosfnt fslsfonts \
-	fstobdf MesaDemos MesaGLUT MesaLib ico iceauth lbxproxy listres lndir \
+	beforelight bitmap editres makedepend fonttosfnt fslsfonts fstobdf \
+	glu glw mesa-demos MesaDemos MesaGLUT MesaLib \
+	ico iceauth lbxproxy listres lndir \
 	luit xproxymanagementprotocol mkfontdir oclock proxymngr rgb \
 	setxkbmap smproxy twm viewres x11perf xauth xcalc xclipboard \
 	xclock xcmsdb xconsole xcutsel xditview xdpyinfo xdriinfo xdm \

@@ -1,4 +1,4 @@
-/*	$NetBSD: armreg.h,v 1.97 2014/04/14 20:50:47 matt Exp $	*/
+/*	$NetBSD: armreg.h,v 1.102 2014/11/27 04:07:13 matt Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Ben Harris
@@ -225,6 +225,7 @@
 #define CPU_ID_CORTEXA9R4	0x413fc090
 #define CPU_ID_CORTEXA15R2	0x412fc0f0
 #define CPU_ID_CORTEXA15R3	0x413fc0f0
+#define CPU_ID_CORTEXA17R1	0x411fc0e0
 #define CPU_ID_CORTEX_P(n)	((n & 0xff0ff000) == 0x410fc000)
 #define CPU_ID_CORTEX_A5_P(n)	((n & 0xff0ff0f0) == 0x410fc050)
 #define CPU_ID_CORTEX_A7_P(n)	((n & 0xff0ff0f0) == 0x410fc070)
@@ -417,16 +418,6 @@
 #define	ARM1176_AUXCTL_FSD	0x40000000 /* force speculative ops disable */
 #define	ARM1176_AUXCTL_FIO	0x80000000 /* low intr latency override */
 
-/* Cortex-A9 Auxiliary Control Register (CP15 register 1, opcode2 1) */   
-#define	CORTEXA9_AUXCTL_PARITY	0x00000200 /* Enable parity */
-#define	CORTEXA9_AUXCTL_1WAY	0x00000100 /* Alloc in one way only */
-#define	CORTEXA9_AUXCTL_EXCL	0x00000080 /* Exclusive cache */
-#define	CORTEXA9_AUXCTL_SMP	0x00000040 /* CPU is in SMP mode */
-#define	CORTEXA9_AUXCTL_WRZERO	0x00000008 /* Write full line of zeroes */
-#define	CORTEXA9_AUXCTL_L1PLD	0x00000004 /* L1 Dside prefetch */
-#define	CORTEXA9_AUXCTL_L2PLD	0x00000002 /* L2 Dside prefetch */
-#define	CORTEXA9_AUXCTL_FW	0x00000001 /* Forward Cache/TLB ops */
-
 /* XScale Auxiliary Control Register (CP15 register 1, opcode2 1) */
 #define	XSCALE_AUXCTL_K		0x00000001 /* dis. write buffer coalescing */
 #define	XSCALE_AUXCTL_P		0x00000002 /* ECC protect page table access */
@@ -448,8 +439,8 @@
 
 /* Cortex-A9 Auxiliary Control Register (CP15 register 1, opcode 1) */
 #define	CORTEXA9_AUXCTL_FW	0x00000001 /* Cache and TLB updates broadcast */
-#define	CORTEXA9_AUXCTL_L2_PLD	0x00000002 /* Prefetch hint enable */
-#define	CORTEXA9_AUXCTL_L1_PLD	0x00000004 /* Data prefetch hint enable */
+#define	CORTEXA9_AUXCTL_L2PE	0x00000002 /* Prefetch hint enable */
+#define	CORTEXA9_AUXCTL_L1PE	0x00000004 /* Data prefetch hint enable */
 #define	CORTEXA9_AUXCTL_WR_ZERO	0x00000008 /* Ena. write full line of 0s mode */
 #define	CORTEXA9_AUXCTL_SMP	0x00000040 /* Coherency is active */
 #define	CORTEXA9_AUXCTL_EXCL	0x00000080 /* Exclusive cache bit */
@@ -722,13 +713,13 @@
 #define ARM_A7_TLBDATA2_S2_LEVEL	__BITS(85-64,84-64)
 #define ARM_A7_TLBDATA2_S1_SIZE		__BITS(83-64,82-64)
 #define ARM_A7_TLBDATA2_S1_SIZE_4KB	0
-#define ARM_A7_TLBDATA2_S1_SIZE_64KB	0
-#define ARM_A7_TLBDATA2_S1_SIZE_1MB	0
-#define ARM_A7_TLBDATA2_S1_SIZE_16MB	0
+#define ARM_A7_TLBDATA2_S1_SIZE_64KB	1
+#define ARM_A7_TLBDATA2_S1_SIZE_1MB	2
+#define ARM_A7_TLBDATA2_S1_SIZE_16MB	3
 #define ARM_A7_TLBDATA2_DOM		__BITS(81-64,78-64)
 #define ARM_A7_TLBDATA2_IS		__BITS(77-64,76-64)
 #define ARM_A7_TLBDATA2_IS_NC		0
-#define ARM_A7_TLBDATA2_IS_WB		1
+#define ARM_A7_TLBDATA2_IS_WB_WA	1
 #define ARM_A7_TLBDATA2_IS_WT		2
 #define ARM_A7_TLBDATA2_IS_DSO		3
 #define ARM_A7_TLBDATA2_S2OVR		__BIT(75-64)
@@ -922,12 +913,13 @@ ARMREG_READ_INLINE(dfar, "p15,0,%0,c6,c0,0") /* Data Fault Address Register */
 ARMREG_READ_INLINE(ifar, "p15,0,%0,c6,c0,2") /* Instruction Fault Address Register */
 /* cp15 c7 registers */
 ARMREG_WRITE_INLINE(icialluis, "p15,0,%0,c7,c1,0") /* Instruction Inv All (IS) */
-ARMREG_WRITE_INLINE(bpiallis, "p15,0,%0,c7,c1,6") /* Branch Invalidate All (IS) */
+ARMREG_WRITE_INLINE(bpiallis, "p15,0,%0,c7,c1,6") /* Branch Predictor Invalidate All (IS) */
 ARMREG_READ_INLINE(par, "p15,0,%0,c7,c4,0") /* Physical Address Register */
 ARMREG_WRITE_INLINE(iciallu, "p15,0,%0,c7,c5,0") /* Instruction Invalidate All */
 ARMREG_WRITE_INLINE(icimvau, "p15,0,%0,c7,c5,1") /* Instruction Invalidate MVA */
 ARMREG_WRITE_INLINE(isb, "p15,0,%0,c7,c5,4") /* Instruction Synchronization Barrier */
-ARMREG_WRITE_INLINE(bpiall, "p15,0,%0,c5,c1,6") /* Breakpoint Invalidate All */
+ARMREG_WRITE_INLINE(bpiall, "p15,0,%0,c7,c5,6") /* Branch Predictor Invalidate All */
+ARMREG_WRITE_INLINE(bpimva, "p15,0,%0,c7,c5,7") /* Branch Predictor invalidate by MVA */
 ARMREG_WRITE_INLINE(dcimvac, "p15,0,%0,c7,c6,1") /* Data Invalidate MVA to PoC */
 ARMREG_WRITE_INLINE(dcisw, "p15,0,%0,c7,c6,2") /* Data Invalidate Set/Way */
 ARMREG_WRITE_INLINE(ats1cpr, "p15,0,%0,c7,c8,0") /* AddrTrans CurState PL1 Read */
@@ -938,7 +930,7 @@ ARMREG_WRITE_INLINE(dccmvac, "p15,0,%0,c7,c10,1") /* Data Clean MVA to PoC */
 ARMREG_WRITE_INLINE(dccsw, "p15,0,%0,c7,c10,2") /* Data Clean Set/Way */
 ARMREG_WRITE_INLINE(dsb, "p15,0,%0,c7,c10,4") /* Data Synchronization Barrier */
 ARMREG_WRITE_INLINE(dmb, "p15,0,%0,c7,c10,5") /* Data Memory Barrier */
-ARMREG_WRITE_INLINE(dccmvau, "p15,0,%0,c7,c14,1") /* Data Clean MVA to PoU */
+ARMREG_WRITE_INLINE(dccmvau, "p15,0,%0,c7,c11,1") /* Data Clean MVA to PoU */
 ARMREG_WRITE_INLINE(dccimvac, "p15,0,%0,c7,c14,1") /* Data Clean&Inv MVA to PoC */
 ARMREG_WRITE_INLINE(dccisw, "p15,0,%0,c7,c14,2") /* Data Clean&Inv Set/Way */
 /* cp15 c8 registers */

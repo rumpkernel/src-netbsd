@@ -1,13 +1,8 @@
-#	$NetBSD: Makefile,v 1.2 2011/08/28 15:48:19 jmcneill Exp $
+#	$NetBSD: Makefile,v 1.4 2014/11/19 00:17:10 pooka Exp $
 
 .include "../Makefile.inc"
-
-.PATH:	${S}/dev/pci/hdaudio
+.include "${.CURDIR}/Makefile.inc"
 
 KMOD=	hdaudio
-IOCONF=	hdaudio.ioconf
-SRCS=	hdaudio.c
-SRCS+=	hdaudio_ids.c
-SRCS+=	hdaudio_pci.c
 
 .include <bsd.kmodule.mk>

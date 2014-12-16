@@ -1,4 +1,4 @@
-/*	$NetBSD: tty_ptm.c,v 1.33 2014/07/25 08:10:40 dholland Exp $	*/
+/*	$NetBSD: tty_ptm.c,v 1.35 2014/10/15 15:00:03 christos Exp $	*/
 
 /*-
  * Copyright (c) 2004 The NetBSD Foundation, Inc.
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tty_ptm.c,v 1.33 2014/07/25 08:10:40 dholland Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tty_ptm.c,v 1.35 2014/10/15 15:00:03 christos Exp $");
 
 #include "opt_compat_netbsd.h"
 #include "opt_ptm.h"
@@ -87,6 +87,7 @@ int pts_major, ptc_major;
 static dev_t pty_getfree(void);
 static int pty_alloc_master(struct lwp *, int *, dev_t *, struct mount *);
 static int pty_alloc_slave(struct lwp *, int *, dev_t, struct mount *);
+static int pty_vn_open(struct vnode *, struct lwp *);
 
 void ptmattach(int);
 
@@ -174,22 +175,6 @@ retry:
 		error = EOPNOTSUPP;
 		goto bad;
 	}
-	/*
-	 * XXX Since PTYFS has now multiple instance support, if we mounted
-	 * more than one PTYFS we must check here the ptyfs_used_tbl, to find
-	 * out if the ptyfsnode is under the appropriate mount and skip the
-	 * node if not, because the pty could has been released, but
-	 * ptyfs_reclaim didn't get a chance to release the corresponding
-	 * node other mount point yet.
-	 *
-	 * It's important to have only one mount point's ptyfsnode for each
-	 * appropriate device in ptyfs_used_tbl, else we will have a security 
-	 * problem, because every entry will have access to this device.
-	 *
-	 * Also we will not have not efficient vnode and memory usage.
-	 * You can test this by changing a_recycle from true to false
-	 * in ptyfs_inactive.
-	 */
 	if ((error = (*ptm->allocvp)(mp, l, &vp, *dev, 'p')) != 0) {
 		DPRINTF(("pty_allocvp %d\n", error));
 		goto bad;
@@ -213,7 +198,7 @@ retry:
 	fp->f_flag = FREAD|FWRITE;
 	fp->f_type = DTYPE_VNODE;
 	fp->f_ops = &vnops;
-	fp->f_data = vp;
+	fp->f_vnode = vp;
 	VOP_UNLOCK(vp);
 	fd_affix(curproc, fp, *fd);
 	return 0;
@@ -290,7 +275,7 @@ pty_alloc_slave(struct lwp *l, int *fd, dev_t dev, struct mount *mp)
 	fp->f_flag = FREAD|FWRITE;
 	fp->f_type = DTYPE_VNODE;
 	fp->f_ops = &vnops;
-	fp->f_data = vp;
+	fp->f_vnode = vp;
 	VOP_UNLOCK(vp);
 	fd_affix(curproc, fp, *fd);
 	return 0;

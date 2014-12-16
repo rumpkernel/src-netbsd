@@ -1,4 +1,4 @@
-/*	$NetBSD: udp6_output.c,v 1.44 2013/01/06 00:17:13 christos Exp $	*/
+/*	$NetBSD: udp6_output.c,v 1.47 2014/12/05 18:45:37 seanb Exp $	*/
 /*	$KAME: udp6_output.c,v 1.43 2001/10/15 09:19:52 itojun Exp $	*/
 
 /*
@@ -62,12 +62,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: udp6_output.c,v 1.44 2013/01/06 00:17:13 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: udp6_output.c,v 1.47 2014/12/05 18:45:37 seanb Exp $");
 
 #include "opt_inet.h"
 
 #include <sys/param.h>
-#include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
@@ -178,11 +177,11 @@ udp6_output(struct in6pcb * const in6p, struct mbuf *m,
 
 	if (sin6) {
 		/*
-		 * IPv4 version of udp_output calls in_pcbconnect in this case,
-		 * which needs splnet and affects performance.
-		 * We have to do this as well, since in6_pcbsetport needs to
-		 * know the foreign address for some of the algorithms that
-		 * it employs.
+		 * Slightly different than v4 version in that we call
+		 * in6_selectsrc and in6_pcbsetport to fill in the local
+		 * address and port rather than in_pcbconnect. in_pcbconnect
+		 * sets in6p_faddr which causes EISCONN below to be hit on
+		 * subsequent sendto.
 		 */
 		if (sin6->sin6_port == 0) {
 			error = EADDRNOTAVAIL;
@@ -404,7 +403,7 @@ udp6_output(struct in6pcb * const in6p, struct mbuf *m,
 
 		UDP_STATINC(UDP_STAT_OPACKETS);
 		error = ip_output(m, NULL, &in6p->in6p_route, flags /* XXX */,
-		    NULL, (struct socket *)in6p->in6p_socket);
+		    in6p->in6p_v4moptions, (struct socket *)in6p->in6p_socket);
 		break;
 #else
 		error = EAFNOSUPPORT;

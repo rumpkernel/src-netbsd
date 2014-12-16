@@ -1,4 +1,4 @@
-/*	$NetBSD: if_tap.c,v 1.77 2014/07/25 08:10:40 dholland Exp $	*/
+/*	$NetBSD: if_tap.c,v 1.80 2014/11/07 09:26:08 ozaki-r Exp $	*/
 
 /*
  *  Copyright (c) 2003, 2004, 2008, 2009 The NetBSD Foundation.
@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_tap.c,v 1.77 2014/07/25 08:10:40 dholland Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_tap.c,v 1.80 2014/11/07 09:26:08 ozaki-r Exp $");
 
 #if defined(_KERNEL_OPT)
 
@@ -50,7 +50,6 @@ __KERNEL_RCSID(0, "$NetBSD: if_tap.c,v 1.77 2014/07/25 08:10:40 dholland Exp $")
 #include <sys/device.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
-#include <sys/ksyms.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
 #include <sys/select.h>
@@ -276,6 +275,25 @@ tap_attach(device_t parent, device_t self, void *aux)
 	sc->sc_sih = NULL;
 	getnanotime(&sc->sc_btime);
 	sc->sc_atime = sc->sc_mtime = sc->sc_btime;
+	sc->sc_flags = 0;
+	selinit(&sc->sc_rsel);
+
+	/*
+	 * Initialize the two locks for the device.
+	 *
+	 * We need a lock here because even though the tap device can be
+	 * opened only once, the file descriptor might be passed to another
+	 * process, say a fork(2)ed child.
+	 *
+	 * The Giant saves us from most of the hassle, but since the read
+	 * operation can sleep, we don't want two processes to wake up at
+	 * the same moment and both try and dequeue a single packet.
+	 *
+	 * The queue for event listeners (used by kqueue(9), see below) has
+	 * to be protected too, so use a spin lock.
+	 */
+	mutex_init(&sc->sc_rdlock, MUTEX_DEFAULT, IPL_NONE);
+	mutex_init(&sc->sc_kqlock, MUTEX_DEFAULT, IPL_VM);
 
 	if (!pmf_device_register(self, NULL, NULL))
 		aprint_error_dev(self, "couldn't establish power handler\n");
@@ -328,8 +346,6 @@ tap_attach(device_t parent, device_t self, void *aux)
 	if_attach(ifp);
 	ether_ifattach(ifp, enaddr);
 
-	sc->sc_flags = 0;
-
 #if defined(COMPAT_40) || defined(MODULAR)
 	/*
 	 * Add a sysctl node for that interface.
@@ -354,25 +370,6 @@ tap_attach(device_t parent, device_t self, void *aux)
 		aprint_error_dev(self, "sysctl_createv returned %d, ignoring\n",
 		    error);
 #endif
-
-	/*
-	 * Initialize the two locks for the device.
-	 *
-	 * We need a lock here because even though the tap device can be
-	 * opened only once, the file descriptor might be passed to another
-	 * process, say a fork(2)ed child.
-	 *
-	 * The Giant saves us from most of the hassle, but since the read
-	 * operation can sleep, we don't want two processes to wake up at
-	 * the same moment and both try and dequeue a single packet.
-	 *
-	 * The queue for event listeners (used by kqueue(9), see below) has
-	 * to be protected too, so use a spin lock.
-	 */
-	mutex_init(&sc->sc_rdlock, MUTEX_DEFAULT, IPL_NONE);
-	mutex_init(&sc->sc_kqlock, MUTEX_DEFAULT, IPL_VM);
-
-	selinit(&sc->sc_rsel);
 }
 
 /*
@@ -739,7 +736,7 @@ tap_cdev_open(dev_t dev, int flags, int fmt, struct lwp *l)
  *
  * Once those two steps are successful, we can re-wire the existing file
  * descriptor to its new self.  This is done with fdclone():  it fills the fp
- * structure as needed (notably f_data gets filled with the fifth parameter
+ * structure as needed (notably f_devunit gets filled with the fifth parameter
  * passed, the unit of the tap device which will allows us identifying the
  * device later), and returns EMOVEFD.
  *
@@ -805,7 +802,7 @@ tap_cdev_close(dev_t dev, int flags, int fmt,
 static int
 tap_fops_close(file_t *fp)
 {
-	int unit = (intptr_t)fp->f_data;
+	int unit = fp->f_devunit;
 	struct tap_softc *sc;
 	int error;
 
@@ -882,7 +879,7 @@ tap_fops_read(file_t *fp, off_t *offp, struct uio *uio,
 	int error;
 
 	KERNEL_LOCK(1, NULL);
-	error = tap_dev_read((intptr_t)fp->f_data, uio, flags);
+	error = tap_dev_read(fp->f_devunit, uio, flags);
 	KERNEL_UNLOCK_ONE(NULL);
 	return error;
 }
@@ -890,8 +887,7 @@ tap_fops_read(file_t *fp, off_t *offp, struct uio *uio,
 static int
 tap_dev_read(int unit, struct uio *uio, int flags)
 {
-	struct tap_softc *sc =
-	    device_lookup_private(&tap_cd, unit);
+	struct tap_softc *sc = device_lookup_private(&tap_cd, unit);
 	struct ifnet *ifp;
 	struct mbuf *m, *n;
 	int error = 0, s;
@@ -977,7 +973,7 @@ tap_fops_stat(file_t *fp, struct stat *st)
 {
 	int error = 0;
 	struct tap_softc *sc;
-	int unit = (uintptr_t)fp->f_data;
+	int unit = fp->f_devunit;
 
 	(void)memset(st, 0, sizeof(*st));
 
@@ -1012,7 +1008,7 @@ tap_fops_write(file_t *fp, off_t *offp, struct uio *uio,
 	int error;
 
 	KERNEL_LOCK(1, NULL);
-	error = tap_dev_write((intptr_t)fp->f_data, uio, flags);
+	error = tap_dev_write(fp->f_devunit, uio, flags);
 	KERNEL_UNLOCK_ONE(NULL);
 	return error;
 }
@@ -1081,7 +1077,7 @@ tap_cdev_ioctl(dev_t dev, u_long cmd, void *data, int flags,
 static int
 tap_fops_ioctl(file_t *fp, u_long cmd, void *data)
 {
-	return tap_dev_ioctl((intptr_t)fp->f_data, cmd, data, curlwp);
+	return tap_dev_ioctl(fp->f_devunit, cmd, data, curlwp);
 }
 
 static int
@@ -1163,7 +1159,7 @@ tap_cdev_poll(dev_t dev, int events, struct lwp *l)
 static int
 tap_fops_poll(file_t *fp, int events)
 {
-	return tap_dev_poll((intptr_t)fp->f_data, events, curlwp);
+	return tap_dev_poll(fp->f_devunit, events, curlwp);
 }
 
 static int
@@ -1212,7 +1208,7 @@ tap_cdev_kqfilter(dev_t dev, struct knote *kn)
 static int
 tap_fops_kqfilter(file_t *fp, struct knote *kn)
 {
-	return tap_dev_kqfilter((intptr_t)fp->f_data, kn);
+	return tap_dev_kqfilter(fp->f_devunit, kn);
 }
 
 static int

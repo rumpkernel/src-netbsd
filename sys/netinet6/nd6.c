@@ -1,4 +1,4 @@
-/*	$NetBSD: nd6.c,v 1.152 2014/06/06 01:02:47 rmind Exp $	*/
+/*	$NetBSD: nd6.c,v 1.156 2014/12/16 11:42:27 roy Exp $	*/
 /*	$KAME: nd6.c,v 1.279 2002/06/08 11:16:51 itojun Exp $	*/
 
 /*
@@ -31,8 +31,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nd6.c,v 1.152 2014/06/06 01:02:47 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nd6.c,v 1.156 2014/12/16 11:42:27 roy Exp $");
 
+#include "bridge.h"
+#include "carp.h"
 #include "opt_ipsec.h"
 
 #include <sys/param.h>
@@ -183,14 +185,14 @@ nd6_ifattach(struct ifnet *ifp)
 
 	/* A loopback interface always has ND6_IFF_AUTO_LINKLOCAL.
 	 * A bridge interface should not have ND6_IFF_AUTO_LINKLOCAL
-	 * because one of it's members should. */
+	 * because one of its members should. */
 	if ((ip6_auto_linklocal && ifp->if_type != IFT_BRIDGE) ||
 	    (ifp->if_flags & IFF_LOOPBACK))
 		nd->flags |= ND6_IFF_AUTO_LINKLOCAL;
 
 	/* A loopback interface does not need to accept RTADV.
 	 * A bridge interface should not accept RTADV
-	 * because one of it's members should. */
+	 * because one of its members should. */
 	if (ip6_accept_rtadv &&
 	    !(ifp->if_flags & IFF_LOOPBACK) &&
 	    !(ifp->if_type != IFT_BRIDGE))
@@ -906,7 +908,7 @@ nd6_lookup1(const struct in6_addr *addr6, int create, struct ifnet *ifp,
 	    rt->rt_flags & (RTF_CLONING | RTF_CLONED) &&
 	    (rt->rt_ifp == ifp
 #if NBRIDGE > 0
-	    || SAME_BRIDGE(rt->rt_ifp->if_bridgeport, ifp->if_bridgeport)
+	    || rt->rt_ifp->if_bridge == ifp->if_bridge
 #endif
 #if NCARP > 0
 	    || (ifp->if_type == IFT_CARP && rt->rt_ifp == ifp->if_carpdev) ||
@@ -1035,6 +1037,7 @@ nd6_free(struct rtentry *rt, int gc)
 	struct llinfo_nd6 *ln = (struct llinfo_nd6 *)rt->rt_llinfo, *next;
 	struct in6_addr in6 = satocsin6(rt_getkey(rt))->sin6_addr;
 	struct nd_defrouter *dr;
+	struct rtentry *oldrt;
 
 	/*
 	 * we used to have pfctlinput(PRC_HOSTDEAD) here.
@@ -1127,7 +1130,15 @@ nd6_free(struct rtentry *rt, int gc)
 	 * caches, and disable the route entry not to be used in already
 	 * cached routes.
 	 */
-	rtrequest(RTM_DELETE, rt_getkey(rt), NULL, rt_mask(rt), 0, NULL);
+	oldrt = NULL;
+	rtrequest(RTM_DELETE, rt_getkey(rt), NULL, rt_mask(rt), 0, &oldrt);
+	if (oldrt) {
+		nd6_rtmsg(RTM_DELETE, oldrt); /* tell user process */
+		if (oldrt->rt_refcnt <= 0) {
+			oldrt->rt_refcnt++;
+			rtfree(oldrt);
+		}
+	}
 
 	return next;
 }
@@ -2057,6 +2068,9 @@ fail:
 		break;
 	}
 
+	if (do_update)
+		nd6_rtmsg(RTM_CHANGE, rt);  /* tell user process */
+
 	/*
 	 * When the link-layer address of a router changes, select the
 	 * best router again.  In particular, when the neighbor entry is newly
@@ -2378,10 +2392,13 @@ nd6_storelladdr(const struct ifnet *ifp, const struct rtentry *rt,
 	}
 	sdl = satocsdl(rt->rt_gateway);
 	if (sdl->sdl_alen == 0 || sdl->sdl_alen > dstsize) {
+		char sbuf[INET6_ADDRSTRLEN];
+		char dbuf[LINK_ADDRSTRLEN];
 		/* this should be impossible, but we bark here for debugging */
-		printf("%s: sdl_alen == %" PRIu8 ", dst=%s, if=%s\n", __func__,
-		    sdl->sdl_alen, ip6_sprintf(&satocsin6(dst)->sin6_addr),
-		    if_name(ifp));
+		printf("%s: sdl_alen == %" PRIu8 ", if=%s, dst=%s, sdl=%s\n",
+		    __func__, sdl->sdl_alen, if_name(ifp),
+		    IN6_PRINT(sbuf, &satocsin6(dst)->sin6_addr),
+		    DL_PRINT(dbuf, &sdl->sdl_addr));
 		m_freem(m);
 		return 0;
 	}
