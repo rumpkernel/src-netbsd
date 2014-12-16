@@ -1,4 +1,4 @@
-/*	$NetBSD: headers.c,v 1.56 2014/08/26 07:54:27 christos Exp $	 */
+/*	$NetBSD: headers.c,v 1.59 2014/08/26 21:20:05 joerg Exp $	 */
 
 /*
  * Copyright 1996 John D. Polstra.
@@ -40,7 +40,7 @@
 
 #include <sys/cdefs.h>
 #ifndef lint
-__RCSID("$NetBSD: headers.c,v 1.56 2014/08/26 07:54:27 christos Exp $");
+__RCSID("$NetBSD: headers.c,v 1.59 2014/08/26 21:20:05 joerg Exp $");
 #endif /* not lint */
 
 #include <err.h>
@@ -74,7 +74,9 @@ _rtld_digest_dynamic(const char *execname, Obj_Entry *obj)
 	bool		use_pltrela = false;
 	Elf_Addr        relsz = 0, relasz = 0;
 	Elf_Addr	pltrel = 0, pltrelsz = 0;
+#ifdef RTLD_LOADER
 	Elf_Addr	init = 0, fini = 0;
+#endif
 
 	dbg(("headers: digesting PT_DYNAMIC at %p", obj->dynamic));
 	for (dynp = obj->dynamic; dynp->d_tag != DT_NULL; ++dynp) {
@@ -227,12 +229,15 @@ _rtld_digest_dynamic(const char *execname, Obj_Entry *obj)
 			break;
 
 		case DT_INIT:
+#ifdef RTLD_LOADER
 			init = dynp->d_un.d_ptr;
+#endif
 			break;
 
 #ifdef HAVE_INITFINI_ARRAY
 		case DT_INIT_ARRAY:
-			obj->init_array = (Elf_Addr *)obj->relocbase + dynp->d_un.d_ptr;
+			obj->init_array =
+			    (Elf_Addr *)(obj->relocbase + dynp->d_un.d_ptr);
 			dbg(("headers: DT_INIT_ARRAY at %p",
 			    obj->init_array));
 			break;
@@ -245,7 +250,9 @@ _rtld_digest_dynamic(const char *execname, Obj_Entry *obj)
 #endif
 
 		case DT_FINI:
+#ifdef RTLD_LOADER
 			fini = dynp->d_un.d_ptr;
+#endif
 			break;
 
 #ifdef HAVE_INITFINI_ARRAY
@@ -344,10 +351,12 @@ _rtld_digest_dynamic(const char *execname, Obj_Entry *obj)
 			obj->relalim = obj->pltrela;
 	}
 
+#ifdef RTLD_LOADER
 	if (init != 0)
-		obj->init = (Elf_Addr) RTLD_ELF32_CAST obj->relocbase + init;
+		obj->init = (Elf_Addr) obj->relocbase + init;
 	if (fini != 0)
-		obj->fini = (Elf_Addr) RTLD_ELF32_CAST obj->relocbase + fini;
+		obj->fini = (Elf_Addr) obj->relocbase + fini;
+#endif
 
 	if (dyn_rpath != NULL) {
 		_rtld_add_paths(execname, &obj->rpaths, obj->strtab +

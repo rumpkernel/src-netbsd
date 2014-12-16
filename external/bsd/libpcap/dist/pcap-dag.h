@@ -1,4 +1,4 @@
-/*	$NetBSD: pcap-dag.h,v 1.1.1.4 2013/12/31 16:57:22 christos Exp $	*/
+/*	$NetBSD: pcap-dag.h,v 1.2 2014/11/19 19:33:30 christos Exp $	*/
 
 /*
  * pcap-dag.c: Packet capture interface for Endace DAG card.
@@ -8,8 +8,6 @@
  * at the same time as another type of device.
  *
  * Author: Richard Littin, Sean Irvine ({richard,sean}@reeltwo.com)
- *
- * @(#) Header: /tcpdump/master/libpcap/pcap-dag.h,v 1.7 2008-04-04 19:37:45 guy Exp  (LBL)
  */
 
 pcap_t *dag_create(const char *, char *, int *);
