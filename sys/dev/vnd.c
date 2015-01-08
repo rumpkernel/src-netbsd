@@ -1,4 +1,4 @@
-/*	$NetBSD: vnd.c,v 1.234 2014/11/04 07:51:54 mlelstv Exp $	*/
+/*	$NetBSD: vnd.c,v 1.239 2015/01/02 19:42:06 christos Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 2008 The NetBSD Foundation, Inc.
@@ -91,7 +91,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vnd.c,v 1.234 2014/11/04 07:51:54 mlelstv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vnd.c,v 1.239 2015/01/02 19:42:06 christos Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_vnd.h"
@@ -1041,8 +1041,6 @@ vndioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 #ifdef __HAVE_OLD_DISKLABEL
 	struct disklabel newlabel;
 #endif
-	struct dkwedge_info *dkw;
-	struct dkwedge_list *dkwl;
 
 #ifdef DEBUG
 	if (vnddebug & VDB_FOLLOW)
@@ -1060,10 +1058,6 @@ vndioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	    cmd != VNDIOCGET)
 		return ENXIO;
 	vio = (struct vnd_ioctl *)data;
-
-	error = disk_ioctl(&vnd->sc_dkdev, cmd, data, flag, l);
-	if (error != EPASSTHROUGH)
-		return (error);
 
 	/* Must be open for writes for these commands... */
 	switch (cmd) {
@@ -1108,6 +1102,11 @@ vndioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		if ((vnd->sc_flags & VNF_INITED) == 0)
 			return ENXIO;
 	}
+
+	error = disk_ioctl(&vnd->sc_dkdev, dev, cmd, data, flag, l);
+	if (error != EPASSTHROUGH)
+		return error;
+
 
 	switch (cmd) {
 #ifdef VNDIOCSET50
@@ -1284,9 +1283,9 @@ vndioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 			 * Compute the size (in DEV_BSIZE blocks) specified
 			 * by the geometry.
 			 */
-			geomsize = (vnd->sc_geom.vng_nsectors *
+			geomsize = (int64_t)vnd->sc_geom.vng_nsectors *
 			    vnd->sc_geom.vng_ntracks *
-			    vnd->sc_geom.vng_ncylinders) *
+			    vnd->sc_geom.vng_ncylinders *
 			    (vnd->sc_geom.vng_secsize / DEV_BSIZE);
 
 			/*
@@ -1350,7 +1349,6 @@ vndioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 
 		/* Attach the disk. */
 		disk_attach(&vnd->sc_dkdev);
-		disk_blocksize(&vnd->sc_dkdev, vnd->sc_geom.vng_secsize);
 
 		/* Initialize the xfer and buffer pools. */
 		pool_init(&vnd->sc_vxpool, sizeof(struct vndxfer), 0,
@@ -1467,25 +1465,6 @@ unlock_and_exit:
 		break;
 	}
 
-	case DIOCGDINFO:
-		*(struct disklabel *)data = *(vnd->sc_dkdev.dk_label);
-		break;
-
-#ifdef __HAVE_OLD_DISKLABEL
-	case ODIOCGDINFO:
-		newlabel = *(vnd->sc_dkdev.dk_label);
-		if (newlabel.d_npartitions > OLDMAXPARTITIONS)
-			return ENOTTY;
-		memcpy(data, &newlabel, sizeof (struct olddisklabel));
-		break;
-#endif
-
-	case DIOCGPART:
-		((struct partinfo *)data)->disklab = vnd->sc_dkdev.dk_label;
-		((struct partinfo *)data)->part =
-		    &vnd->sc_dkdev.dk_label->d_partitions[DISKPART(dev)];
-		break;
-
 	case DIOCWDINFO:
 	case DIOCSDINFO:
 #ifdef __HAVE_OLD_DISKLABEL
@@ -1564,40 +1543,6 @@ unlock_and_exit:
 		    FSYNC_WAIT | FSYNC_DATAONLY | FSYNC_CACHE, 0, 0);
 		VOP_UNLOCK(vnd->sc_vp);
 		return error;
-
-	case DIOCAWEDGE:
-		dkw = (void *) data;
-
-		if ((flag & FWRITE) == 0)
-			return EBADF;
-
-		/* If the ioctl happens here, the parent is us. */
-		strlcpy(dkw->dkw_parent, device_xname(vnd->sc_dev),
-		    sizeof(dkw->dkw_parent));
-		return dkwedge_add(dkw);
-
-	case DIOCDWEDGE:
-		dkw = (void *) data;
-
-		if ((flag & FWRITE) == 0)
-			return EBADF;
-
-		/* If the ioctl happens here, the parent is us. */
-		strlcpy(dkw->dkw_parent, device_xname(vnd->sc_dev),
-		    sizeof(dkw->dkw_parent));
-		return dkwedge_del(dkw);
-
-	case DIOCLWEDGES:
-		dkwl = (void *) data;
-
-		return dkwedge_list(&vnd->sc_dkdev, dkwl, l);
-
-	case DIOCMWEDGES:
-		if ((flag & FWRITE) == 0)
-			return EBADF;
-
-		dkwedge_discover(&vnd->sc_dkdev);
-		return 0;
 
 	default:
 		return ENOTTY;
@@ -1793,13 +1738,15 @@ vndgetdefaultlabel(struct vnd_softc *sc, struct disklabel *lp)
 {
 	struct vndgeom *vng = &sc->sc_geom;
 	struct partition *pp;
+	unsigned spb;
 
 	memset(lp, 0, sizeof(*lp));
 
-	if (sc->sc_size > UINT32_MAX)
+	spb = vng->vng_secsize / DEV_BSIZE;
+	if (sc->sc_size / spb > UINT32_MAX)
 		lp->d_secperunit = UINT32_MAX;
 	else
-		lp->d_secperunit = sc->sc_size;
+		lp->d_secperunit = sc->sc_size / spb;
 	lp->d_secsize = vng->vng_secsize;
 	lp->d_nsectors = vng->vng_nsectors;
 	lp->d_ntracks = vng->vng_ntracks;
@@ -1807,7 +1754,7 @@ vndgetdefaultlabel(struct vnd_softc *sc, struct disklabel *lp)
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
 
 	strncpy(lp->d_typename, "vnd", sizeof(lp->d_typename));
-	lp->d_type = DTYPE_VND;
+	lp->d_type = DKTYPE_VND;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
 	lp->d_rpm = 3600;
 	lp->d_interleave = 1;
