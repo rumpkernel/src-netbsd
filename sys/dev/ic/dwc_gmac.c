@@ -1,4 +1,4 @@
-/* $NetBSD: dwc_gmac.c,v 1.29 2014/12/07 02:23:14 jmcneill Exp $ */
+/* $NetBSD: dwc_gmac.c,v 1.31 2015/01/08 14:44:43 jmcneill Exp $ */
 
 /*-
  * Copyright (c) 2013, 2014 The NetBSD Foundation, Inc.
@@ -41,7 +41,7 @@
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(1, "$NetBSD: dwc_gmac.c,v 1.29 2014/12/07 02:23:14 jmcneill Exp $");
+__KERNEL_RCSID(1, "$NetBSD: dwc_gmac.c,v 1.31 2015/01/08 14:44:43 jmcneill Exp $");
 
 /* #define	DWC_GMAC_DEBUG	1 */
 
@@ -598,7 +598,7 @@ dwc_gmac_txdesc_sync(struct dwc_gmac_softc *sc, int start, int end, int ops)
 	/* sync from 'start' to end of ring */
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_dma_ring_map,
 	    TX_DESC_OFFSET(start),
-	    TX_DESC_OFFSET(AWGE_TX_RING_COUNT+1)-TX_DESC_OFFSET(start),
+	    TX_DESC_OFFSET(AWGE_TX_RING_COUNT)-TX_DESC_OFFSET(start),
 	    ops);
 	/* sync from start of ring to 'end' */
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_dma_ring_map,
@@ -787,6 +787,7 @@ dwc_gmac_start(struct ifnet *ifp)
 {
 	struct dwc_gmac_softc *sc = ifp->if_softc;
 	int old = sc->sc_txq.t_queued;
+	int start = sc->sc_txq.t_cur;
 	struct mbuf *m0;
 
 	if ((ifp->if_flags & (IFF_RUNNING | IFF_OACTIVE)) != IFF_RUNNING)
@@ -806,7 +807,7 @@ dwc_gmac_start(struct ifnet *ifp)
 
 	if (sc->sc_txq.t_queued != old) {
 		/* packets have been queued, kick it off */
-		dwc_gmac_txdesc_sync(sc, old, sc->sc_txq.t_cur,
+		dwc_gmac_txdesc_sync(sc, start, sc->sc_txq.t_cur,
 		    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
 
 		bus_space_write_4(sc->sc_bst, sc->sc_bsh,
@@ -866,7 +867,7 @@ dwc_gmac_queue(struct dwc_gmac_softc *sc, struct mbuf *m0)
 		return error;
 	}
 
-	if (sc->sc_txq.t_queued + map->dm_nsegs >= AWGE_TX_RING_COUNT - 1) {
+	if (sc->sc_txq.t_queued + map->dm_nsegs >= AWGE_TX_RING_COUNT) {
 		bus_dmamap_unload(sc->sc_dmat, map);
 		return ENOBUFS;
 	}
