@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.c,v 1.4 2014/02/25 15:20:29 martin Exp $	*/
+/*	$NetBSD: pmap.c,v 1.9 2015/01/05 05:35:18 nonaka Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2001 The NetBSD Foundation, Inc.
@@ -67,7 +67,7 @@
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.4 2014/02/25 15:20:29 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.9 2015/01/05 05:35:18 nonaka Exp $");
 
 /*
  *	Manages physical address maps.
@@ -197,7 +197,7 @@ CTASSERT(PMAP_ASID_RESERVED == 0);
  * Initialize the kernel pmap.
  */
 #ifdef MULTIPROCESSOR
-#define	PMAP_SIZE	offsetof(struct pmap, pm_pai[MAXCPUS])
+#define	PMAP_SIZE	offsetof(struct pmap, pm_pai[PMAP_TLB_MAX])
 #else
 #define	PMAP_SIZE	sizeof(struct pmap)
 kmutex_t pmap_pvlist_mutex __aligned(COHERENCY_UNIT);
@@ -219,6 +219,8 @@ struct pmap_limits pmap_limits;
 #ifdef UVMHIST
 static struct kern_history_ent pmapexechistbuf[10000];
 static struct kern_history_ent pmaphistbuf[10000];
+UVMHIST_DEFINE(pmapexechist);
+UVMHIST_DEFINE(pmaphist);
 #endif
 
 /*
@@ -511,6 +513,11 @@ pmap_create(void)
 
 	pmap_segtab_init(pmap);
 
+#ifdef MULTIPROCESSOR
+	kcpuset_create(&pmap->pm_active, true);
+	kcpuset_create(&pmap->pm_onproc, true);
+#endif
+
 	UVMHIST_LOG(pmaphist, "<- pmap %p", pmap,0,0,0);
 	return pmap;
 }
@@ -536,6 +543,11 @@ pmap_destroy(pmap_t pmap)
 	kpreempt_disable();
 	pmap_tlb_asid_release_all(pmap);
 	pmap_segtab_destroy(pmap, NULL, 0);
+
+#ifdef MULTIPROCESSOR
+	kcpuset_destroy(pmap->pm_active);
+	kcpuset_destroy(pmap->pm_onproc);
+#endif
 
 	pool_put(&pmap_pmap_pool, pmap);
 	kpreempt_enable();
