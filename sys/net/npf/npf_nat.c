@@ -1,4 +1,4 @@
-/*	$NetBSD: npf_nat.c,v 1.37 2014/11/30 01:37:53 rmind Exp $	*/
+/*	$NetBSD: npf_nat.c,v 1.39 2014/12/30 19:11:44 christos Exp $	*/
 
 /*-
  * Copyright (c) 2014 Mindaugas Rasiukevicius <rmind at netbsd org>
@@ -71,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: npf_nat.c,v 1.37 2014/11/30 01:37:53 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: npf_nat.c,v 1.39 2014/12/30 19:11:44 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -256,6 +256,7 @@ npf_nat_newpolicy(prop_dictionary_t natdict, npf_ruleset_t *rset)
 	}
 	return np;
 err:
+	mutex_destroy(&np->n_lock);
 	kmem_free(np, sizeof(npf_natpolicy_t));
 	return NULL;
 }
@@ -914,8 +915,8 @@ npf_nat_dump(const npf_nat_t *nt)
 
 	np = nt->nt_natpolicy;
 	memcpy(&ip, &np->n_taddr, sizeof(ip));
-	printf("\tNATP(%p): type %d flags 0x%x taddr %s tport %d\n",
-	    np, np->n_type, np->n_flags, inet_ntoa(ip), np->n_tport);
+	printf("\tNATP(%p): type %d flags 0x%x taddr %s tport %d\n", np,
+	    np->n_type, np->n_flags, inet_ntoa(ip), ntohs(np->n_tport));
 	memcpy(&ip, &nt->nt_oaddr, sizeof(ip));
 	printf("\tNAT: original address %s oport %d tport %d\n",
 	    inet_ntoa(ip), ntohs(nt->nt_oport), ntohs(nt->nt_tport));
