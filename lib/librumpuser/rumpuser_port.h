@@ -1,4 +1,4 @@
-/*	$NetBSD: rumpuser_port.h,v 1.42 2014/11/10 22:43:46 pooka Exp $	*/
+/*	$NetBSD: rumpuser_port.h,v 1.44 2015/03/05 00:25:39 pooka Exp $	*/
 
 #ifndef _LIB_LIBRUMPUSER_RUMPUSER_PORT_H_
 #define _LIB_LIBRUMPUSER_RUMPUSER_PORT_H_
@@ -47,6 +47,7 @@
 #define HAVE_SYS_TYPES_H 1
 #define HAVE_UNISTD_H 1
 #define HAVE___QUOTACTL 1
+#define HAVE_UTIMENSAT 1
 #define PACKAGE_BUGREPORT "http://rumpkernel.org/"
 #define PACKAGE_NAME "rumpuser-posix"
 #define PACKAGE_STRING "rumpuser-posix 999"
@@ -112,10 +113,6 @@ typedef uint16_t in_port_t;
 #include <sys/select.h>
 #define atomic_inc_uint(x)  __sync_fetch_and_add(x, 1)
 #define atomic_dec_uint(x)  __sync_fetch_and_sub(x, 1)
-#include <time.h>
-int clock_nanosleep (clockid_t, int, const struct timespec *, struct timespec *);
-#include <stdlib.h>
-void arc4random_buf(void*, size_t);
 #endif
 
 /* sunny magic */
