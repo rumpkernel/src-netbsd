@@ -1,4 +1,4 @@
-/*	$NetBSD: rumpfiber.c,v 1.9 2014/12/29 21:50:09 justin Exp $	*/
+/*	$NetBSD: rumpfiber.c,v 1.12 2015/02/15 00:54:32 justin Exp $	*/
 
 /*
  * Copyright (c) 2007-2013 Antti Kantee.  All Rights Reserved.
@@ -68,10 +68,9 @@
 #include "rumpuser_port.h"
 
 #if !defined(lint)
-__RCSID("$NetBSD: rumpfiber.c,v 1.9 2014/12/29 21:50:09 justin Exp $");
+__RCSID("$NetBSD: rumpfiber.c,v 1.12 2015/02/15 00:54:32 justin Exp $");
 #endif /* !lint */
 
-#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/time.h>
 
@@ -398,6 +397,10 @@ init_sched(void)
 {
 	struct thread *thread = calloc(1, sizeof(struct thread));
 
+	if (!thread) {
+		abort();
+	}
+
 	thread->name = strdup("init");
 	thread->flags = 0;
 	thread->wakeup_time = -1;
@@ -441,11 +444,11 @@ rumpuser_init(int version, const struct rumpuser_hyperup *hyp)
 		ET(rv);
 	}
 
-        rumpuser__hyp = *hyp;
+	rumpuser__hyp = *hyp;
 
 	init_sched();
 
-        return 0;
+	return 0;
 }
 
 int
@@ -482,7 +485,7 @@ int
 rumpuser_clock_sleep(int enum_rumpclock, int64_t sec, long nsec)
 {
 	enum rumpclock rclk = enum_rumpclock;
-	uint32_t msec;
+	uint64_t msec;
 	int nlocks;
 
 	rumpkern_unsched(&nlocks, NULL);
@@ -635,39 +638,40 @@ wakeup_all(struct waithead *wh)
 
 int
 rumpuser_thread_create(void *(*f)(void *), void *arg, const char *thrname,
-        int joinable, int pri, int cpuidx, void **tptr)
+	int joinable, int pri, int cpuidx, void **tptr)
 {
-        struct thread *thr;
+	struct thread *thr;
 
-        thr = create_thread(thrname, NULL, (void (*)(void *))f, arg, NULL, 0);
-        /*
-         * XXX: should be supplied as a flag to create_thread() so as to
-         * _ensure_ it's set before the thread runs (and could exit).
-         * now we're trusting unclear semantics of create_thread()
-         */
-        if (thr && joinable)
-                thr->flags |= THREAD_MUSTJOIN;
+	thr = create_thread(thrname, NULL, (void (*)(void *))f, arg, NULL, 0);
 
-        if (!thr)
-                return EINVAL;
+	if (!thr)
+		return EINVAL;
 
-        *tptr = thr;
-        return 0;
+	/*
+	 * XXX: should be supplied as a flag to create_thread() so as to
+	 * _ensure_ it's set before the thread runs (and could exit).
+	 * now we're trusting unclear semantics of create_thread()
+	 */
+	if (thr && joinable)
+		thr->flags |= THREAD_MUSTJOIN;
+
+	*tptr = thr;
+	return 0;
 }
 
 void
 rumpuser_thread_exit(void)
 {
 
-        exit_thread();
+	exit_thread();
 }
 
 int
 rumpuser_thread_join(void *p)
 {
 
-        join_thread(p);
-        return 0;
+	join_thread(p);
+	return 0;
 }
 
 struct rumpuser_mtx {
