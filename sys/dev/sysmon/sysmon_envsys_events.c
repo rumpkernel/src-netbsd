@@ -1,4 +1,4 @@
-/* $NetBSD: sysmon_envsys_events.c,v 1.113 2014/11/23 10:00:20 ozaki-r Exp $ */
+/* $NetBSD: sysmon_envsys_events.c,v 1.115 2015/04/18 14:44:44 mlelstv Exp $ */
 
 /*-
  * Copyright (c) 2007, 2008 Juan Romero Pardines.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sysmon_envsys_events.c,v 1.113 2014/11/23 10:00:20 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sysmon_envsys_events.c,v 1.115 2015/04/18 14:44:44 mlelstv Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -42,6 +42,7 @@ __KERNEL_RCSID(0, "$NetBSD: sysmon_envsys_events.c,v 1.113 2014/11/23 10:00:20 o
 #include <sys/mutex.h>
 #include <sys/kmem.h>
 #include <sys/callout.h>
+#include <sys/syslog.h>
 
 #include <dev/sysmon/sysmonvar.h>
 #include <dev/sysmon/sysmon_envsysvar.h>
@@ -731,11 +732,23 @@ sme_events_check(void *arg)
 
 	KASSERT(sme != NULL);
 
+	mutex_enter(&sme->sme_work_mtx);
+	if (sme->sme_busy > 0) {
+		log(LOG_WARNING, "%s: workqueue busy: updates stopped\n",
+		    sme->sme_name);
+		mutex_exit(&sme->sme_work_mtx);
+		return;
+	}
+	mutex_exit(&sme->sme_work_mtx);
+
 	mutex_enter(&sme->sme_mtx);
+	mutex_enter(&sme->sme_work_mtx);
 	LIST_FOREACH(see, &sme->sme_events_list, see_list) {
 		workqueue_enqueue(sme->sme_wq, &see->see_wk, NULL);
 		see->see_edata->flags |= ENVSYS_FNEED_REFRESH;
+		sme->sme_busy++;
 	}
+	mutex_exit(&sme->sme_work_mtx);
 	if (!sysmon_low_power)
 		sme_schedule_callout(sme);
 	mutex_exit(&sme->sme_mtx);
@@ -771,7 +784,7 @@ sme_events_worker(struct work *wk, void *arg)
 	}
 
 	DPRINTFOBJ(("%s: (%s) desc=%s sensor=%d type=%d state=%d units=%d "
-	    "value_cur=%d upropset=%d\n", __func__, sme->sme_name, edata->desc,
+	    "value_cur=%d upropset=0x%04x\n", __func__, sme->sme_name, edata->desc,
 	    edata->sensor, see->see_type, edata->state, edata->units,
 	    edata->value_cur, edata->upropset));
 
@@ -815,6 +828,10 @@ sme_events_worker(struct work *wk, void *arg)
 out:
 	see->see_flags &= ~SEE_EVENT_WORKING;
 	cv_broadcast(&sme->sme_condvar);
+	mutex_enter(&sme->sme_work_mtx);
+	KASSERT(sme->sme_busy > 0);
+	sme->sme_busy--;
+	mutex_exit(&sme->sme_work_mtx);
 	mutex_exit(&sme->sme_mtx);
 }
 

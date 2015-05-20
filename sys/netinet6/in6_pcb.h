@@ -1,4 +1,4 @@
-/*	$NetBSD: in6_pcb.h,v 1.40 2014/10/11 20:53:16 christos Exp $	*/
+/*	$NetBSD: in6_pcb.h,v 1.45 2015/05/02 17:18:03 rtr Exp $	*/
 /*	$KAME: in6_pcb.h,v 1.45 2001/02/09 05:59:46 itojun Exp $	*/
 
 /*
@@ -66,6 +66,7 @@
 
 #include <sys/queue.h>
 #include <netinet/in_pcb_hdr.h>
+#include <netinet/ip6.h>
 
 /*
  * Common structure pcb for internet protocol implementation.
@@ -155,8 +156,9 @@ struct	in6pcb {
 void	in6_losing(struct in6pcb *);
 void	in6_pcbinit(struct inpcbtable *, int, int);
 int	in6_pcballoc(struct socket *, void *);
-int	in6_pcbbind(void *, struct mbuf *, struct lwp *);
-int	in6_pcbconnect(void *, struct mbuf *, struct lwp *);
+int	in6_pcbbind(void *, struct sockaddr_in6 *, struct lwp *);
+int	in6_pcbconnect(void *, struct sockaddr_in6 *, struct lwp *);
+int	in6_pcbconnect_m(void *, struct mbuf *, struct lwp *);
 void	in6_pcbdetach(struct in6pcb *);
 void	in6_pcbdisconnect(struct in6pcb *);
 struct	in6pcb *in6_pcblookup_port(struct inpcbtable *, struct in6_addr *,
@@ -168,11 +170,12 @@ void	in6_pcbpurgeif0(struct inpcbtable *, struct ifnet *);
 void	in6_pcbpurgeif(struct inpcbtable *, struct ifnet *);
 void	in6_pcbstate(struct in6pcb *, int);
 void	in6_rtchange(struct in6pcb *, int);
-void	in6_setpeeraddr(struct in6pcb *, struct mbuf *);
-void	in6_setsockaddr(struct in6pcb *, struct mbuf *);
+void	in6_setpeeraddr(struct in6pcb *, struct sockaddr_in6 *);
+void	in6_setsockaddr(struct in6pcb *, struct sockaddr_in6 *);
 
 /* in in6_src.c */
 int	in6_selecthlim(struct in6pcb *, struct ifnet *);
+int	in6_selecthlim_rt(struct in6pcb *);
 int	in6_pcbsetport(struct sockaddr_in6 *, struct in6pcb *, struct lwp *);
 
 extern struct rtentry *

@@ -135,10 +135,11 @@ via_map_blit_for_device(struct pci_dev *pdev,
 
 			if (mode == 1) {
 #ifdef __NetBSD__
+				const vaddr_t cur_va = (vaddr_t)cur_mem;
 				const bus_dma_segment_t *const seg =
-				    &vsg->dmamap->dm_segs[atop(cur_mem)];
+				    &vsg->dmamap->dm_segs[atop(cur_va)];
 				desc_ptr->mem_addr =
-				    seg->ds_addr + trunc_page((vaddr_t)cur_mem);
+				    seg->ds_addr + trunc_page(cur_va);
 #else
 				desc_ptr->mem_addr =
 					dma_map_page(&pdev->dev,
@@ -597,8 +598,7 @@ via_dmablit_sync(struct drm_device *dev, uint32_t handle, int engine)
 #ifdef __NetBSD__
 	spin_lock(&blitq->blit_lock);
 	if (via_dmablit_active(blitq, engine, handle, &queue)) {
-		DRM_SPIN_TIMED_WAIT_UNTIL(ret, queue, &blitq->blit_lock,
-		    3*DRM_HZ,
+		DRM_SPIN_WAIT_ON(ret, queue, &blitq->blit_lock, 3*DRM_HZ,
 		    !via_dmablit_active(blitq, engine, handle, NULL));
 	}
 	spin_unlock(&blitq->blit_lock);
@@ -875,12 +875,15 @@ via_dmablit_grab_slot(drm_via_blitq_t *blitq, int engine)
 	spin_lock_irqsave(&blitq->blit_lock, irqsave);
 	while (blitq->num_free == 0) {
 #ifdef __NetBSD__
-		DRM_SPIN_TIMED_WAIT_UNTIL(ret, &blitq->busy_queue,
-		    &blitq->blit_lock, DRM_HZ,
+		DRM_SPIN_WAIT_ON(ret, &blitq->busy_queue, &blitq->blit_lock,
+		    DRM_HZ,
 		    blitq->num_free > 0);
+		/* Map -EINTR to -EAGAIN.  */
+		if (ret == -EINTR)
+			ret = -EAGAIN;
+		/* Bail on failure.  */
 		if (ret) {
-			if (ret == -EINTR)
-				ret = -EAGAIN;
+			spin_unlock_irqrestore(&blitq->blit_lock, irqsave);
 			return ret;
 		}
 #else

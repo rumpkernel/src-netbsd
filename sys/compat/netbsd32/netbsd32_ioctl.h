@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_ioctl.h,v 1.44 2014/01/24 10:41:07 manu Exp $	*/
+/*	$NetBSD: netbsd32_ioctl.h,v 1.48 2015/05/20 07:24:49 matt Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Matthew R. Green
@@ -314,6 +314,12 @@ struct netbsd32_if_addrprefreq {
 	} ifap_addr;
 };
 
+struct netbsd32_if_clonereq {
+	int	ifcr_total;
+	int	ifcr_count;
+	netbsd32_charp ifcr_buffer;
+};
+
 /* from <dev/pci/if_devar.h> */
 #define	SIOCGADDRROM32		_IOW('i', 240, struct netbsd32_ifreq)	/* get 128 bytes of ROM */
 #define	SIOCGCHIPID32		_IOWR('i', 241, struct netbsd32_ifreq)	/* get chipid */
@@ -374,6 +380,8 @@ struct netbsd32_if_addrprefreq {
 
 #define	SIOCSIFMEDIA32	_IOWR('i', 53, struct netbsd32_ifreq)	/* set net media */
 #define	OSIOCSIFMEDIA32	_IOWR('i', 53, struct netbsd32_oifreq)	/* set net media */
+
+#define	SIOCIFGCLONERS32 _IOWR('i', 120, struct netbsd32_if_clonereq) /* get cloners */
 
 #define	SIOCSIFMTU32	 _IOW('i', 127, struct netbsd32_ifreq)	/* set ifnet mtu */
 #define	OSIOCSIFMTU32	 _IOW('i', 127, struct netbsd32_oifreq)	/* set ifnet mtu */
@@ -525,3 +533,19 @@ struct netbsd32_clockctl_ntp_adjtime {
 #define CLOCKCTL_NTP_ADJTIME32 _IOWR('C', 0x8, \
     struct netbsd32_clockctl_ntp_adjtime)
 
+#ifdef KIOCGSYMBOL
+struct netbsd32_ksyms_gsymbol {
+	netbsd32_charp kg_name;
+	union {
+		Elf_Sym ku_sym;
+	} _un;
+};
+
+struct netbsd32_ksyms_gvalue {
+	netbsd32_charp kv_name;
+	uint64_t kv_value;
+};
+
+#define	KIOCGVALUE32	_IOWR('l', 4, struct netbsd32_ksyms_gvalue)
+#define	KIOCGSYMBOL32	_IOWR('l', 5, struct netbsd32_ksyms_gsymbol)
+#endif /* KIOCGSYMBOL */

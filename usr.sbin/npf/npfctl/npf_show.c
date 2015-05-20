@@ -1,4 +1,4 @@
-/*	$NetBSD: npf_show.c,v 1.15 2014/07/20 00:48:51 rmind Exp $	*/
+/*	$NetBSD: npf_show.c,v 1.18 2015/03/21 00:49:07 rmind Exp $	*/
 
 /*-
  * Copyright (c) 2013 The NetBSD Foundation, Inc.
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__RCSID("$NetBSD: npf_show.c,v 1.15 2014/07/20 00:48:51 rmind Exp $");
+__RCSID("$NetBSD: npf_show.c,v 1.18 2015/03/21 00:49:07 rmind Exp $");
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -53,13 +53,22 @@ __RCSID("$NetBSD: npf_show.c,v 1.15 2014/07/20 00:48:51 rmind Exp $");
 
 #include "npfctl.h"
 
+#define	SEEN_SRC	0x01
+#define	SEEN_DST	0x02
+
 typedef struct {
 	nl_config_t *	conf;
 	FILE *		fp;
 	long		fpos;
+	u_int		flags;
+	uint32_t	curmark;
 } npf_conf_info_t;
 
-static npf_conf_info_t	stdout_ctx = { .fp = stdout, .fpos = 0 };
+static npf_conf_info_t	stdout_ctx = {
+	.fp = stdout,
+	.fpos = 0,
+	.flags = 0
+};
 
 static void	print_indent(npf_conf_info_t *, u_int);
 static void	print_linesep(npf_conf_info_t *);
@@ -201,12 +210,18 @@ static char *
 print_portrange(npf_conf_info_t *ctx, const uint32_t *words)
 {
 	u_int fport = words[0], tport = words[1];
+	const char *any_str = "";
 	char *p;
 
+	if (ctx->curmark == BM_SRC_PORTS && (ctx->flags & SEEN_SRC) == 0)
+		any_str = "to any ";
+	if (ctx->curmark == BM_DST_PORTS && (ctx->flags & SEEN_DST) == 0)
+		any_str = "from any ";
+
 	if (fport != tport) {
-		easprintf(&p, "%u:%u", fport, tport);
+		easprintf(&p, "%s%u:%u", any_str, fport, tport);
 	} else {
-		easprintf(&p, "%u", fport);
+		easprintf(&p, "%s%u", any_str, fport);
 	}
 	return p;
 }
@@ -244,22 +259,23 @@ static const struct mark_keyword_mapent {
 	u_int		mark;
 	const char *	token;
 	const char *	sep;
+	u_int		set_flags;
 	char *		(*printfn)(npf_conf_info_t *, const uint32_t *);
 	u_int		fwords;
 } mark_keyword_map[] = {
-	{ BM_IPVER,	"family %s",	NULL,		print_family,	1 },
-	{ BM_PROTO,	"proto %s",	", ",		print_proto,	1 },
-	{ BM_TCPFL,	"flags %s",	NULL,		print_tcpflags,	2 },
-	{ BM_ICMP_TYPE,	"icmp-type %s",	NULL,		print_number,	1 },
-	{ BM_ICMP_CODE,	"code %s",	NULL,		print_number,	1 },
+	{ BM_IPVER,	"family %s",	NULL, 0,	print_family,	1 },
+	{ BM_PROTO,	"proto %s",	", ", 0,	print_proto,	1 },
+	{ BM_TCPFL,	"flags %s",	NULL, 0,	print_tcpflags,	2 },
+	{ BM_ICMP_TYPE,	"icmp-type %s",	NULL, 0,	print_number,	1 },
+	{ BM_ICMP_CODE,	"code %s",	NULL, 0,	print_number,	1 },
 
-	{ BM_SRC_CIDR,	"from %s",	", ",		print_address,	6 },
-	{ BM_SRC_TABLE,	"from <%s>",	NULL,		print_table,	1 },
-	{ BM_SRC_PORTS,	"port %s",	", ",		print_portrange,2 },
+	{ BM_SRC_CIDR,	"from %s",	", ", SEEN_SRC,	print_address,	6 },
+	{ BM_SRC_TABLE,	"from <%s>",	NULL, SEEN_SRC,	print_table,	1 },
+	{ BM_SRC_PORTS,	"port %s",	", ", 0,	print_portrange,2 },
 
-	{ BM_DST_CIDR,	"to %s",	", ",		print_address,	6 },
-	{ BM_DST_TABLE,	"to <%s>",	NULL,		print_table,	1 },
-	{ BM_DST_PORTS,	"port %s",	", ",		print_portrange,2 },
+	{ BM_DST_CIDR,	"to %s",	", ", SEEN_DST,	print_address,	6 },
+	{ BM_DST_TABLE,	"to <%s>",	NULL, SEEN_DST,	print_table,	1 },
+	{ BM_DST_PORTS,	"port %s",	", ", 0,	print_portrange,2 },
 };
 
 static const char * __attribute__((format_arg(2)))
@@ -285,6 +301,10 @@ scan_marks(npf_conf_info_t *ctx, const struct mark_keyword_mapent *mk,
 			errx(EXIT_FAILURE, "byte-code marking inconsistency");
 		}
 		if (m == mk->mark) {
+			/* Set the current mark and the flags. */
+			ctx->flags |= mk->set_flags;
+			ctx->curmark = m;
+
 			/* Value is processed by the print function. */
 			assert(mk->fwords == nwords);
 			vals[nvals++] = mk->printfn(ctx, marks);
@@ -316,10 +336,25 @@ static void
 npfctl_print_filter(npf_conf_info_t *ctx, nl_rule_t *rl)
 {
 	const void *marks;
-	size_t mlen;
+	size_t mlen, len;
+	const void *code;
+	int type;
 
-	/* BPF filter criteria described by the byte-code marks. */
 	marks = npf_rule_getinfo(rl, &mlen);
+	if (!marks && (code = npf_rule_getcode(rl, &type, &len)) != NULL) {
+		/*
+		 * No marks, but the byte-code is present.  This must
+		 * have been filled by libpcap(3) or possibly an unknown
+		 * to us byte-code.
+		 */
+		fprintf(ctx->fp, "%s ", type == NPF_CODE_BPF ?
+		    "pcap-filter \"...\"" : "unrecognized-bytecode");
+		return;
+	}
+
+	/*
+	 * BPF filter criteria described by the byte-code marks.
+	 */
 	for (u_int i = 0; i < __arraycount(mark_keyword_map); i++) {
 		const struct mark_keyword_mapent *mk = &mark_keyword_map[i];
 		char *val;
@@ -356,7 +391,7 @@ npfctl_print_rule(npf_conf_info_t *ctx, nl_rule_t *rl)
 		fprintf(ctx->fp, "on %s ", ifname);
 	}
 
-	if ((attr & (NPF_RULE_GROUP | NPF_RULE_DYNAMIC)) == NPF_RULE_GROUP) {
+	if ((attr & NPF_DYNAMIC_GROUP) == NPF_RULE_GROUP) {
 		/* Group; done. */
 		fputs("\n", ctx->fp);
 		return;
@@ -367,8 +402,15 @@ npfctl_print_rule(npf_conf_info_t *ctx, nl_rule_t *rl)
 
 	/* Rule procedure. */
 	if ((rproc = npf_rule_getproc(rl)) != NULL) {
-		fprintf(ctx->fp, "apply \"%s\"", rproc);
+		fprintf(ctx->fp, "apply \"%s\" ", rproc);
 	}
+
+	/* If dynamic rule - print its ID. */
+	if ((attr & NPF_DYNAMIC_GROUP) == NPF_RULE_DYNAMIC) {
+		uint64_t id = npf_rule_getid(rl);
+		fprintf(ctx->fp, "# id = \"%" PRIx64 "\" ", id);
+	}
+
 	fputs("\n", ctx->fp);
 }
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: tcp_input.c,v 1.335 2014/12/02 20:25:47 christos Exp $	*/
+/*	$NetBSD: tcp_input.c,v 1.340 2015/05/15 18:03:45 kefren Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -148,7 +148,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tcp_input.c,v 1.335 2014/12/02 20:25:47 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tcp_input.c,v 1.340 2015/05/15 18:03:45 kefren Exp $");
 
 #include "opt_inet.h"
 #include "opt_ipsec.h"
@@ -174,7 +174,6 @@ __KERNEL_RCSID(0, "$NetBSD: tcp_input.c,v 1.335 2014/12/02 20:25:47 christos Exp
 #include <sys/cprng.h>
 
 #include <net/if.h>
-#include <net/route.h>
 #include <net/if_types.h>
 
 #include <netinet/in.h>
@@ -738,6 +737,7 @@ tcp_reass(struct tcpcb *tp, const struct tcphdr *th, struct mbuf *m, int *tlen)
 	/*
 	 * Update the counters.
 	 */
+	tp->t_rcvoopack++;
 	tcps = TCP_STAT_GETREF();
 	tcps[TCP_STAT_RCVOOPACK]++;
 	tcps[TCP_STAT_RCVOOBYTE] += rcvoobyte;
@@ -1394,6 +1394,12 @@ tcp_input(struct mbuf *m, ...)
 	tiflags = th->th_flags;
 
 	/*
+	 * Checksum extended TCP header and data
+	 */
+	if (tcp_input_checksum(af, m, th, toff, off, tlen))
+		goto badcsum;
+
+	/*
 	 * Locate pcb for segment.
 	 */
 findpcb:
@@ -1563,12 +1569,6 @@ findpcb:
 
 	KASSERT(so->so_lock == softnet_lock);
 	KASSERT(solocked(so));
-
-	/*
-	 * Checksum extended TCP header and data.
-	 */
-	if (tcp_input_checksum(af, m, th, toff, off, tlen))
-		goto badcsum;
 
 	tcp_fields_to_host(th);
 
@@ -3190,9 +3190,11 @@ tcp_signature(struct mbuf *m, struct tcphdr *th, int thoff,
 	MD5_CTX ctx;
 	struct ip *ip;
 	struct ipovly *ipovly;
+#ifdef INET6
 	struct ip6_hdr *ip6;
-	struct ippseudo ippseudo;
 	struct ip6_hdr_pseudo ip6pseudo;
+#endif /* INET6 */
+	struct ippseudo ippseudo;
 	struct tcphdr th0;
 	int l, tcphdrlen;
 
@@ -3203,20 +3205,8 @@ tcp_signature(struct mbuf *m, struct tcphdr *th, int thoff,
 
 	switch (mtod(m, struct ip *)->ip_v) {
 	case 4:
+		MD5Init(&ctx);
 		ip = mtod(m, struct ip *);
-		ip6 = NULL;
-		break;
-	case 6:
-		ip = NULL;
-		ip6 = mtod(m, struct ip6_hdr *);
-		break;
-	default:
-		return (-1);
-	}
-
-	MD5Init(&ctx);
-
-	if (ip) {
 		memset(&ippseudo, 0, sizeof(ippseudo));
 		ipovly = (struct ipovly *)ip;
 		ippseudo.ippseudo_src = ipovly->ih_src;
@@ -3225,7 +3215,11 @@ tcp_signature(struct mbuf *m, struct tcphdr *th, int thoff,
 		ippseudo.ippseudo_p = IPPROTO_TCP;
 		ippseudo.ippseudo_len = htons(m->m_pkthdr.len - thoff);
 		MD5Update(&ctx, (char *)&ippseudo, sizeof(ippseudo));
-	} else {
+		break;
+#if INET6
+	case 6:
+		MD5Init(&ctx);
+		ip6 = mtod(m, struct ip6_hdr *);
 		memset(&ip6pseudo, 0, sizeof(ip6pseudo));
 		ip6pseudo.ip6ph_src = ip6->ip6_src;
 		in6_clearscope(&ip6pseudo.ip6ph_src);
@@ -3234,6 +3228,10 @@ tcp_signature(struct mbuf *m, struct tcphdr *th, int thoff,
 		ip6pseudo.ip6ph_len = htons(m->m_pkthdr.len - thoff);
 		ip6pseudo.ip6ph_nxt = IPPROTO_TCP;
 		MD5Update(&ctx, (char *)&ip6pseudo, sizeof(ip6pseudo));
+		break;
+#endif /* INET6 */
+	default:
+		return (-1);
 	}
 
 	th0 = *th;
@@ -4078,7 +4076,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst,
 	am->m_len = src->sa_len;
 	bcopy(src, mtod(am, void *), src->sa_len);
 	if (inp) {
-		if (in_pcbconnect(inp, am, &lwp0)) {
+		if (in_pcbconnect_m(inp, am, &lwp0)) {
 			(void) m_free(am);
 			goto resetandabort;
 		}
@@ -4099,7 +4097,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst,
 				&sin6->sin6_addr.s6_addr32[3],
 				sizeof(sin6->sin6_addr.s6_addr32[3]));
 		}
-		if (in6_pcbconnect(in6p, am, NULL)) {
+		if (in6_pcbconnect_m(in6p, am, NULL)) {
 			(void) m_free(am);
 			goto resetandabort;
 		}
@@ -4798,8 +4796,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 #ifdef INET6
 	case AF_INET6:
 		ip6->ip6_hlim = in6_selecthlim(NULL,
-				(rt = rtcache_validate(ro)) != NULL ? rt->rt_ifp
-				                                    : NULL);
+		    (rt = rtcache_validate(ro)) != NULL ? rt->rt_ifp : NULL);
 
 		error = ip6_output(m, NULL /*XXX*/, ro, 0, NULL, so, NULL);
 		break;

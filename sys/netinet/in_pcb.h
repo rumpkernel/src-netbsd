@@ -1,4 +1,4 @@
-/*	$NetBSD: in_pcb.h,v 1.55 2014/11/25 15:04:37 seanb Exp $	*/
+/*	$NetBSD: in_pcb.h,v 1.58 2015/05/02 17:18:03 rtr Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -131,8 +131,9 @@ struct inpcb {
 #ifdef _KERNEL
 void	in_losing(struct inpcb *);
 int	in_pcballoc(struct socket *, void *);
-int	in_pcbbind(void *, struct mbuf *, struct lwp *);
-int	in_pcbconnect(void *, struct mbuf *, struct lwp *);
+int	in_pcbbind(void *, struct sockaddr_in *, struct lwp *);
+int	in_pcbconnect(void *, struct sockaddr_in *, struct lwp *);
+int	in_pcbconnect_m(void *, struct mbuf *, struct lwp *);
 void	in_pcbdetach(void *);
 void	in_pcbdisconnect(void *);
 void	in_pcbinit(struct inpcbtable *, int, int);
@@ -155,8 +156,8 @@ void	in_pcbpurgeif(struct inpcbtable *, struct ifnet *);
 void	in_purgeifmcast(struct ip_moptions *, struct ifnet *);
 void	in_pcbstate(struct inpcb *, int);
 void	in_rtchange(struct inpcb *, int);
-void	in_setpeeraddr(struct inpcb *, struct mbuf *);
-void	in_setsockaddr(struct inpcb *, struct mbuf *);
+void	in_setpeeraddr(struct inpcb *, struct sockaddr_in *);
+void	in_setsockaddr(struct inpcb *, struct sockaddr_in *);
 struct rtentry *
 	in_pcbrtentry(struct inpcb *);
 #endif

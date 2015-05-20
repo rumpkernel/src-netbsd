@@ -1,4 +1,4 @@
-/*	$NetBSD: ip6_output.c,v 1.160 2014/10/12 19:00:21 christos Exp $	*/
+/*	$NetBSD: ip6_output.c,v 1.165 2015/04/27 10:14:44 ozaki-r Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -62,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ip6_output.c,v 1.160 2014/10/12 19:00:21 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ip6_output.c,v 1.165 2015/04/27 10:14:44 ozaki-r Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -167,7 +167,7 @@ ip6_output(
 	bool tso;
 	struct route ip6route;
 	struct rtentry *rt = NULL;
-	const struct sockaddr_in6 *dst = NULL;
+	const struct sockaddr_in6 *dst;
 	struct sockaddr_in6 src_sa, dst_sa;
 	int error = 0;
 	struct in6_ifaddr *ia = NULL;
@@ -543,8 +543,7 @@ ip6_output(
 	/* scope check is done. */
 
 	if (rt == NULL || IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) {
-		if (dst == NULL)
-			dst = satocsin6(rtcache_getdst(ro));
+		dst = satocsin6(rtcache_getdst(ro));
 		KASSERT(dst != NULL);
 	} else if (opt && rtcache_validate(&opt->ip6po_nextroute) != NULL) {
 		/*
@@ -555,7 +554,7 @@ ip6_output(
 		dst = (struct sockaddr_in6 *)opt->ip6po_nexthop;
 	} else if ((rt->rt_flags & RTF_GATEWAY))
 		dst = (struct sockaddr_in6 *)rt->rt_gateway;
-	else if (dst == NULL)
+	else
 		dst = satocsin6(rtcache_getdst(ro));
 
 	/*
@@ -1529,6 +1528,7 @@ else 					\
 		case IPV6_TCLASS:
 		case IPV6_DONTFRAG:
 		case IPV6_USE_MIN_MTU:
+		case IPV6_PREFER_TEMPADDR:
 			error = sockopt_getint(sopt, &optval);
 			if (error)
 				break;
@@ -1851,6 +1851,7 @@ else 					\
 		case IPV6_TCLASS:
 		case IPV6_DONTFRAG:
 		case IPV6_USE_MIN_MTU:
+		case IPV6_PREFER_TEMPADDR:
 			error = ip6_getpcbopt(in6p->in6p_outputopts,
 			    optname, sopt);
 			break;
@@ -2031,6 +2032,7 @@ ip6_initpktopts(struct ip6_pktopts *opt)
 	opt->ip6po_hlim = -1;	/* -1 means default hop limit */
 	opt->ip6po_tclass = -1;	/* -1 means default traffic class */
 	opt->ip6po_minmtu = IP6PO_MINMTU_MCASTONLY;
+	opt->ip6po_prefer_tempaddr = IP6PO_TEMPADDR_SYSTEM;
 }
 
 #define sin6tosa(sin6)	((struct sockaddr *)(sin6)) /* XXX */
@@ -2063,6 +2065,7 @@ ip6_getpcbopt(struct ip6_pktopts *pktopt, int optname, struct sockopt *sopt)
 	struct in6_pktinfo null_pktinfo;
 	int deftclass = 0, on;
 	int defminmtu = IP6PO_MINMTU_MCASTONLY;
+	int defpreftemp = IP6PO_TEMPADDR_SYSTEM;
 
 	switch (optname) {
 	case IPV6_PKTINFO:
@@ -2134,6 +2137,13 @@ ip6_getpcbopt(struct ip6_pktopts *pktopt, int optname, struct sockopt *sopt)
 		optdata = (void *)&on;
 		optdatalen = sizeof(on);
 		break;
+	case IPV6_PREFER_TEMPADDR:
+		if (pktopt)
+			optdata = (void *)&pktopt->ip6po_prefer_tempaddr;
+		else
+			optdata = (void *)&defpreftemp;
+		optdatalen = sizeof(int);
+		break;
 	default:		/* should not happen */
 #ifdef DIAGNOSTIC
 		panic("ip6_getpcbopt: unexpected option\n");
@@ -2204,6 +2214,8 @@ copypktopts(struct ip6_pktopts *dst, struct ip6_pktopts *src, int canwait)
 	dst->ip6po_hlim = src->ip6po_hlim;
 	dst->ip6po_tclass = src->ip6po_tclass;
 	dst->ip6po_flags = src->ip6po_flags;
+	dst->ip6po_minmtu = src->ip6po_minmtu;
+	dst->ip6po_prefer_tempaddr = src->ip6po_prefer_tempaddr;
 	if (src->ip6po_pktinfo) {
 		dst->ip6po_pktinfo = malloc(sizeof(*dst->ip6po_pktinfo),
 		    M_IP6OPT, canwait);
@@ -2321,7 +2333,9 @@ ip6_get_membership(const struct sockopt *sopt, struct ifnet **ifp, void *v,
 			sockaddr_in_init(&u.dst4, ia4, 0);
 		else
 			sockaddr_in6_init(&u.dst6, ia, 0, 0, 0);
-		rtcache_setdst(&ro, &u.dst);
+		error = rtcache_setdst(&ro, &u.dst);
+		if (error != 0)
+			return error;
 		*ifp = (rt = rtcache_init(&ro)) != NULL ? rt->rt_ifp : NULL;
 		rtcache_free(&ro);
 	} else {
@@ -2755,6 +2769,7 @@ ip6_setpktopt(int optname, u_char *buf, int len, struct ip6_pktopts *opt,
 		case IPV6_DONTFRAG:
 		case IPV6_OTCLASS:
 		case IPV6_TCLASS:
+		case IPV6_PREFER_TEMPADDR: /* XXX not an RFC3542 option */
 			return (ENOPROTOOPT);
 		}
 	}
@@ -3087,6 +3102,25 @@ ip6_setpktopt(int optname, u_char *buf, int len, struct ip6_pktopts *opt,
 		} else
 			opt->ip6po_flags |= IP6PO_DONTFRAG;
 		break;
+
+	case IPV6_PREFER_TEMPADDR:
+	{
+		int preftemp;
+
+		if (len != sizeof(int))
+			return (EINVAL);
+		preftemp = *(int *)buf;
+		switch (preftemp) {
+		case IP6PO_TEMPADDR_SYSTEM:
+		case IP6PO_TEMPADDR_NOTPREFER:
+		case IP6PO_TEMPADDR_PREFER:
+			break;
+		default:
+			return (EINVAL);
+		}
+		opt->ip6po_prefer_tempaddr = preftemp;
+		break;
+	}
 
 	default:
 		return (ENOPROTOOPT);

@@ -1,4 +1,4 @@
-/*	$NetBSD: in.h,v 1.95 2014/12/02 20:25:47 christos Exp $	*/
+/*	$NetBSD: in.h,v 1.97 2015/05/02 14:41:32 roy Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -85,6 +85,7 @@ typedef __sa_family_t	sa_family_t;
 #define	IPPROTO_UDP		17		/* user datagram protocol */
 #define	IPPROTO_IDP		22		/* xns idp */
 #define	IPPROTO_TP		29 		/* tp-4 w/ class negotiation */
+#define	IPPROTO_DCCP		33		/* DCCP */
 #define	IPPROTO_IPV6		41		/* IP6 header */
 #define	IPPROTO_ROUTING		43		/* IP6 routing header */
 #define	IPPROTO_FRAGMENT	44		/* IP6 fragmentation header */
@@ -466,7 +467,8 @@ struct ip_mreq {
 #define	IPCTL_RANDOMID	       22	/* use random IP ids (if configured) */
 #define	IPCTL_LOOPBACKCKSUM    23	/* do IP checksum on loopback */
 #define	IPCTL_STATS		24	/* IP statistics */
-#define	IPCTL_MAXID	       25
+#define	IPCTL_DAD_COUNT        25	/* DAD packets to send */
+#define	IPCTL_MAXID	       26
 
 #define	IPCTL_NAMES { \
 	{ 0, 0 }, \
@@ -494,6 +496,7 @@ struct ip_mreq {
 	{ "random_id", CTLTYPE_INT }, \
 	{ "do_loopback_cksum", CTLTYPE_INT }, \
 	{ "stats", CTLTYPE_STRUCT }, \
+	{ "dad_count", CTLTYPE_INT }, \
 }
 #endif /* _NETBSD_SOURCE */
 
@@ -562,6 +565,12 @@ int	in4_cksum(struct mbuf *, u_int8_t, int, int);
 void	in_delayed_cksum(struct mbuf *);
 int	in_localaddr(struct in_addr);
 void	in_socktrim(struct sockaddr_in *);
+
+void	in_if_link_up(struct ifnet *);
+void	in_if_link_down(struct ifnet *);
+void	in_if_up(struct ifnet *);
+void	in_if_down(struct ifnet *);
+void	in_if_link_state_change(struct ifnet *, int);
 
 struct route;
 struct ip_moptions;

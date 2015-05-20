@@ -1,4 +1,4 @@
-/* $NetBSD: nilfs_vnops.c,v 1.30 2014/10/15 09:05:46 hannken Exp $ */
+/* $NetBSD: nilfs_vnops.c,v 1.32 2015/04/20 23:03:08 riastradh Exp $ */
 
 /*
  * Copyright (c) 2008, 2009 Reinoud Zandijk
@@ -28,7 +28,7 @@
 
 #include <sys/cdefs.h>
 #ifndef lint
-__KERNEL_RCSID(0, "$NetBSD: nilfs_vnops.c,v 1.30 2014/10/15 09:05:46 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nilfs_vnops.c,v 1.32 2015/04/20 23:03:08 riastradh Exp $");
 #endif /* not lint */
 
 
@@ -555,7 +555,7 @@ nilfs_readdir(void *v)
 
 		blocknr = diroffset / blocksize;
 		blkoff  = diroffset % blocksize;
-		error = nilfs_bread(node, blocknr, NOCRED, 0, &bp);
+		error = nilfs_bread(node, blocknr, 0, &bp);
 		if (error)
 			return EIO;
 		while (diroffset < file_size) {
@@ -564,8 +564,7 @@ nilfs_readdir(void *v)
 			if (blkoff >= blocksize) {
 				blkoff = 0; blocknr++;
 				brelse(bp, BC_AGE);
-				error = nilfs_bread(node, blocknr, NOCRED, 0,
-						&bp);
+				error = nilfs_bread(node, blocknr, 0, &bp);
 				if (error)
 					return EIO;
 			}
@@ -1190,7 +1189,7 @@ nilfs_do_link(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 int
 nilfs_link(void *v)
 {
-	struct vop_link_args /* {
+	struct vop_link_v2_args /* {
 		struct vnode *a_dvp;
 		struct vnode *a_vp;
 		struct componentname *a_cnp;
@@ -1206,7 +1205,6 @@ nilfs_link(void *v)
 
 	VN_KNOTE(vp, NOTE_LINK);
 	VN_KNOTE(dvp, NOTE_WRITE);
-	vput(dvp);
 
 	return error;
 }

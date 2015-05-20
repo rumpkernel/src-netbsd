@@ -1,4 +1,4 @@
-/*	$NetBSD: nd6.h,v 1.61 2014/12/16 11:42:27 roy Exp $	*/
+/*	$NetBSD: nd6.h,v 1.64 2015/02/25 12:45:34 roy Exp $	*/
 /*	$KAME: nd6.h,v 1.95 2002/06/08 11:31:06 itojun Exp $	*/
 
 /*
@@ -407,17 +407,16 @@ union nd_opts {
 /* nd6.c */
 void nd6_init(void);
 struct nd_ifinfo *nd6_ifattach(struct ifnet *);
-void nd6_ifdetach(struct nd_ifinfo *);
+void nd6_ifdetach(struct ifnet *, struct in6_ifextra *);
 int nd6_is_addr_neighbor(const struct sockaddr_in6 *, struct ifnet *);
 void nd6_option_init(void *, int, union nd_opts *);
 struct nd_opt_hdr *nd6_option(union nd_opts *);
 int nd6_options(union nd_opts *);
 struct	rtentry *nd6_lookup(const struct in6_addr *, int, struct ifnet *);
-void nd6_rtmsg(int, struct rtentry *);
 void nd6_setmtu(struct ifnet *);
 void nd6_llinfo_settimer(struct llinfo_nd6 *, long);
 void nd6_timer(void *);
-void nd6_purge(struct ifnet *);
+void nd6_purge(struct ifnet *, struct in6_ifextra *);
 void nd6_nud_hint(struct rtentry *, struct in6_addr *, int);
 int nd6_resolve(struct ifnet *, struct rtentry *,
 	struct mbuf *, struct sockaddr *, u_char *);
@@ -442,7 +441,6 @@ void nd6_ns_input(struct mbuf *, int, int);
 void nd6_ns_output(struct ifnet *, const struct in6_addr *,
 	const struct in6_addr *, struct llinfo_nd6 *, int);
 const void *nd6_ifptomac(const struct ifnet *);
-void nd6_newaddrmsg(struct ifaddr *);
 void nd6_dad_start(struct ifaddr *, int);
 void nd6_dad_stop(struct ifaddr *);
 void nd6_dad_duplicated(struct ifaddr *);
@@ -454,7 +452,7 @@ void prelist_del(struct nd_prefix *);
 void defrouter_addreq(struct nd_defrouter *);
 void defrouter_reset(void);
 void defrouter_select(void);
-void defrtrlist_del(struct nd_defrouter *);
+void defrtrlist_del(struct nd_defrouter *, struct in6_ifextra *);
 void prelist_remove(struct nd_prefix *);
 int nd6_prelist_add(struct nd_prefixctl *, struct nd_defrouter *,
 	struct nd_prefix **);
