@@ -1,11 +1,12 @@
-#	$NetBSD: Makefile,v 1.4 2015/01/03 23:22:52 christos Exp $
+#	$NetBSD: Makefile,v 1.6 2015/04/14 14:08:36 christos Exp $
 
 .include "bsd.own.mk"
 
 PROG=	yacc
 SRCS=	closure.c error.c lalr.c lr0.c main.c mkpar.c output.c reader.c \
-	symtab.c verbose.c warshall.c graph.c mstring.c btyaccpar.c
+	symtab.c verbose.c warshall.c graph.c mstring.c yaccpar.c
 
+CPPFLAGS+=	-DMAXTABLE=INT_MAX
 CPPFLAGS+=	-DGCC_NORETURN=__dead
 
 COPTS.output.c += -Wno-format-nonliteral

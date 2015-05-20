@@ -1437,9 +1437,7 @@ extern unsigned int drm_poll(struct file *filp, struct poll_table_struct *wait);
 
 				/* Memory management support (drm_memory.h) */
 #include <drm/drm_memory.h>
-#ifdef __NetBSD__		/* XXX move to drm_memory.h */
-extern void *drm_ioremap(struct drm_device *dev, struct drm_local_map *map);
-extern void drm_iounmap(struct drm_device *dev, struct drm_local_map *map);
+#ifdef __NetBSD__
 extern int drm_limit_dma_space(struct drm_device *, resource_size_t,
     resource_size_t);
 #endif
@@ -1751,6 +1749,7 @@ extern drm_dma_handle_t *drm_pci_alloc(struct drm_device *dev, size_t size,
 extern void __drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
 extern void drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
 #ifdef __NetBSD__
+extern int drmkms_pci_agp_guarantee_initialized(void);
 extern int drm_pci_attach(device_t, const struct pci_attach_args *,
     struct pci_dev *, struct drm_driver *, unsigned long,
     struct drm_device **);

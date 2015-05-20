@@ -1,4 +1,4 @@
-/*	$NetBSD: uipc_socket.c,v 1.235 2014/09/05 09:20:59 matt Exp $	*/
+/*	$NetBSD: uipc_socket.c,v 1.245 2015/05/09 15:22:47 rtr Exp $	*/
 
 /*-
  * Copyright (c) 2002, 2007, 2008, 2009 The NetBSD Foundation, Inc.
@@ -71,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uipc_socket.c,v 1.235 2014/09/05 09:20:59 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uipc_socket.c,v 1.245 2015/05/09 15:22:47 rtr Exp $");
 
 #include "opt_compat_netbsd.h"
 #include "opt_sock_counters.h"
@@ -624,11 +624,15 @@ sofamily(const struct socket *so)
 }
 
 int
-sobind(struct socket *so, struct mbuf *nam, struct lwp *l)
+sobind(struct socket *so, struct sockaddr *nam, struct lwp *l)
 {
 	int	error;
 
 	solock(so);
+	if (nam->sa_family != so->so_proto->pr_domain->dom_family) {
+		sounlock(so);
+		return EAFNOSUPPORT;
+	}
 	error = (*so->so_proto->pr_usrreqs->pr_bind)(so, nam, l);
 	sounlock(so);
 	return error;
@@ -789,7 +793,7 @@ soabort(struct socket *so)
 }
 
 int
-soaccept(struct socket *so, struct mbuf *nam)
+soaccept(struct socket *so, struct sockaddr *nam)
 {
 	int error;
 
@@ -807,7 +811,7 @@ soaccept(struct socket *so, struct mbuf *nam)
 }
 
 int
-soconnect(struct socket *so, struct mbuf *nam, struct lwp *l)
+soconnect(struct socket *so, struct sockaddr *nam, struct lwp *l)
 {
 	int error;
 
@@ -823,10 +827,14 @@ soconnect(struct socket *so, struct mbuf *nam, struct lwp *l)
 	 */
 	if (so->so_state & (SS_ISCONNECTED|SS_ISCONNECTING) &&
 	    ((so->so_proto->pr_flags & PR_CONNREQUIRED) ||
-	    (error = sodisconnect(so))))
+	    (error = sodisconnect(so)))) {
 		error = EISCONN;
-	else
+	} else {
+		if (nam->sa_family != so->so_proto->pr_domain->dom_family) {
+			return EAFNOSUPPORT;
+		}
 		error = (*so->so_proto->pr_usrreqs->pr_connect)(so, nam, l);
+	}
 
 	return error;
 }
@@ -875,8 +883,8 @@ sodisconnect(struct socket *so)
  * Data and control buffers are freed on return.
  */
 int
-sosend(struct socket *so, struct mbuf *addr, struct uio *uio, struct mbuf *top,
-	struct mbuf *control, int flags, struct lwp *l)
+sosend(struct socket *so, struct sockaddr *addr, struct uio *uio,
+	struct mbuf *top, struct mbuf *control, int flags, struct lwp *l)
 {
 	struct mbuf	**mp, *m;
 	long		space, len, resid, clen, mlen;
@@ -933,7 +941,7 @@ sosend(struct socket *so, struct mbuf *addr, struct uio *uio, struct mbuf *top,
 					error = ENOTCONN;
 					goto release;
 				}
-			} else if (addr == 0) {
+			} else if (addr == NULL) {
 				error = EDESTADDRREQ;
 				goto release;
 			}
@@ -1047,12 +1055,13 @@ sosend(struct socket *so, struct mbuf *addr, struct uio *uio, struct mbuf *top,
 				so->so_options |= SO_DONTROUTE;
 			if (resid > 0)
 				so->so_state |= SS_MORETOCOME;
-			if (flags & MSG_OOB)
+			if (flags & MSG_OOB) {
 				error = (*so->so_proto->pr_usrreqs->pr_sendoob)(so,
 				    top, control);
-			else
+			} else {
 				error = (*so->so_proto->pr_usrreqs->pr_send)(so,
 				    top, addr, control, l);
+			}
 			if (dontroute)
 				so->so_options &= ~SO_DONTROUTE;
 			if (resid > 0)

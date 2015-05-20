@@ -1,4 +1,4 @@
-/*	$NetBSD: in6_var.h,v 1.71 2014/09/05 06:06:31 matt Exp $	*/
+/*	$NetBSD: in6_var.h,v 1.73 2015/04/07 23:30:36 roy Exp $	*/
 /*	$KAME: in6_var.h,v 1.81 2002/06/08 11:16:51 itojun Exp $	*/
 
 /*
@@ -685,7 +685,6 @@ int	in6_control(struct socket *, u_long, void *, struct ifnet *);
 int	in6_update_ifa(struct ifnet *, struct in6_aliasreq *,
 	struct in6_ifaddr *, int);
 void	in6_purgeaddr(struct ifaddr *);
-int	in6if_do_dad(struct ifnet *);
 void	in6_purgeif(struct ifnet *);
 void	in6_savemkludge(struct in6_ifaddr *);
 void	in6_setmaxmtu  (void);
@@ -693,8 +692,8 @@ int	in6_if2idlen  (struct ifnet *);
 void	*in6_domifattach(struct ifnet *);
 void	in6_domifdetach(struct ifnet *, void *);
 void	in6_restoremkludge(struct in6_ifaddr *, struct ifnet *);
-void	in6_ifremloop(struct ifaddr *);
-void	in6_ifaddloop(struct ifaddr *);
+void	in6_ifremlocal(struct ifaddr *);
+void	in6_ifaddlocal(struct ifaddr *);
 void	in6_createmkludge(struct ifnet *);
 void	in6_purgemkludge(struct ifnet *);
 struct in6_ifaddr *in6ifa_ifpforlinklocal(const struct ifnet *, int);

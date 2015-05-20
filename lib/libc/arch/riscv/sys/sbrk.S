@@ -1,4 +1,4 @@
-/*	$NetBSD: sbrk.S,v 1.1 2014/09/19 17:36:25 matt Exp $	*/
+/*	$NetBSD: sbrk.S,v 1.4 2015/03/31 11:59:41 matt Exp $	*/
 
 /*-
  * Copyright (c) 2014 The NetBSD Foundation, Inc.
@@ -33,21 +33,19 @@
 
 	.hidden	_C_LABEL(__curbrk)
 	.globl	_C_LABEL(__curbrk)
-	.globl	_C_LABEL(_end)
 
 #ifdef WEAK_ALIAS
 WEAK_ALIAS(sbrk, _sbrk)
 #endif
 
 ENTRY(_sbrk)
-	auipc		t1, %pcrel_hi(_C_LABEL(__curbrk))
-	addi		t1, t1, %pcrel_lo(_C_LABEL(__curbrk))
+	lla		t1, _C_LABEL(__curbrk)
 	PTR_L		t2, 0(t1)
 	add		a0, a0, t2	// compute current break
 	SYSTRAP(break)
 	JUMP_TO_CERROR()		/* error */
-	move		v0, t2		// return old val of curbrk from above
 	PTR_S		a0, 0(t1)	// save current val of curbrk from above
+	move		a0, t2		// return old val of curbrk from above
 	ret
 1:
 END(_sbrk)

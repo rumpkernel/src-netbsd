@@ -198,7 +198,7 @@ dt_type_lookup(const char *s, dtrace_typeinfo_t *tip)
 	const char *p, *q, *end, *obj;
 
 	for (p = s, end = s + strlen(s); *p != '\0'; p = q) {
-		while (isspace(*p))
+		while (isspace((unsigned char)*p))
 			p++;	/* skip leading whitespace prior to token */
 
 		if (p == end || (q = strpbrk(p + 1, delimiters)) == NULL)
@@ -1039,10 +1039,12 @@ dt_node_is_ptrcompat(const dt_node_t *lp, const dt_node_t *rp,
 	 * then resolve the referenced type as well (assuming the base type
 	 * is CTF_K_POINTER or CTF_K_ARRAY).  Otherwise [lr]ref = CTF_ERR.
 	 */
-	if (!lp_is_int) {
-		lbase = ctf_type_resolve(lfp, lp->dn_type);
-		lkind = ctf_type_kind(lfp, lbase);
+	lbase = ctf_type_resolve(lfp, lp->dn_type);
+	lkind = ctf_type_kind(lfp, lbase);
+	rbase = ctf_type_resolve(rfp, rp->dn_type);
+	rkind = ctf_type_kind(rfp, rbase);
 
+	if (!lp_is_int) {
 		if (lkind == CTF_K_POINTER) {
 			lref = ctf_type_resolve(lfp,
 			    ctf_type_reference(lfp, lbase));
@@ -1053,9 +1055,6 @@ dt_node_is_ptrcompat(const dt_node_t *lp, const dt_node_t *rp,
 	}
 
 	if (!rp_is_int) {
-		rbase = ctf_type_resolve(rfp, rp->dn_type);
-		rkind = ctf_type_kind(rfp, rbase);
-
 		if (rkind == CTF_K_POINTER) {
 			rref = ctf_type_resolve(rfp,
 			    ctf_type_reference(rfp, rbase));
@@ -1080,7 +1079,8 @@ dt_node_is_ptrcompat(const dt_node_t *lp, const dt_node_t *rp,
 		rkind = lkind;
 		rref = lref;
 		rfp = lfp;
-	}
+	} else
+		return 0;
 
 	lp_is_void = ctf_type_encoding(lfp, lref, &e) == 0 && IS_VOID(e);
 	rp_is_void = ctf_type_encoding(rfp, rref, &e) == 0 && IS_VOID(e);
@@ -2515,7 +2515,7 @@ dt_node_provider(char *name, dt_node_t *probes)
 		    "characters: %s\n", DTRACE_PROVNAMELEN - 1, name);
 	}
 
-	if (isdigit(name[len - 1])) {
+	if (isdigit((unsigned char)name[len - 1])) {
 		dnerror(dnp, D_PROV_BADNAME, "provider name may not "
 		    "end with a digit: %s\n", name);
 	}
@@ -3080,14 +3080,15 @@ dt_cook_op2(dt_node_t *dnp, uint_t idflags)
 	int op = dnp->dn_op;
 
 	ctf_membinfo_t m;
-	ctf_file_t *ctfp;
-	ctf_id_t type;
+	ctf_file_t *ctfp = NULL;
+	ctf_id_t type = 0;
 	int kind, val, uref;
 	dt_ident_t *idp;
 
 	char n1[DT_TYPE_NAMELEN];
 	char n2[DT_TYPE_NAMELEN];
 
+	uref = 0;
 	/*
 	 * The expression E1[E2] is identical by definition to *((E1)+(E2)) so
 	 * we convert "[" to "+" and glue on "*" at the end (see K&R[A7.3.1])
@@ -4886,8 +4887,10 @@ yylabel(const char *label)
 	yypcb->pcb_region = label;
 }
 
+#if 0
 int
 yywrap(void)
 {
 	return (1); /* indicate that lex should return a zero token for EOF */
 }
+#endif
