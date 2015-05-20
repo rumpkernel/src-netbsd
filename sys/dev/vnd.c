@@ -1,4 +1,4 @@
-/*	$NetBSD: vnd.c,v 1.239 2015/01/02 19:42:06 christos Exp $	*/
+/*	$NetBSD: vnd.c,v 1.243 2015/04/26 15:15:20 mlelstv Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 2008 The NetBSD Foundation, Inc.
@@ -91,7 +91,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vnd.c,v 1.239 2015/01/02 19:42:06 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vnd.c,v 1.243 2015/04/26 15:15:20 mlelstv Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_vnd.h"
@@ -233,7 +233,10 @@ extern struct cfdriver vnd_cd;
 static struct vnd_softc	*vnd_spawn(int);
 int	vnd_destroy(device_t);
 
-static struct	dkdriver vnddkdriver = { vndstrategy, minphys };
+static struct	dkdriver vnddkdriver = {
+	.d_strategy = vndstrategy,
+	.d_minphys = minphys
+};
 
 void
 vndattach(int num)
@@ -332,6 +335,9 @@ vndopen(dev_t dev, int flags, int mode, struct lwp *l)
 		sc = vnd_spawn(unit);
 		if (sc == NULL)
 			return ENOMEM;
+
+		/* compatibility, keep disklabel after close */
+		sc->sc_flags = VNF_KLABEL;
 	}
 
 	if ((error = vndlock(sc)) != 0)
@@ -433,6 +439,12 @@ vndclose(dev_t dev, int flags, int mode, struct lwp *l)
 	}
 	sc->sc_dkdev.dk_openmask =
 	    sc->sc_dkdev.dk_copenmask | sc->sc_dkdev.dk_bopenmask;
+
+	/* are we last opener ? */
+	if (sc->sc_dkdev.dk_openmask == 0) {
+		if ((sc->sc_flags & VNF_KLABEL) == 0)
+			sc->sc_flags &= ~VNF_VLABEL;
+	}
 
 	vndunlock(sc);
 
@@ -795,15 +807,10 @@ handle_with_strategy(struct vnd_softc *vnd, const struct buf *obp,
 	size_t resid, sz;
 	off_t bn, offset;
 	struct vnode *vp;
+	struct buf *nbp = NULL;
 
 	flags = obp->b_flags;
 
-	if (!(flags & B_READ)) {
-		vp = bp->b_vp;
-		mutex_enter(vp->v_interlock);
-		vp->v_numoutput++;
-		mutex_exit(vp->v_interlock);
-	}
 
 	/* convert to a byte offset within the file. */
 	bn = obp->b_rawblkno * vnd->sc_dkdev.dk_label->d_secsize;
@@ -820,9 +827,8 @@ handle_with_strategy(struct vnd_softc *vnd, const struct buf *obp,
 	 */
 	error = 0;
 	bp->b_resid = bp->b_bcount;
-	for (offset = 0, resid = bp->b_resid; resid;
+	for (offset = 0, resid = bp->b_resid; /* true */;
 	    resid -= sz, offset += sz) {
-		struct buf *nbp;
 		daddr_t nbn;
 		int off, nra;
 
@@ -875,10 +881,34 @@ handle_with_strategy(struct vnd_softc *vnd, const struct buf *obp,
 			    nbp->vb_buf.b_flags, nbp->vb_buf.b_data,
 			    nbp->vb_buf.b_bcount);
 #endif
+		if (resid == sz) {
+			break;
+		}
 		VOP_STRATEGY(vp, nbp);
 		bn += sz;
 	}
-	nestiobuf_done(bp, skipped, error);
+	if (!(flags & B_READ)) {
+		struct vnode *w_vp;
+		/*
+		 * this is the last nested buf, account for
+		 * the parent buf write too.
+		 * This has to be done last, so that
+		 * fsync won't wait for this write which
+		 * has no chance to complete before all nested bufs
+		 * have been queued. But it has to be done
+		 * before the last VOP_STRATEGY() 
+		 * or the call to nestiobuf_done().
+		 */
+		w_vp = bp->b_vp;
+		mutex_enter(w_vp->v_interlock);
+		w_vp->v_numoutput++;
+		mutex_exit(w_vp->v_interlock);
+	}
+	KASSERT(skipped != 0 || nbp != NULL);
+	if (skipped) 
+		nestiobuf_done(bp, skipped, error);
+	else 
+		VOP_STRATEGY(vp, nbp);
 }
 
 static void
@@ -1678,7 +1708,7 @@ vndclear(struct vnd_softc *vnd, int myminor)
 	}
 #endif /* VND_COMPRESSION */
 	vnd->sc_flags &=
-	    ~(VNF_INITED | VNF_READONLY | VNF_VLABEL
+	    ~(VNF_INITED | VNF_READONLY | VNF_KLABEL | VNF_VLABEL
 	      | VNF_VUNCONF | VNF_COMP | VNF_CLEARING);
 	if (vp == NULL)
 		panic("vndclear: null vp");

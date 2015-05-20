@@ -1,4 +1,4 @@
-/*	$NetBSD: if_spppsubr.c,v 1.131 2014/11/28 08:29:00 ozaki-r Exp $	 */
+/*	$NetBSD: if_spppsubr.c,v 1.133 2015/05/02 14:41:32 roy Exp $	 */
 
 /*
  * Synchronous PPP/Cisco link level subroutines.
@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_spppsubr.c,v 1.131 2014/11/28 08:29:00 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_spppsubr.c,v 1.133 2015/05/02 14:41:32 roy Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_inet.h"
@@ -1017,12 +1017,14 @@ sppp_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
 	struct lwp *l = curlwp;	/* XXX */
 	struct ifreq *ifr = (struct ifreq *) data;
+	struct ifaddr *ifa = (struct ifaddr *) data;
 	struct sppp *sp = (struct sppp *) ifp;
 	int s, error=0, going_up, going_down, newmode;
 
 	s = splnet();
 	switch (cmd) {
 	case SIOCINITIFADDR:
+		ifa->ifa_rtrequest = p2p_rtrequest;
 		break;
 
 	case SIOCSIFFLAGS:
@@ -4873,7 +4875,7 @@ sppp_set_ip_addrs(struct sppp *sp, uint32_t myaddr, uint32_t hisaddr)
 
 found:
 	{
-		int error;
+		int error, hostIsNew;
 		struct sockaddr_in new_sin = *si;
 		struct sockaddr_in new_dst = *dest;
 
@@ -4884,8 +4886,13 @@ found:
 		 */
 		in_ifscrub(ifp, ifatoia(ifa));
 
-		if (myaddr != 0)
-			new_sin.sin_addr.s_addr = htonl(myaddr);
+		hostIsNew = 0;
+		if (myaddr != 0) {
+			if (new_sin.sin_addr.s_addr != htonl(myaddr)) {
+				new_sin.sin_addr.s_addr = htonl(myaddr);
+				hostIsNew = 1;
+			}
+		}
 		if (hisaddr != 0) {
 			new_dst.sin_addr.s_addr = htonl(hisaddr);
 			if (new_dst.sin_addr.s_addr != dest->sin_addr.s_addr) {
@@ -4893,7 +4900,7 @@ found:
 				*dest = new_dst; /* fix dstaddr in place */
 			}
 		}
-		error = in_ifinit(ifp, ifatoia(ifa), &new_sin, 0);
+		error = in_ifinit(ifp, ifatoia(ifa), &new_sin, 0, hostIsNew);
 		if (debug && error)
 		{
 			log(LOG_DEBUG, "%s: sppp_set_ip_addrs: in_ifinit "
@@ -4946,7 +4953,7 @@ found:
 		if (sp->ipcp.flags & IPCP_HISADDR_DYN)
 			/* replace peer addr in place */
 			dest->sin_addr.s_addr = sp->ipcp.saved_hisaddr;
-		in_ifinit(ifp, ifatoia(ifa), &new_sin, 0);
+		in_ifinit(ifp, ifatoia(ifa), &new_sin, 0, 0);
 		(void)pfil_run_hooks(if_pfil,
 		    (struct mbuf **)SIOCDIFADDR, ifp, PFIL_IFADDR);
 	}

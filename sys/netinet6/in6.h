@@ -1,4 +1,4 @@
-/*	$NetBSD: in6.h,v 1.81 2014/12/02 20:25:48 christos Exp $	*/
+/*	$NetBSD: in6.h,v 1.84 2015/04/22 19:46:08 roy Exp $	*/
 /*	$KAME: in6.h,v 1.83 2001/03/29 02:55:07 jinmei Exp $	*/
 
 /*
@@ -438,6 +438,8 @@ extern const struct in6_addr in6addr_linklocal_allrouters;
 
 #define IPV6_TCLASS		61 /* int; send traffic class value */
 #define IPV6_DONTFRAG		62 /* bool; disable IPv6 fragmentation */
+#define IPV6_PREFER_TEMPADDR	63 /* int; prefer temporary address as
+				    * the sorce address */
 /* to define items, should talk with KAME guys first, for *BSD compatibility */
 
 #define IPV6_RTHDR_LOOSE     0 /* this hop need not be a neighbor. XXX old spec */
@@ -703,6 +705,7 @@ int	in6_addrscope(const struct in6_addr *);
 struct	in6_ifaddr *in6_ifawithifp(struct ifnet *, struct in6_addr *);
 extern void in6_if_link_up(struct ifnet *);
 extern void in6_if_link_down(struct ifnet *);
+extern void in6_if_link_state_change(struct ifnet *, int);
 extern void in6_if_up(struct ifnet *);
 extern void in6_if_down(struct ifnet *);
 #ifndef __FreeBSD__
@@ -768,7 +771,7 @@ __BEGIN_DECLS
 struct cmsghdr;
 
 void	in6_sin6_2_sin(struct sockaddr_in *, struct sockaddr_in6 *);
-void	in6_sin_2_v4mapsin6(struct sockaddr_in *, struct sockaddr_in6 *);
+void	in6_sin_2_v4mapsin6(const struct sockaddr_in *, struct sockaddr_in6 *);
 void	in6_sin6_2_sin_in_sock(struct sockaddr *);
 void	in6_sin_2_v4mapsin6_in_sock(struct sockaddr **);
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: rump.c,v 1.315 2015/01/07 22:24:04 pooka Exp $	*/
+/*	$NetBSD: rump.c,v 1.320 2015/05/20 11:02:54 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007-2011 Antti Kantee.  All Rights Reserved.
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rump.c,v 1.315 2015/01/07 22:24:04 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rump.c,v 1.320 2015/05/20 11:02:54 pooka Exp $");
 
 #include <sys/systm.h>
 #define ELFSIZE ARCH_ELFSIZE
@@ -71,6 +71,7 @@ __KERNEL_RCSID(0, "$NetBSD: rump.c,v 1.315 2015/01/07 22:24:04 pooka Exp $");
 #include <sys/vmem.h>
 #include <sys/xcall.h>
 #include <sys/cprng.h>
+#include <sys/rnd.h>
 #include <sys/ktrace.h>
 
 #include <rump/rumpuser.h>
@@ -307,7 +308,6 @@ rump_init(void)
 	prop_kern_init();
 
 	kmem_init();
-	kmeminit();
 
 	uvm_ra_init();
 	uao_init();
@@ -317,7 +317,6 @@ rump_init(void)
 
 	kprintf_init();
 	pserialize_init();
-	loginit();
 
 	kauth_init();
 
@@ -354,6 +353,8 @@ rump_init(void)
 
 	lwpinit_specificdata();
 	lwp_initspecific(&lwp0);
+
+	loginit();
 
 	rump_biglock_init();
 
@@ -492,6 +493,7 @@ rump_init(void)
 	mutex_exit(proc_lock);
 	if (initproc == NULL)
 		panic("where in the world is initproc?");
+	strlcpy(initproc->p_comm, "rumplocal", sizeof(initproc->p_comm));
 
 	rump_component_init(RUMP_COMPONENT_POSTINIT);
 
@@ -684,17 +686,6 @@ rump_getversion(void)
 }
 /* compat */
 __strong_alias(rump_pub_getversion,rump_getversion);
-
-int
-rump_nativeabi_p(void)
-{
-
-#ifdef _RUMP_NATIVE_ABI
-	return 1;
-#else
-	return 0;
-#endif
-}
 
 /*
  * Note: may be called unscheduled.  Not fully safe since no locking

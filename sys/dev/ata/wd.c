@@ -1,4 +1,4 @@
-/*	$NetBSD: wd.c,v 1.418 2015/01/02 19:42:06 christos Exp $ */
+/*	$NetBSD: wd.c,v 1.420 2015/04/26 15:15:20 mlelstv Exp $ */
 
 /*
  * Copyright (c) 1998, 2001 Manuel Bouyer.  All rights reserved.
@@ -54,7 +54,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wd.c,v 1.418 2015/01/02 19:42:06 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wd.c,v 1.420 2015/04/26 15:15:20 mlelstv Exp $");
 
 #include "opt_ata.h"
 
@@ -76,7 +76,7 @@ __KERNEL_RCSID(0, "$NetBSD: wd.c,v 1.418 2015/01/02 19:42:06 christos Exp $");
 #include <sys/proc.h>
 #include <sys/reboot.h>
 #include <sys/vnode.h>
-#include <sys/rnd.h>
+#include <sys/rndsource.h>
 
 #include <sys/intr.h>
 #include <sys/bus.h>
@@ -202,7 +202,10 @@ bool  wd_shutdown(device_t, int);
 int   wd_getcache(struct wd_softc *, int *);
 int   wd_setcache(struct wd_softc *, int);
 
-struct dkdriver wddkdriver = { wdstrategy, wdminphys };
+struct dkdriver wddkdriver = {
+	.d_strategy = wdstrategy,
+	.d_minphys = wdminphys
+};
 
 #ifdef HAS_BAD144_HANDLING
 static void bad144intern(struct wd_softc *);

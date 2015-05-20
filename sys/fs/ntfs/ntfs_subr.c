@@ -1,4 +1,4 @@
-/*	$NetBSD: ntfs_subr.c,v 1.58 2015/01/06 11:04:00 hannken Exp $	*/
+/*	$NetBSD: ntfs_subr.c,v 1.61 2015/03/28 19:24:05 maxv Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999 Semen Ustimenko (semenu@FreeBSD.org)
@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ntfs_subr.c,v 1.58 2015/01/06 11:04:00 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ntfs_subr.c,v 1.61 2015/03/28 19:24:05 maxv Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -284,7 +284,7 @@ ntfs_loadntnode(struct ntfsmount *ntmp, struct ntnode *ip)
 		off = ntfs_btocnoff(boff);
 
 		error = bread(ntmp->ntm_devvp, bn, ntfs_cntob(1),
-		    NOCRED, 0, &bp);
+		    0, &bp);
 		if (error) {
 			printf("%s: BREAD FAILED\n", __func__);
 			goto out;
@@ -756,9 +756,9 @@ ntfs_ntlookupfile(struct ntfsmount *ntmp, struct vnode *vp,
 {
 	struct fnode   *fp = VTOF(vp);
 	struct ntnode  *ip = FTONT(fp);
-	struct ntvattr *vap;	/* Root attribute */
+	struct ntvattr *vap = NULL;	/* Root attribute */
 	cn_t            cn = 0;	/* VCN in current attribute */
-	void *        rdbuf;	/* Buffer to read directory's blocks  */
+	void *        rdbuf = NULL;	/* Buffer to read directory's blocks  */
 	u_int32_t       blsize;
 	u_int32_t       rdsize;	/* Length of data to read from current block */
 	struct attr_indexentry *iep;
@@ -776,8 +776,10 @@ ntfs_ntlookupfile(struct ntfsmount *ntmp, struct vnode *vp,
 		return (error);
 
 	error = ntfs_ntvattrget(ntmp, ip, NTFS_A_INDXROOT, "$I30", 0, &vap);
-	if (error || (vap->va_flag & NTFS_AF_INRUN))
-		return (ENOTDIR);
+	if (error || (vap->va_flag & NTFS_AF_INRUN)) {
+		error = ENOTDIR;
+		goto fail;
+	}
 
 	/*
 	 * Divide file name into: foofilefoofilefoofile[:attrspec]
@@ -963,9 +965,11 @@ fail:
 			free(tctx, M_TEMP);
 		}
 	}
-	ntfs_ntvattrrele(vap);
+	if (vap)
+		ntfs_ntvattrrele(vap);
+	if (rdbuf)
+		free(rdbuf, M_TEMP);
 	ntfs_ntput(ip);
-	free(rdbuf, M_TEMP);
 	return (error);
 }
 
@@ -1026,8 +1030,10 @@ ntfs_ntreaddir(struct ntfsmount *ntmp, struct fnode *fp, u_int32_t num,
 		return (error);
 
 	error = ntfs_ntvattrget(ntmp, ip, NTFS_A_INDXROOT, "$I30", 0, &vap);
-	if (error)
-		return (ENOTDIR);
+	if (error) {
+		error = ENOTDIR;
+		goto fail;
+	}
 
 	if (fp->f_dirblbuf == NULL) {
 		fp->f_dirblsz = vap->va_a_iroot->ir_size;
@@ -1177,7 +1183,7 @@ ntfs_nttimetounix(u_int64_t nt)
 }
 
 /*
- * This is one of write routine.
+ * This is one of the write routines.
  */
 int
 ntfs_writeattr_plain(struct ntfsmount *ntmp, struct ntnode *ip,
@@ -1225,7 +1231,7 @@ ntfs_writeattr_plain(struct ntfsmount *ntmp, struct ntnode *ip,
 }
 
 /*
- * This is one of write routine.
+ * This is one of the write routines.
  *
  * ntnode should be locked.
  */
@@ -1300,7 +1306,7 @@ ntfs_writentvattr_plain(struct ntfsmount *ntmp, struct ntnode *ip,
 				clrbuf(bp);
 			} else {
 				error = bread(ntmp->ntm_devvp, ntfs_cntobn(cn),
-				    ntfs_cntob(cl), NOCRED, B_MODIFY, &bp);
+				    ntfs_cntob(cl), B_MODIFY, &bp);
 				if (error)
 					return (error);
 			}
@@ -1327,7 +1333,7 @@ ntfs_writentvattr_plain(struct ntfsmount *ntmp, struct ntnode *ip,
 }
 
 /*
- * This is one of read routines.
+ * This is one of the read routines.
  *
  * ntnode should be locked.
  */
@@ -1398,7 +1404,7 @@ ntfs_readntvattr_plain(struct ntfsmount *ntmp, struct ntnode *ip,
 					error = bread(ntmp->ntm_devvp,
 						      ntfs_cntobn(cn),
 						      ntfs_cntob(cl),
-						      NOCRED, 0, &bp);
+						      0, &bp);
 					if (error) {
 						return (error);
 					}
@@ -1454,7 +1460,7 @@ ntfs_readntvattr_plain(struct ntfsmount *ntmp, struct ntnode *ip,
 }
 
 /*
- * This is one of read routines.
+ * This is one of the read routines.
  */
 int
 ntfs_readattr_plain(struct ntfsmount *ntmp, struct ntnode *ip,
@@ -1502,7 +1508,7 @@ ntfs_readattr_plain(struct ntfsmount *ntmp, struct ntnode *ip,
 }
 
 /*
- * This is one of read routines.
+ * This is one of the read routines.
  */
 int
 ntfs_readattr(struct ntfsmount *ntmp, struct ntnode *ip, u_int32_t attrnum,

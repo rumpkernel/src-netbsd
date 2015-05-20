@@ -1,4 +1,4 @@
-/*      $NetBSD: lwproc.c,v 1.32 2015/01/21 14:39:37 pooka Exp $	*/
+/*      $NetBSD: lwproc.c,v 1.35 2015/04/18 15:49:18 pooka Exp $	*/
 
 /*
  * Copyright (c) 2010, 2011 Antti Kantee.  All Rights Reserved.
@@ -28,7 +28,7 @@
 #define RUMP__CURLWP_PRIVATE
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lwproc.c,v 1.32 2015/01/21 14:39:37 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lwproc.c,v 1.35 2015/04/18 15:49:18 pooka Exp $");
 
 #include <sys/param.h>
 #include <sys/atomic.h>
@@ -130,10 +130,11 @@ lwproc_proc_free(struct proc *p)
 	cv_destroy(&p->p_waitcv);
 	cv_destroy(&p->p_lwpcv);
 
-	/* non-kernel vmspaces are not shared */
+	/* non-local vmspaces are not shared */
 	if (!RUMP_LOCALPROC_P(p)) {
+		struct rump_spctl *ctl = (struct rump_spctl *)p->p_vmspace;
 		KASSERT(p->p_vmspace->vm_refcnt == 1);
-		kmem_free(p->p_vmspace, sizeof(*p->p_vmspace));
+		kmem_free(ctl, sizeof(*ctl));
 	}
 
 	proc_free_mem(p);
@@ -147,7 +148,7 @@ lwproc_proc_free(struct proc *p)
  * Switch to the new lwp and return a pointer to it.
  */
 static struct proc *
-lwproc_newproc(struct proc *parent, int flags)
+lwproc_newproc(struct proc *parent, struct vmspace *vm, int flags)
 {
 	uid_t uid = kauth_cred_getuid(parent->p_cred);
 	struct proc *p;
@@ -176,7 +177,7 @@ lwproc_newproc(struct proc *parent, int flags)
 
 	p->p_stats = pstatscopy(parent->p_stats);
 
-	p->p_vmspace = vmspace_kernel();
+	p->p_vmspace = vm;
 	p->p_emul = emul_default;
 #ifdef __HAVE_SYSCALL_INTERN
 	p->p_emul->e_syscall_intern(p);
@@ -327,7 +328,7 @@ rump__lwproc_alloclwp(struct proc *p)
 	bool newproc = false;
 
 	if (p == NULL) {
-		p = lwproc_newproc(&proc0, 0);
+		p = lwproc_newproc(&proc0, rump_vmspace_local, RUMP_RFCFDG);
 		newproc = true;
 	}
 
@@ -368,7 +369,7 @@ rump_lwproc_newlwp(pid_t pid)
 }
 
 int
-rump_lwproc_rfork(int flags)
+rump_lwproc_rfork_vmspace(struct vmspace *vm, int flags)
 {
 	struct proc *p;
 	struct lwp *l;
@@ -377,13 +378,20 @@ rump_lwproc_rfork(int flags)
 	    (~flags & (RUMP_RFFDG|RUMP_RFCFDG)) == 0)
 		return EINVAL;
 
-	p = lwproc_newproc(curproc, flags);
+	p = lwproc_newproc(curproc, vm, flags);
 	l = kmem_zalloc(sizeof(*l), KM_SLEEP);
 	mutex_enter(p->p_lock);
 	KASSERT((p->p_sflag & PS_RUMP_LWPEXIT) == 0);
 	lwproc_makelwp(p, l, true, true);
 
 	return 0;
+}
+
+int
+rump_lwproc_rfork(int flags)
+{
+
+	return rump_lwproc_rfork_vmspace(rump_vmspace_local, flags);
 }
 
 /*

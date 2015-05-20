@@ -1,4 +1,4 @@
-/*	$NetBSD: lfs_vnops.c,v 1.269 2014/07/25 08:20:53 dholland Exp $	*/
+/*	$NetBSD: lfs_vnops.c,v 1.271 2015/04/20 23:03:09 riastradh Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001, 2002, 2003 The NetBSD Foundation, Inc.
@@ -125,7 +125,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lfs_vnops.c,v 1.269 2014/07/25 08:20:53 dholland Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lfs_vnops.c,v 1.271 2015/04/20 23:03:09 riastradh Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_compat_netbsd.h"
@@ -691,9 +691,9 @@ lfs_symlink(void *v)
 		if ((*vpp)->v_mount->mnt_flag & MNT_RELATIME)
 			ip->i_flag |= IN_ACCESS;
 	} else {
-		error = vn_rdwr(UIO_WRITE, *vpp, ap->a_target, len, (off_t)0,
-		    UIO_SYSSPACE, IO_NODELOCKED | IO_JOURNALLOCKED,
-		    ap->a_cnp->cn_cred, NULL, NULL);
+		error = ulfs_bufio(UIO_WRITE, *vpp, ap->a_target, len, (off_t)0,
+		    IO_NODELOCKED | IO_JOURNALLOCKED, ap->a_cnp->cn_cred, NULL,
+		    NULL);
 	}
 
 	VOP_UNLOCK(*vpp);
@@ -1231,7 +1231,7 @@ lfs_rmdir(void *v)
 int
 lfs_link(void *v)
 {
-	struct vop_link_args	/* {
+	struct vop_link_v2_args	/* {
 		struct vnode *a_dvp;
 		struct vnode *a_vp;
 		struct componentname *a_cnp;
@@ -1250,12 +1250,6 @@ lfs_link(void *v)
 
 	error = lfs_set_dirop(dvp, NULL);
 	if (error) {
-		/*
-		 * XXX dholland 20140515 this was here before but must
-		 * be wrong.
-		 */
-		vput(dvp);
-
 		return error;
 	}
 

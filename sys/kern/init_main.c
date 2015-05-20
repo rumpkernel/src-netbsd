@@ -1,4 +1,4 @@
-/*	$NetBSD: init_main.c,v 1.461 2014/11/27 14:38:09 uebayasi Exp $	*/
+/*	$NetBSD: init_main.c,v 1.467 2015/05/06 15:57:08 hannken Exp $	*/
 
 /*-
  * Copyright (c) 2008, 2009 The NetBSD Foundation, Inc.
@@ -97,7 +97,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.461 2014/11/27 14:38:09 uebayasi Exp $");
+__KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.467 2015/05/06 15:57:08 hannken Exp $");
 
 #include "opt_ddb.h"
 #include "opt_ipsec.h"
@@ -113,14 +113,16 @@ __KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.461 2014/11/27 14:38:09 uebayasi Exp
 #include "opt_wapbl.h"
 #include "opt_ptrace.h"
 #include "opt_rnd_printf.h"
+#include "opt_splash.h"
+
+#if defined(SPLASHSCREEN) && defined(SPLASHSCREEN_IMAGE)
+extern void *_binary_splash_image_start;
+extern void *_binary_splash_image_end;
+#endif
 
 #include "drvctl.h"
 #include "ksyms.h"
 
-#include "sysmon_envsys.h"
-#include "sysmon_power.h"
-#include "sysmon_taskq.h"
-#include "sysmon_wdog.h"
 #include "veriexec.h"
 
 #include <sys/param.h>
@@ -214,22 +216,14 @@ __KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.461 2014/11/27 14:38:09 uebayasi Exp
 #include <ufs/ufs/quota.h>
 
 #include <miscfs/genfs/genfs.h>
-#include <miscfs/syncfs/syncfs.h>
 #include <miscfs/specfs/specdev.h>
 
 #include <sys/cpu.h>
 
 #include <uvm/uvm.h>	/* extern struct uvm uvm */
 
-#if NSYSMON_TASKQ > 0
-#include <dev/sysmon/sysmon_taskq.h>
-#endif
-
 #include <dev/cons.h>
-
-#if NSYSMON_ENVSYS > 0 || NSYSMON_POWER > 0 || NSYSMON_WDOG > 0
-#include <dev/sysmon/sysmonvar.h>
-#endif
+#include <dev/splash/splash.h>
 
 #include <net/bpf.h>
 #include <net/if.h>
@@ -368,6 +362,13 @@ main(void)
 	/* Initialize the buffer cache */
 	bufinit();
 
+
+#if defined(SPLASHSCREEN) && defined(SPLASHSCREEN_IMAGE)
+	size_t splash_size = (&_binary_splash_image_end -
+	    &_binary_splash_image_start) * sizeof(void *);
+	splash_setimage(&_binary_splash_image_start, splash_size);
+#endif
+
 	/* Initialize sockets. */
 	soinit();
 
@@ -466,23 +467,6 @@ main(void)
 
 	/* Initialize kqueue. */
 	kqueue_init();
-
-	/* Initialize the system monitor subsystems. */
-#if NSYSMON_TASKQ > 0
-	sysmon_task_queue_preinit();
-#endif
-
-#if NSYSMON_ENVSYS > 0
-	sysmon_envsys_init();
-#endif
-
-#if NSYSMON_POWER > 0
-	sysmon_power_init();
-#endif
-
-#if NSYSMON_WDOG > 0
-	sysmon_wdog_init();
-#endif
 
 	inittimecounter();
 	ntp_init();
@@ -711,6 +695,9 @@ main(void)
 	if (workqueue_create(&uvm.aiodone_queue, "aiodoned",
 	    uvm_aiodone_worker, NULL, PRI_VM, IPL_NONE, WQ_MPSAFE))
 		panic("fork aiodoned");
+
+	/* Wait for final configure threads to complete. */
+	config_finalize_mountroot();
 
 	/*
 	 * Okay, now we can let init(8) exec!  It's off to userland!
