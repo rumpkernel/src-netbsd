@@ -1,4 +1,4 @@
-/*	$NetBSD: vm.c,v 1.161 2015/01/03 17:23:51 pooka Exp $	*/
+/*	$NetBSD: vm.c,v 1.166 2015/04/18 15:49:18 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007-2011 Antti Kantee.  All Rights Reserved.
@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vm.c,v 1.161 2015/01/03 17:23:51 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vm.c,v 1.166 2015/04/18 15:49:18 pooka Exp $");
 
 #include <sys/param.h>
 #include <sys/atomic.h>
@@ -80,13 +80,15 @@ const int * const uvmexp_pagemask = &uvmexp.pagemask;
 const int * const uvmexp_pageshift = &uvmexp.pageshift;
 #endif
 
-struct vm_map rump_vmmap;
-
 static struct vm_map kernel_map_store;
 struct vm_map *kernel_map = &kernel_map_store;
 
 static struct vm_map module_map_store;
 extern struct vm_map *module_map;
+
+static struct pmap pmap_kernel;
+struct pmap rump_pmap_local;
+struct pmap *const kernel_pmap_ptr = &pmap_kernel;
 
 vmem_t *kmem_arena;
 vmem_t *kmem_va_arena;
@@ -94,6 +96,9 @@ vmem_t *kmem_va_arena;
 static unsigned int pdaemon_waiters;
 static kmutex_t pdaemonmtx;
 static kcondvar_t pdaemoncv, oomwait;
+
+/* all local non-proc0 processes share this vmspace */
+struct vmspace *rump_vmspace_local;
 
 unsigned long rump_physmemlimit = RUMPMEM_UNLIMITED;
 static unsigned long pdlimit = RUMPMEM_UNLIMITED; /* page daemon memlimit */
@@ -389,6 +394,10 @@ uvm_init(void)
 
 	pool_cache_bootstrap(&pagecache, sizeof(struct vm_page), 0, 0, 0,
 	    "page$", NULL, IPL_NONE, pgctor, pgdtor, NULL);
+
+	/* create vmspace used by local clients */
+	rump_vmspace_local = kmem_zalloc(sizeof(*rump_vmspace_local), KM_SLEEP);
+	uvmspace_init(rump_vmspace_local, &rump_pmap_local, 0, 0, false);
 }
 
 void
@@ -396,7 +405,7 @@ uvmspace_init(struct vmspace *vm, struct pmap *pmap, vaddr_t vmin, vaddr_t vmax,
     bool topdown)
 {
 
-	vm->vm_map.pmap = pmap_kernel();
+	vm->vm_map.pmap = pmap;
 	vm->vm_refcnt = 1;
 }
 
@@ -448,7 +457,7 @@ uvm_mmap_anon(struct proc *p, void **addrp, size_t size)
 	if (RUMP_LOCALPROC_P(curproc)) {
 		error = rumpuser_anonmmap(NULL, size, 0, 0, addrp);
 	} else {
-		error = rump_sysproxy_anonmmap(p->p_vmspace->vm_map.pmap,
+		error = rump_sysproxy_anonmmap(RUMP_SPVM2CTL(p->p_vmspace),
 		    size, addrp);
 	}
 	return error;

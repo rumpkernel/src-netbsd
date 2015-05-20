@@ -1,4 +1,4 @@
-/*	$NetBSD: uipc_usrreq.c,v 1.172 2014/10/08 16:13:02 taca Exp $	*/
+/*	$NetBSD: uipc_usrreq.c,v 1.179 2015/05/02 17:18:03 rtr Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2000, 2004, 2008, 2009 The NetBSD Foundation, Inc.
@@ -96,7 +96,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uipc_usrreq.c,v 1.172 2014/10/08 16:13:02 taca Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uipc_usrreq.c,v 1.179 2015/05/02 17:18:03 rtr Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -333,39 +333,25 @@ unp_output(struct mbuf *m, struct mbuf *control, struct unpcb *unp)
 }
 
 static void
-unp_setaddr(struct socket *so, struct mbuf *nam, bool peeraddr)
+unp_setaddr(struct socket *so, struct sockaddr *nam, bool peeraddr)
 {
-	const struct sockaddr_un *sun;
+	const struct sockaddr_un *sun = NULL;
 	struct unpcb *unp;
-	bool ext;
 
 	KASSERT(solocked(so));
 	unp = sotounpcb(so);
-	ext = false;
 
-	for (;;) {
-		sun = NULL;
-		if (peeraddr) {
-			if (unp->unp_conn && unp->unp_conn->unp_addr)
-				sun = unp->unp_conn->unp_addr;
-		} else {
-			if (unp->unp_addr)
-				sun = unp->unp_addr;
-		}
-		if (sun == NULL)
-			sun = &sun_noname;
-		nam->m_len = sun->sun_len;
-		if (nam->m_len > MLEN && !ext) {
-			sounlock(so);
-			MEXTMALLOC(nam, MAXPATHLEN * 2, M_WAITOK);
-			solock(so);
-			ext = true;
-		} else {
-			KASSERT(nam->m_len <= MAXPATHLEN * 2);
-			memcpy(mtod(nam, void *), sun, (size_t)nam->m_len);
-			break;
-		}
+	if (peeraddr) {
+		if (unp->unp_conn && unp->unp_conn->unp_addr)
+			sun = unp->unp_conn->unp_addr;
+	} else {
+		if (unp->unp_addr)
+			sun = unp->unp_addr;
 	}
+	if (sun == NULL)
+		sun = &sun_noname;
+
+	memcpy(nam, sun, sun->sun_len);
 }
 
 static int
@@ -423,7 +409,7 @@ unp_recvoob(struct socket *so, struct mbuf *m, int flags)
 }
 
 static int
-unp_send(struct socket *so, struct mbuf *m, struct mbuf *nam,
+unp_send(struct socket *so, struct mbuf *m, struct sockaddr *nam,
     struct mbuf *control, struct lwp *l)
 {
 	struct unpcb *unp = sotounpcb(so);
@@ -559,41 +545,6 @@ unp_sendoob(struct socket *so, struct mbuf *m, struct mbuf * control)
 	m_freem(control);
 
 	return EOPNOTSUPP;
-}
-
-static int
-unp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
-    struct mbuf *control, struct lwp *l)
-{
-
-	KASSERT(req != PRU_ATTACH);
-	KASSERT(req != PRU_DETACH);
-	KASSERT(req != PRU_ACCEPT);
-	KASSERT(req != PRU_BIND);
-	KASSERT(req != PRU_LISTEN);
-	KASSERT(req != PRU_CONNECT);
-	KASSERT(req != PRU_CONNECT2);
-	KASSERT(req != PRU_DISCONNECT);
-	KASSERT(req != PRU_SHUTDOWN);
-	KASSERT(req != PRU_ABORT);
-	KASSERT(req != PRU_CONTROL);
-	KASSERT(req != PRU_SENSE);
-	KASSERT(req != PRU_PEERADDR);
-	KASSERT(req != PRU_SOCKADDR);
-	KASSERT(req != PRU_RCVD);
-	KASSERT(req != PRU_RCVOOB);
-	KASSERT(req != PRU_SEND);
-	KASSERT(req != PRU_SENDOOB);
-	KASSERT(req != PRU_PURGEIF);
-
-	KASSERT(solocked(so));
-
-	if (sotounpcb(so) == NULL)
-		return EINVAL;
-
-	panic("piusrreq");
-
-	return 0;
 }
 
 /*
@@ -785,7 +736,7 @@ unp_detach(struct socket *so)
 }
 
 static int
-unp_accept(struct socket *so, struct mbuf *nam)
+unp_accept(struct socket *so, struct sockaddr *nam)
 {
 	struct unpcb *unp = sotounpcb(so);
 	struct socket *so2;
@@ -888,7 +839,7 @@ unp_stat(struct socket *so, struct stat *ub)
 }
 
 static int
-unp_peeraddr(struct socket *so, struct mbuf *nam)
+unp_peeraddr(struct socket *so, struct sockaddr *nam)
 {
 	KASSERT(solocked(so));
 	KASSERT(sotounpcb(so) != NULL);
@@ -899,7 +850,7 @@ unp_peeraddr(struct socket *so, struct mbuf *nam)
 }
 
 static int
-unp_sockaddr(struct socket *so, struct mbuf *nam)
+unp_sockaddr(struct socket *so, struct sockaddr *nam)
 {
 	KASSERT(solocked(so));
 	KASSERT(sotounpcb(so) != NULL);
@@ -910,28 +861,23 @@ unp_sockaddr(struct socket *so, struct mbuf *nam)
 }
 
 /*
- * Allocate the new sockaddr.  We have to allocate one
- * extra byte so that we can ensure that the pathname
- * is nul-terminated. Note that unlike linux, we don't
- * include in the address length the NUL in the path
- * component, because doing so, would exceed sizeof(sockaddr_un)
- * for fully occupied pathnames. Linux is also inconsistent,
- * because it does not include the NUL in the length of
- * what it calls "abstract" unix sockets.
+ * we only need to perform this allocation until syscalls other than
+ * bind are adjusted to use sockaddr_big.
  */
 static struct sockaddr_un *
-makeun(struct mbuf *nam, size_t *addrlen) {
+makeun_sb(struct sockaddr *nam, size_t *addrlen)
+{
 	struct sockaddr_un *sun;
 
-	*addrlen = nam->m_len + 1;
+	*addrlen = nam->sa_len + 1;
 	sun = malloc(*addrlen, M_SONAME, M_WAITOK);
-	m_copydata(nam, 0, nam->m_len, (void *)sun);
-	*(((char *)sun) + nam->m_len) = '\0';
+	memcpy(sun, nam, nam->sa_len);
+	*(((char *)sun) + nam->sa_len) = '\0';
 	return sun;
 }
 
 static int
-unp_bind(struct socket *so, struct mbuf *nam, struct lwp *l)
+unp_bind(struct socket *so, struct sockaddr *nam, struct lwp *l)
 {
 	struct sockaddr_un *sun;
 	struct unpcb *unp;
@@ -962,7 +908,7 @@ unp_bind(struct socket *so, struct mbuf *nam, struct lwp *l)
 	sounlock(so);
 
 	p = l->l_proc;
-	sun = makeun(nam, &addrlen);
+	sun = makeun_sb(nam, &addrlen);
 
 	pb = pathbuf_create(sun->sun_path);
 	if (pb == NULL) {
@@ -1075,7 +1021,7 @@ unp_abort(struct socket *so)
 }
 
 static int
-unp_connect1(struct socket *so, struct socket *so2)
+unp_connect1(struct socket *so, struct socket *so2, struct lwp *l)
 {
 	struct unpcb *unp = sotounpcb(so);
 	struct unpcb *unp2;
@@ -1099,6 +1045,18 @@ unp_connect1(struct socket *so, struct socket *so2)
 
 	unp2 = sotounpcb(so2);
 	unp->unp_conn = unp2;
+
+	if ((so->so_proto->pr_flags & PR_CONNREQUIRED) != 0) {
+		unp2->unp_connid.unp_pid = l->l_proc->p_pid;
+		unp2->unp_connid.unp_euid = kauth_cred_geteuid(l->l_cred);
+		unp2->unp_connid.unp_egid = kauth_cred_getegid(l->l_cred);
+		unp2->unp_flags |= UNP_EIDSVALID;
+		if (unp2->unp_flags & UNP_EIDSBIND) {
+			unp->unp_connid = unp2->unp_connid;
+			unp->unp_flags |= UNP_EIDSVALID;
+		}
+	}
+
 	switch (so->so_type) {
 
 	case SOCK_DGRAM:
@@ -1125,7 +1083,7 @@ unp_connect1(struct socket *so, struct socket *so2)
 }
 
 int
-unp_connect(struct socket *so, struct mbuf *nam, struct lwp *l)
+unp_connect(struct socket *so, struct sockaddr *nam, struct lwp *l)
 {
 	struct sockaddr_un *sun;
 	vnode_t *vp;
@@ -1147,7 +1105,7 @@ unp_connect(struct socket *so, struct mbuf *nam, struct lwp *l)
 	unp->unp_flags |= UNP_BUSY;
 	sounlock(so);
 
-	sun = makeun(nam, &addrlen);
+	sun = makeun_sb(nam, &addrlen);
 	pb = pathbuf_create(sun->sun_path);
 	if (pb == NULL) {
 		error = ENOMEM;
@@ -1208,17 +1166,9 @@ unp_connect(struct socket *so, struct mbuf *nam, struct lwp *l)
 			unp3->unp_addrlen = unp2->unp_addrlen;
 		}
 		unp3->unp_flags = unp2->unp_flags;
-		unp3->unp_connid.unp_pid = l->l_proc->p_pid;
-		unp3->unp_connid.unp_euid = kauth_cred_geteuid(l->l_cred);
-		unp3->unp_connid.unp_egid = kauth_cred_getegid(l->l_cred);
-		unp3->unp_flags |= UNP_EIDSVALID;
-		if (unp2->unp_flags & UNP_EIDSBIND) {
-			unp->unp_connid = unp2->unp_connid;
-			unp->unp_flags |= UNP_EIDSVALID;
-		}
 		so2 = so3;
 	}
-	error = unp_connect1(so, so2);
+	error = unp_connect1(so, so2, l);
 	if (error) {
 		sounlock(so);
 		goto bad;
@@ -1269,7 +1219,7 @@ unp_connect2(struct socket *so, struct socket *so2)
 
 	KASSERT(solocked2(so, so2));
 
-	error = unp_connect1(so, so2);
+	error = unp_connect1(so, so2, curlwp);
 	if (error)
 		return error;
 
@@ -1285,6 +1235,10 @@ unp_connect2(struct socket *so, struct socket *so2)
 	case SOCK_SEQPACKET: /* FALLTHROUGH */
 	case SOCK_STREAM:
 		unp2->unp_conn = unp;
+		if ((so->so_proto->pr_flags & PR_CONNREQUIRED) != 0) {
+			unp->unp_connid = unp2->unp_connid;
+			unp->unp_flags |= UNP_EIDSVALID;
+		}
 		soisconnected(so);
 		soisconnected(so2);
 		break;
@@ -1702,7 +1656,14 @@ unp_gc(file_t *dp)
 			if ((fp->f_flag & FDEFER) != 0) {
 				atomic_and_uint(&fp->f_flag, ~FDEFER);
 				unp_defer--;
-				KASSERT(fp->f_count != 0);
+				if (fp->f_count == 0) {
+					/*
+					 * XXX: closef() doesn't pay attention
+					 * to FDEFER
+					 */
+					mutex_exit(&fp->f_lock);
+					continue;
+				}
 			} else {
 				if (fp->f_count == 0 ||
 				    (fp->f_flag & FMARK) != 0 ||
@@ -1979,5 +1940,4 @@ const struct pr_usrreqs unp_usrreqs = {
 	.pr_recvoob	= unp_recvoob,
 	.pr_send	= unp_send,
 	.pr_sendoob	= unp_sendoob,
-	.pr_generic	= unp_usrreq,
 };

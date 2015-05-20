@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.libkern,v 1.36 2014/11/20 16:25:16 christos Exp $
+#	$NetBSD: Makefile.libkern,v 1.38 2015/04/15 19:13:47 mrg Exp $
 
 # 
 # Variable definitions for libkern.  
@@ -73,6 +73,7 @@ SRCS+=	memset.c
 
 SRCS+=	popcount32.c popcount64.c
 SRCS+=	strtoul.c strtoll.c strtoull.c strtoimax.c strtoumax.c
+SRCS+=	strtoi.c strtou.c
 
 SRCS+=	scanc.c skpc.c
 SRCS+=	random.c
@@ -110,7 +111,3 @@ unwanted_file := ${SRCS:M${check_file:.S=.c}}
 SRCS := ${SRCS:N${unwanted_file}}
 .endif
 .endfor
-
-.if ${HAVE_GCC:U} == "45" && ${MACHINE_CPU} == "hppa"
-COPTS.md5c.c +=		${${ACTIVE_CC} == "gcc" :? -O0 :}
-.endif

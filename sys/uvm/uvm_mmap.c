@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_mmap.c,v 1.150 2014/12/14 23:48:58 chs Exp $	*/
+/*	$NetBSD: uvm_mmap.c,v 1.152 2015/03/01 13:43:51 mlelstv Exp $	*/
 
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -46,7 +46,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_mmap.c,v 1.150 2014/12/14 23:48:58 chs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_mmap.c,v 1.152 2015/03/01 13:43:51 mlelstv Exp $");
 
 #include "opt_compat_netbsd.h"
 #include "opt_pax.h"
@@ -289,7 +289,7 @@ sys_mmap(struct lwp *l, const struct sys_mmap_args *uap, register_t *retval)
 	struct proc *p = l->l_proc;
 	vaddr_t addr;
 	off_t pos;
-	vsize_t size, pageoff;
+	vsize_t size, pageoff, newsize;
 	vm_prot_t prot, maxprot;
 	int flags, fd, advice;
 	vaddr_t defaddr;
@@ -338,9 +338,13 @@ sys_mmap(struct lwp *l, const struct sys_mmap_args *uap, register_t *retval)
 	 */
 
 	pageoff = (pos & PAGE_MASK);
-	pos  -= pageoff;
-	size += pageoff;			/* add offset */
-	size = (vsize_t)round_page(size);	/* round up */
+	pos    -= pageoff;
+	newsize = size + pageoff;		/* add offset */
+	newsize = (vsize_t)round_page(newsize);	/* round up */
+
+	if (newsize < size)
+		return (ENOMEM);
+	size = newsize;
 
 	/*
 	 * now check (MAP_FIXED) or get (!MAP_FIXED) the "addr"
@@ -1084,13 +1088,13 @@ uvm_mmap_dev(struct proc *p, void **addrp, size_t len, dev_t dev,
 		*addrp = (void *)p->p_emul->e_vm_default_addr(p,
 		    (vaddr_t)p->p_vmspace->vm_daddr, len);
 
-	uobj = udv_attach(dev, prot, 0, len);
+	uobj = udv_attach(dev, prot, off, len);
 	if (uobj == NULL)
 		return EINVAL;
 
 	error = uvm_mmap(&p->p_vmspace->vm_map, (vaddr_t *)addrp,
 			 (vsize_t)len, prot, prot, flags, UVM_ADV_RANDOM,
-			 uobj, 0, p->p_rlimit[RLIMIT_MEMLOCK].rlim_cur);
+			 uobj, off, p->p_rlimit[RLIMIT_MEMLOCK].rlim_cur);
 	return error;
 }
 

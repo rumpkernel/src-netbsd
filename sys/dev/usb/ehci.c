@@ -1,4 +1,4 @@
-/*	$NetBSD: ehci.c,v 1.235 2014/12/24 14:01:10 skrll Exp $ */
+/*	$NetBSD: ehci.c,v 1.239 2015/05/11 06:44:36 skrll Exp $ */
 
 /*
  * Copyright (c) 2004-2012 The NetBSD Foundation, Inc.
@@ -53,7 +53,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ehci.c,v 1.235 2014/12/24 14:01:10 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ehci.c,v 1.239 2015/05/11 06:44:36 skrll Exp $");
 
 #include "ohci.h"
 #include "uhci.h"
@@ -562,7 +562,9 @@ ehci_init(ehci_softc_t *sc)
 	usb_syncmem(&sqh->dma, sqh->offs, sizeof(sqh->qh),
 	    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
 #ifdef EHCI_DEBUG
+	USBHIST_LOGN(ehcidebug, 5, "--- dump start ---", 0, 0, 0, 0);
 	ehci_dump_sqh(sqh);
+	USBHIST_LOGN(ehcidebug, 5, "--- dump end ---", 0, 0, 0, 0);
 #endif
 
 	/* Point to async list */
@@ -889,6 +891,12 @@ ehci_check_qh_intr(ehci_softc_t *sc, struct ehci_xfer *ex)
 		}
 		USBHIST_LOGN(ehcidebug, 10, "ex=%p std=%p still active",
 		    ex, ex->sqtdstart, 0, 0);
+#ifdef EHCI_DEBUG
+		USBHIST_LOGN(ehcidebug, 5, "--- still active start ---", 0, 0, 0, 0);
+		ehci_dump_sqtds(ex->sqtdstart);
+		USBHIST_LOGN(ehcidebug, 5, "--- still active end ---", 0, 0, 0, 0);
+#endif
+
 		return;
 	}
  done:
@@ -1077,11 +1085,11 @@ ehci_idone(struct ehci_xfer *ex)
 	if (status & EHCI_QTD_HALTED) {
 #ifdef EHCI_DEBUG
 		USBHIST_LOG(ehcidebug, "halted addr=%d endpt=0x%02x",
-		   xfer->pipe->device->address,
-		   xfer->pipe->endpoint->edesc->bEndpointAddress, 0, 0);
+		    xfer->pipe->device->address,
+		    xfer->pipe->endpoint->edesc->bEndpointAddress, 0, 0);
 		USBHIST_LOG(ehcidebug, "cerr=%d pid=%d stat=%#x",
-		   EHCI_QTD_GET_CERR(status), EHCI_QTD_GET_PID(status),
-		   status, 0);
+		    EHCI_QTD_GET_CERR(status), EHCI_QTD_GET_PID(status),
+		    status, 0);
 		USBHIST_LOG(ehcidebug,
 		    "active =%d halted=%d buferr=%d babble=%d",
 		    status & EHCI_QTD_ACTIVE ? 1 : 0,
@@ -1585,7 +1593,7 @@ ehci_dump_sqtds(ehci_soft_qtd_t *sqtd)
 		    sqtd->offs + offsetof(ehci_qtd_t, qtd_next),
 		    sizeof(sqtd->qtd), BUS_DMASYNC_PREREAD);
 	}
-	if (sqtd)
+	if (!stop)
 		USBHIST_LOG(ehcidebug,
 		    "dump aborted, too many TDs", 0, 0, 0, 0);
 }
@@ -1671,7 +1679,7 @@ ehci_dump_sqh(ehci_soft_qh_t *sqh)
 	USBHIST_LOGN(ehcidebug, 10,
 	    "        addr = 0x%02x  inact = %d  endpt = %d  eps = %d",
 	    EHCI_QH_GET_ADDR(endp), EHCI_QH_GET_INACT(endp),
-	    EHCI_QH_GET_ENDPT(endp),  EHCI_QH_GET_EPS(endp));
+	    EHCI_QH_GET_ENDPT(endp), EHCI_QH_GET_EPS(endp));
 	USBHIST_LOGN(ehcidebug, 10,
 	    "        dtc  = %d     hrecl = %d",
 	    EHCI_QH_GET_DTC(endp), EHCI_QH_GET_HRECL(endp), 0, 0);
@@ -2087,7 +2095,7 @@ ehci_rem_free_itd_chain(ehci_softc_t *sc, struct ehci_xfer *exfer)
 	prev = NULL;
 
 	if (exfer->itdstart == NULL || exfer->itdend == NULL)
-		panic("ehci isoc xfer being freed, but with no itd chain\n");
+		panic("ehci isoc xfer being freed, but with no itd chain");
 
 	for (itd = exfer->itdstart; itd != NULL; itd = itd->xfer_next) {
 		prev = itd->u.frame_list.prev;
@@ -4167,7 +4175,7 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 
 #ifdef DIAGNOSTIC
 	if (xfer->rqflags & URQ_REQUEST)
-		panic("ehci_device_isoc_start: request\n");
+		panic("ehci_device_isoc_start: request");
 
 	if (!exfer->isdone) {
 		USBHIST_LOG(ehcidebug, "marked not done, ex = %p", exfer,
@@ -4336,7 +4344,7 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 	itd = start;
 	for (j = 0; j < frames; j++) {
 		if (itd == NULL)
-			panic("ehci: unexpectedly ran out of isoc itds, isoc_start\n");
+			panic("ehci: unexpectedly ran out of isoc itds, isoc_start");
 
 		itd->itd.itd_next = sc->sc_flist[frindex];
 		if (itd->itd.itd_next == 0)

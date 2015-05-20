@@ -1,4 +1,4 @@
-/*	$NetBSD: tcp_usrreq.c,v 1.202 2014/11/10 18:52:51 maxv Exp $	*/
+/*	$NetBSD: tcp_usrreq.c,v 1.208 2015/05/02 17:18:03 rtr Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -99,10 +99,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tcp_usrreq.c,v 1.202 2014/11/10 18:52:51 maxv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tcp_usrreq.c,v 1.208 2015/05/02 17:18:03 rtr Exp $");
 
 #include "opt_inet.h"
-#include "opt_ipsec.h"
 #include "opt_tcp_debug.h"
 #include "opt_mbuftrace.h"
 
@@ -119,6 +118,7 @@ __KERNEL_RCSID(0, "$NetBSD: tcp_usrreq.c,v 1.202 2014/11/10 18:52:51 maxv Exp $"
 #include <sys/domain.h>
 #include <sys/sysctl.h>
 #include <sys/kauth.h>
+#include <sys/kernel.h>
 #include <sys/uidinfo.h>
 
 #include <net/if.h>
@@ -214,42 +214,6 @@ tcp_getpcb(struct socket *so, struct inpcb **inp,
 	return 0;
 }
 
-/*
- * Process a TCP user request for TCP tb.  If this is a send request
- * then m is the mbuf chain of send data.  If this is a timer expiration
- * (called from the software clock routine), then timertype tells which timer.
- */
-static int
-tcp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
-    struct mbuf *control, struct lwp *l)
-{
-	KASSERT(req != PRU_ATTACH);
-	KASSERT(req != PRU_DETACH);
-	KASSERT(req != PRU_ACCEPT);
-	KASSERT(req != PRU_BIND);
-	KASSERT(req != PRU_LISTEN);
-	KASSERT(req != PRU_CONNECT);
-	KASSERT(req != PRU_CONNECT2);
-	KASSERT(req != PRU_DISCONNECT);
-	KASSERT(req != PRU_SHUTDOWN);
-	KASSERT(req != PRU_ABORT);
-	KASSERT(req != PRU_CONTROL);
-	KASSERT(req != PRU_SENSE);
-	KASSERT(req != PRU_PEERADDR);
-	KASSERT(req != PRU_SOCKADDR);
-	KASSERT(req != PRU_RCVD);
-	KASSERT(req != PRU_RCVOOB);
-	KASSERT(req != PRU_SEND);
-	KASSERT(req != PRU_SENDOOB);
-	KASSERT(req != PRU_PURGEIF);
-
-	KASSERT(solocked(so));
-
-	panic("tcp_usrreq");
-
-	return 0;
-}
-
 static void
 change_keepalive(struct socket *so, struct tcpcb *tp)
 {
@@ -271,6 +235,65 @@ change_keepalive(struct socket *so, struct tcpcb *tp)
 		TCP_TIMER_ARM(tp, TCPT_2MSL, tp->t_maxidle);
 }
 
+/*
+ * Export TCP internal state information via a struct tcp_info, based on the
+ * Linux 2.6 API.  Not ABI compatible as our constants are mapped differently
+ * (TCP state machine, etc).  We export all information using FreeBSD-native
+ * constants -- for example, the numeric values for tcpi_state will differ
+ * from Linux.
+ */
+static void
+tcp_fill_info(struct tcpcb *tp, struct tcp_info *ti)
+{
+
+	bzero(ti, sizeof(*ti));
+
+	ti->tcpi_state = tp->t_state;
+	if ((tp->t_flags & TF_REQ_TSTMP) && (tp->t_flags & TF_RCVD_TSTMP))
+		ti->tcpi_options |= TCPI_OPT_TIMESTAMPS;
+	if (tp->t_flags & TF_SACK_PERMIT)
+		ti->tcpi_options |= TCPI_OPT_SACK;
+	if ((tp->t_flags & TF_REQ_SCALE) && (tp->t_flags & TF_RCVD_SCALE)) {
+		ti->tcpi_options |= TCPI_OPT_WSCALE;
+		ti->tcpi_snd_wscale = tp->snd_scale;
+		ti->tcpi_rcv_wscale = tp->rcv_scale;
+	}
+	if (tp->t_flags & TF_ECN_PERMIT) {
+		ti->tcpi_options |= TCPI_OPT_ECN;
+	}
+
+	ti->tcpi_rto = tp->t_rxtcur * tick;
+	ti->tcpi_last_data_recv = (long)(hardclock_ticks -
+					 (int)tp->t_rcvtime) * tick;
+	ti->tcpi_rtt = ((u_int64_t)tp->t_srtt * tick) >> TCP_RTT_SHIFT;
+	ti->tcpi_rttvar = ((u_int64_t)tp->t_rttvar * tick) >> TCP_RTTVAR_SHIFT;
+
+	ti->tcpi_snd_ssthresh = tp->snd_ssthresh;
+	/* Linux API wants these in # of segments, apparently */
+	ti->tcpi_snd_cwnd = tp->snd_cwnd / tp->t_segsz;
+	ti->tcpi_snd_wnd = tp->snd_wnd / tp->t_segsz;
+
+	/*
+	 * FreeBSD-specific extension fields for tcp_info.
+	 */
+	ti->tcpi_rcv_space = tp->rcv_wnd;
+	ti->tcpi_rcv_nxt = tp->rcv_nxt;
+	ti->tcpi_snd_bwnd = 0;		/* Unused, kept for compat. */
+	ti->tcpi_snd_nxt = tp->snd_nxt;
+	ti->tcpi_snd_mss = tp->t_segsz;
+	ti->tcpi_rcv_mss = tp->t_segsz;
+#ifdef TF_TOE
+	if (tp->t_flags & TF_TOE)
+		ti->tcpi_options |= TCPI_OPT_TOE;
+#endif
+	/* From the redundant department of redundancies... */
+	ti->__tcpi_retransmits = ti->__tcpi_retrans =
+		ti->tcpi_snd_rexmitpack = tp->t_sndrexmitpack;
+
+	ti->tcpi_rcv_ooopack = tp->t_rcvoopack;
+	ti->tcpi_snd_zerowin = tp->t_sndzerowin;
+}
+
 int
 tcp_ctloutput(int op, struct socket *so, struct sockopt *sopt)
 {
@@ -280,6 +303,7 @@ tcp_ctloutput(int op, struct socket *so, struct sockopt *sopt)
 	struct in6pcb *in6p;
 #endif
 	struct tcpcb *tp;
+	struct tcp_info ti;
 	u_int ui;
 	int family;	/* family of the socket */
 	int level, optname, optval;
@@ -450,6 +474,10 @@ tcp_ctloutput(int op, struct socket *so, struct sockopt *sopt)
 			optval = tp->t_peermss;
 			error = sockopt_set(sopt, &optval, sizeof(optval));
 			break;
+		case TCP_INFO:
+			tcp_fill_info(tp, &ti);
+			error = sockopt_set(sopt, &ti, sizeof ti);
+			break;
 #ifdef notyet
 		case TCP_CONGCTL:
 			break;
@@ -610,7 +638,7 @@ tcp_detach(struct socket *so)
 }
 
 static int
-tcp_accept(struct socket *so, struct mbuf *nam)
+tcp_accept(struct socket *so, struct sockaddr *nam)
 {
 	struct inpcb *inp = NULL;
 	struct in6pcb *in6p = NULL;
@@ -632,12 +660,12 @@ tcp_accept(struct socket *so, struct mbuf *nam)
 	s = splsoftnet();
 #ifdef INET
 	if (inp) {
-		in_setpeeraddr(inp, nam);
+		in_setpeeraddr(inp, (struct sockaddr_in *)nam);
 	}
 #endif
 #ifdef INET6
 	if (in6p) {
-		in6_setpeeraddr(in6p, nam);
+		in6_setpeeraddr(in6p, (struct sockaddr_in6 *)nam);
 	}
 #endif
 	tcp_debug_trace(so, tp, ostate, PRU_ACCEPT);
@@ -647,10 +675,14 @@ tcp_accept(struct socket *so, struct mbuf *nam)
 }
 
 static int
-tcp_bind(struct socket *so, struct mbuf *nam, struct lwp *l)
+tcp_bind(struct socket *so, struct sockaddr *nam, struct lwp *l)
 {
 	struct inpcb *inp = NULL;
 	struct in6pcb *in6p = NULL;
+	struct sockaddr_in *sin = (struct sockaddr_in *)nam;
+#ifdef INET6
+	struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)nam;
+#endif /* INET6 */
 	struct tcpcb *tp = NULL;
 	int s;
 	int error = 0;
@@ -668,12 +700,12 @@ tcp_bind(struct socket *so, struct mbuf *nam, struct lwp *l)
 	switch (so->so_proto->pr_domain->dom_family) {
 #ifdef INET
 	case PF_INET:
-		error = in_pcbbind(inp, nam, l);
+		error = in_pcbbind(inp, sin, l);
 		break;
 #endif
 #ifdef INET6
 	case PF_INET6:
-		error = in6_pcbbind(in6p, nam, l);
+		error = in6_pcbbind(in6p, sin6, l);
 		if (!error) {
 			/* mapped addr case */
 			if (IN6_IS_ADDR_V4MAPPED(&in6p->in6p_laddr))
@@ -733,7 +765,7 @@ release:
 }
 
 static int
-tcp_connect(struct socket *so, struct mbuf *nam, struct lwp *l)
+tcp_connect(struct socket *so, struct sockaddr *nam, struct lwp *l)
 {
 	struct inpcb *inp = NULL;
 	struct in6pcb *in6p = NULL;
@@ -762,7 +794,7 @@ tcp_connect(struct socket *so, struct mbuf *nam, struct lwp *l)
 			if (error)
 				goto release;
 		}
-		error = in_pcbconnect(inp, nam, l);
+		error = in_pcbconnect(inp, (struct sockaddr_in *)nam, l);
 	}
 #endif
 #ifdef INET6
@@ -772,7 +804,7 @@ tcp_connect(struct socket *so, struct mbuf *nam, struct lwp *l)
 			if (error)
 				goto release;
 		}
-		error = in6_pcbconnect(in6p, nam, l);
+		error = in6_pcbconnect(in6p, (struct sockaddr_in6 *)nam, l);
 		if (!error) {
 			/* mapped addr case */
 			if (IN6_IS_ADDR_V4MAPPED(&in6p->in6p_faddr))
@@ -955,7 +987,7 @@ tcp_stat(struct socket *so, struct stat *ub)
 }
 
 static int
-tcp_peeraddr(struct socket *so, struct mbuf *nam)
+tcp_peeraddr(struct socket *so, struct sockaddr *nam)
 {
 	struct inpcb *inp = NULL;
 	struct in6pcb *in6p = NULL;
@@ -971,12 +1003,14 @@ tcp_peeraddr(struct socket *so, struct mbuf *nam)
 
 	s = splsoftnet();
 #ifdef INET
-	if (inp)
-		in_setpeeraddr(inp, nam);
+	if (inp) {
+		in_setpeeraddr(inp, (struct sockaddr_in *)nam);
+	}
 #endif
 #ifdef INET6
-	if (in6p)
-		in6_setpeeraddr(in6p, nam);
+	if (in6p) {
+		in6_setpeeraddr(in6p, (struct sockaddr_in6 *)nam);
+	}
 #endif
 	tcp_debug_trace(so, tp, ostate, PRU_PEERADDR);
 	splx(s);
@@ -985,7 +1019,7 @@ tcp_peeraddr(struct socket *so, struct mbuf *nam)
 }
 
 static int
-tcp_sockaddr(struct socket *so, struct mbuf *nam)
+tcp_sockaddr(struct socket *so, struct sockaddr *nam)
 {
 	struct inpcb *inp = NULL;
 	struct in6pcb *in6p = NULL;
@@ -1001,12 +1035,14 @@ tcp_sockaddr(struct socket *so, struct mbuf *nam)
 
 	s = splsoftnet();
 #ifdef INET
-	if (inp)
-		in_setsockaddr(inp, nam);
+	if (inp) {
+		in_setsockaddr(inp, (struct sockaddr_in *)nam);
+	}
 #endif
 #ifdef INET6
-	if (in6p)
-		in6_setsockaddr(in6p, nam);
+	if (in6p) {
+		in6_setsockaddr(in6p, (struct sockaddr_in6 *)nam);
+	}
 #endif
 	tcp_debug_trace(so, tp, ostate, PRU_SOCKADDR);
 	splx(s);
@@ -1089,7 +1125,7 @@ tcp_recvoob(struct socket *so, struct mbuf *m, int flags)
 }
 
 static int
-tcp_send(struct socket *so, struct mbuf *m, struct mbuf *nam,
+tcp_send(struct socket *so, struct mbuf *m, struct sockaddr *nam,
     struct mbuf *control, struct lwp *l)
 {
 	struct inpcb *inp = NULL;
@@ -2451,7 +2487,6 @@ PR_WRAP_USRREQS(tcp)
 #define	tcp_send	tcp_send_wrapper
 #define	tcp_sendoob	tcp_sendoob_wrapper
 #define	tcp_purgeif	tcp_purgeif_wrapper
-#define	tcp_usrreq	tcp_usrreq_wrapper
 
 const struct pr_usrreqs tcp_usrreqs = {
 	.pr_attach	= tcp_attach,
@@ -2473,5 +2508,4 @@ const struct pr_usrreqs tcp_usrreqs = {
 	.pr_send	= tcp_send,
 	.pr_sendoob	= tcp_sendoob,
 	.pr_purgeif	= tcp_purgeif,
-	.pr_generic	= tcp_usrreq,
 };

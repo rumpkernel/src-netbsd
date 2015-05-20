@@ -1,4 +1,4 @@
-/*	$NetBSD: dbcool.c,v 1.41 2014/08/10 16:44:35 tls Exp $ */
+/*	$NetBSD: dbcool.c,v 1.43 2015/04/23 23:23:00 pgoyette Exp $ */
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -50,7 +50,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dbcool.c,v 1.41 2014/08/10 16:44:35 tls Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dbcool.c,v 1.43 2015/04/23 23:23:00 pgoyette Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -2161,7 +2161,7 @@ dbcool_set_fan_limits(struct dbcool_softc *sc, int idx,
 	}
 }
 
-MODULE(MODULE_CLASS_DRIVER, dbcool, "iic");
+MODULE(MODULE_CLASS_DRIVER, dbcool, "i2cexec,sysmon_envsys");
 
 #ifdef _MODULE
 #include "ioconf.c"
