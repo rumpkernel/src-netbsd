@@ -104,7 +104,7 @@ u32 via_get_vblank_counter(struct drm_device *dev, int crtc)
 	return atomic_read(&dev_priv->vbl_received);
 }
 
-irqreturn_t via_driver_irq_handler(int irq, void *arg)
+irqreturn_t via_driver_irq_handler(DRM_IRQ_ARGS)
 {
 	struct drm_device *dev = (struct drm_device *) arg;
 	drm_via_private_t *dev_priv = (drm_via_private_t *) dev->dev_private;
@@ -249,14 +249,14 @@ via_driver_irq_wait(struct drm_device *dev, unsigned int irq, int force_sequence
 #ifdef __NetBSD__
 	spin_lock(&cur_irq->irq_lock);
 	if (masks[real_irq][2] && !force_sequence) {
-		DRM_SPIN_TIMED_WAIT_UNTIL(ret, &cur_irq->irq_queue,
-		    &cur_irq->irq_lock, 3 * DRM_HZ,
+		DRM_SPIN_WAIT_ON(ret, &cur_irq->irq_queue, &cur_irq->irq_lock,
+		    3 * DRM_HZ,
 		    ((VIA_READ(masks[irq][2]) & masks[irq][3]) ==
 			masks[irq][4]));
 		cur_irq_sequence = cur_irq->irq_received;
 	} else {
-		DRM_SPIN_TIMED_WAIT_UNTIL(ret, &cur_irq->irq_queue,
-		    &cur_irq->irq_lock, 3 * DRM_HZ,
+		DRM_SPIN_WAIT_ON(ret, &cur_irq->irq_queue, &cur_irq->irq_lock,
+		    3 * DRM_HZ,
 		    (((cur_irq_sequence = cur_irq->irq_received) -
 			*sequence) <= (1 << 23)));
 	}

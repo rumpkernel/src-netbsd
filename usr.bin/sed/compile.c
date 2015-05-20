@@ -1,4 +1,4 @@
-/*	$NetBSD: compile.c,v 1.43 2014/06/26 02:14:32 christos Exp $	*/
+/*	$NetBSD: compile.c,v 1.46 2015/03/12 12:40:41 christos Exp $	*/
 
 /*-
  * Copyright (c) 1992 Diomidis Spinellis.
@@ -38,7 +38,7 @@
 #endif
 
 #include <sys/cdefs.h>
-__RCSID("$NetBSD: compile.c,v 1.43 2014/06/26 02:14:32 christos Exp $");
+__RCSID("$NetBSD: compile.c,v 1.46 2015/03/12 12:40:41 christos Exp $");
 #ifdef __FBSDID
 __FBSDID("$FreeBSD: head/usr.bin/sed/compile.c 259132 2013-12-09 18:57:20Z eadler $");
 #endif

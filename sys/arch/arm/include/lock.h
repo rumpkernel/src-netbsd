@@ -1,4 +1,4 @@
-/*	$NetBSD: lock.h,v 1.29 2015/01/02 02:00:15 christos Exp $	*/
+/*	$NetBSD: lock.h,v 1.32 2015/02/25 13:52:42 joerg Exp $	*/
 
 /*-
  * Copyright (c) 2000, 2001 The NetBSD Foundation, Inc.
@@ -139,23 +139,23 @@ __swp(int __val, __cpu_simple_lock_t *__ptr)
 }
 #endif /* !_ARM_ARCH_6 */
 
-static inline void
+static __inline void
 __arm_membar_producer(void)
 {
 #ifdef _ARM_ARCH_7
-		__asm __volatile("dsb");
+	__asm __volatile("dsb" ::: "memory");
 #elif defined(_ARM_ARCH_6)
-		__asm __volatile("mcr\tp15,0,%0,c7,c10,4" :: "r"(0));
+	__asm __volatile("mcr\tp15,0,%0,c7,c10,4" :: "r"(0) : "memory");
 #endif
 }
 
-static inline void
+static __inline void
 __arm_membar_consumer(void)
 {
 #ifdef _ARM_ARCH_7
-		__asm __volatile("dmb");
+	__asm __volatile("dmb" ::: "memory");
 #elif defined(_ARM_ARCH_6)
-		__asm __volatile("mcr\tp15,0,%0,c7,c10,5" :: "r"(0));
+	__asm __volatile("mcr\tp15,0,%0,c7,c10,5" :: "r"(0) : "memory");
 #endif
 }
 

@@ -41,11 +41,14 @@
 #else
 #include <sys/ioctl.h>
 #include <sys/sysctl.h>
+#include <sys/cpuio.h>
 #endif
 #include <assert.h>
 #include <libgen.h>
 #include <limits.h>
+#include <paths.h>
 
+#include <sys/isa_defs.h>
 #include <dt_impl.h>
 
 static const struct {
@@ -104,7 +107,7 @@ dtrace_xstr2desc(dtrace_hdl_t *dtp, dtrace_probespec_t spec,
 				v++;
 			}
 
-			if (isdigit(v[1])) {
+			if (isdigit((unsigned char)v[1])) {
 				long i;
 
 				errno = 0;
@@ -389,7 +392,7 @@ dt_version_str2num(const char *s, dt_version_t *vp)
 	char c;
 
 	while ((c = *s++) != '\0') {
-		if (isdigit(c))
+		if (isdigit((unsigned char)c))
 			n[i] = n[i] * 10 + c - '0';
 		else if (c != '.' || i++ >= sizeof (n) / sizeof (n[0]) - 1)
 			return (-1);
@@ -497,6 +500,25 @@ dt_ioctl(dtrace_hdl_t *dtp, u_long val, void *arg)
 	return (-1);
 }
 
+static bool
+cpu_online(processorid_t cpu)
+{
+	cpustate_t cs;
+	int fd, online = false;
+
+	if ((fd = open(_PATH_CPUCTL, O_RDONLY)) < 0)
+		return false;
+
+	cs.cs_id = cpu;
+	if (ioctl(fd, IOC_CPU_GETSTATE, &cs) == 0) {
+		if (cs.cs_online)
+			online = true;
+	}
+
+	close(fd);
+	return online;
+}
+
 int
 dt_status(dtrace_hdl_t *dtp, processorid_t cpu)
 {
@@ -506,7 +528,7 @@ dt_status(dtrace_hdl_t *dtp, processorid_t cpu)
 #if defined(sun)
 		return (p_online(cpu, P_STATUS));
 #else
-		return 1;
+		return cpu_online(cpu) ? 1 : -1;
 #endif
 	}
 

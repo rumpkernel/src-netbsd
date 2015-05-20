@@ -1,4 +1,4 @@
-/*	$NetBSD: process.c,v 1.46 2014/08/13 11:35:34 christos Exp $	*/
+/*	$NetBSD: process.c,v 1.52 2015/03/12 12:40:41 christos Exp $	*/
 
 /*-
  * Copyright (c) 1992 Diomidis Spinellis.
@@ -38,7 +38,7 @@
 #endif
 
 #include <sys/cdefs.h>
-__RCSID("$NetBSD: process.c,v 1.46 2014/08/13 11:35:34 christos Exp $");
+__RCSID("$NetBSD: process.c,v 1.52 2015/03/12 12:40:41 christos Exp $");
 #ifdef __FBSDID
 __FBSDID("$FreeBSD: head/usr.bin/sed/process.c 192732 2009-05-25 06:45:33Z brian $");
 #endif

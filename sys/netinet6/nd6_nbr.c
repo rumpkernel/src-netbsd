@@ -1,4 +1,4 @@
-/*	$NetBSD: nd6_nbr.c,v 1.103 2014/12/16 11:42:27 roy Exp $	*/
+/*	$NetBSD: nd6_nbr.c,v 1.108 2015/04/27 10:14:44 ozaki-r Exp $	*/
 /*	$KAME: nd6_nbr.c,v 1.61 2001/02/10 16:06:14 jinmei Exp $	*/
 
 /*
@@ -31,10 +31,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nd6_nbr.c,v 1.103 2014/12/16 11:42:27 roy Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nd6_nbr.c,v 1.108 2015/04/27 10:14:44 ozaki-r Exp $");
 
 #include "opt_inet.h"
-#include "opt_ipsec.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -804,7 +803,7 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 			s = splsoftnet();
 			dr = defrouter_lookup(in6, rt->rt_ifp);
 			if (dr)
-				defrtrlist_del(dr);
+				defrtrlist_del(dr, NULL);
 			else if (!ip6_forwarding) {
 				/*
 				 * Even if the neighbor is not in the default
@@ -823,7 +822,7 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 	ln->ln_asked = 0;
 	nd6_llinfo_release_pkts(ln, ifp, rt);
 	if (rt_announce) /* tell user process about any new lladdr */
-		nd6_rtmsg(RTM_CHANGE, rt);
+		rt_newmsg(RTM_CHANGE, rt);
 
  freeit:
 	m_freem(m);
@@ -928,7 +927,8 @@ nd6_na_output(
 	ip6->ip6_dst = daddr6;
 	sockaddr_in6_init(&u.dst6, &daddr6, 0, 0, 0);
 	dst = &u.dst;
-	rtcache_setdst(&ro, dst);
+	if (rtcache_setdst(&ro, dst) != 0)
+		goto bad;
 
 	/*
 	 * Select a source whose scope is the same as that of the dest.
@@ -1067,26 +1067,6 @@ nd6_dad_stoptimer(struct dadq *dp)
 }
 
 /*
- * Routine to report address flag changes to the routing socket
- */
-void
-nd6_newaddrmsg(struct ifaddr *ifa)
-{
-	struct sockaddr_in6 all1_sa;
-	struct rtentry *nrt = NULL;
-	int e;
-
-	sockaddr_in6_init(&all1_sa, &in6mask128, 0, 0, 0);
-	e = rtrequest(RTM_GET, ifa->ifa_addr, ifa->ifa_addr,
-	    (struct sockaddr *)&all1_sa, RTF_UP | RTF_HOST | RTF_LLINFO, &nrt);
-	if (nrt) {
-		rt_newaddrmsg(RTM_ADD, ifa, e, nrt);
-		nrt->rt_refcnt--;
-	}
-}
-
-
-/*
  * Start Duplicate Address Detection (DAD) for specified interface address.
  *
  * Note that callout is used when xtick > 0 and not when xtick == 0.
@@ -1120,7 +1100,7 @@ nd6_dad_start(struct ifaddr *ifa, int xtick)
 	}
 	if (ia->ia6_flags & IN6_IFF_ANYCAST || !ip6_dad_count) {
 		ia->ia6_flags &= ~IN6_IFF_TENTATIVE;
-		nd6_newaddrmsg(ifa);
+		rt_newaddrmsg(RTM_NEWADDR, ifa, 0, NULL);
 		return;
 	}
 	if (ifa->ifa_ifp == NULL)
@@ -1276,7 +1256,7 @@ nd6_dad_timer(struct ifaddr *ifa)
 			 * No duplicate address found.
 			 */
 			ia->ia6_flags &= ~IN6_IFF_TENTATIVE;
-			nd6_newaddrmsg(ifa);
+			rt_newaddrmsg(RTM_NEWADDR, ifa, 0, NULL);
 
 			nd6log((LOG_DEBUG,
 			    "%s: DAD complete for %s - no duplicates found\n",
@@ -1326,7 +1306,7 @@ nd6_dad_duplicated(struct ifaddr *ifa)
 	    if_name(ifp));
 
 	/* Inform the routing socket that DAD has completed */
-	nd6_newaddrmsg(ifa);
+	rt_newaddrmsg(RTM_NEWADDR, ifa, 0, NULL);
 
 	/*
 	 * If the address is a link-local address formed from an interface

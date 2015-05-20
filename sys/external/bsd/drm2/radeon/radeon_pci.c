@@ -1,4 +1,4 @@
-/*	$NetBSD: radeon_pci.c,v 1.4 2014/07/26 07:36:09 riastradh Exp $	*/
+/*	$NetBSD: radeon_pci.c,v 1.9 2015/04/19 01:08:56 mrg Exp $	*/
 
 /*-
  * Copyright (c) 2014 The NetBSD Foundation, Inc.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: radeon_pci.c,v 1.4 2014/07/26 07:36:09 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: radeon_pci.c,v 1.9 2015/04/19 01:08:56 mrg Exp $");
 
 #ifdef _KERNEL_OPT
 #include "vga.h"
@@ -82,6 +82,12 @@ struct radeon_softc {
 	}				sc_task_u;
 	struct drm_device		*sc_drm_dev;
 	struct pci_dev			sc_pci_dev;
+#if defined(__i386__)
+#define RADEON_PCI_UGLY_MAP_HACK
+	/* XXX Used to claim the VGA device before attach_real */
+	bus_space_handle_t		sc_temp_memh;
+	bool				sc_temp_set;
+#endif
 };
 
 struct radeon_device *
@@ -99,6 +105,8 @@ static int	radeon_match(device_t, cfdata_t, void *);
 static void	radeon_attach(device_t, device_t, void *);
 static void	radeon_attach_real(device_t);
 static int	radeon_detach(device_t, int);
+static bool	radeon_do_suspend(device_t, const pmf_qual_t *);
+static bool	radeon_do_resume(device_t, const pmf_qual_t *);
 
 static void	radeon_task_work(struct work *, void *);
 
@@ -157,6 +165,9 @@ radeon_attach(device_t parent, device_t self, void *aux)
 
 	pci_aprint_devinfo(pa, NULL);
 
+	if (!pmf_device_register(self, &radeon_do_suspend, &radeon_do_resume))
+		aprint_error_dev(self, "unable to establish power handler\n");
+
 	/*
 	 * Trivial initialization first; the rest will come after we
 	 * have mounted the root file system and can load firmware
@@ -164,6 +175,22 @@ radeon_attach(device_t parent, device_t self, void *aux)
 	 */
 	sc->sc_dev = NULL;
 	sc->sc_pa = *pa;
+
+#ifdef RADEON_PCI_UGLY_MAP_HACK
+	/*
+	 * XXX
+	 * We try to map the VGA registers, in case we can prevent vga@isa or
+	 * pcdisplay@isa attaching, and stealing wsdisplay0.  This only works
+	 * with serial console, as actual VGA console has already mapped them.
+	 * The only way to handle that is for vga@isa to not attach.
+	 */
+	int rv = bus_space_map(pa->pa_memt, 0xb0000, 0x10000, 0,
+			       &sc->sc_temp_memh);
+	sc->sc_temp_set = rv == 0;
+	if (rv != 0)
+		aprint_error_dev(self, "unable to reserve VGA registers for "
+				       "i386 radeondrmkms hack\n");
+#endif
 
 	config_mountroot(self, &radeon_attach_real);
 }
@@ -179,6 +206,15 @@ radeon_attach_real(device_t self)
 
 	ok = radeon_pci_lookup(pa, &flags);
 	KASSERT(ok);
+
+#ifdef RADEON_PCI_UGLY_MAP_HACK
+	/*
+	 * XXX
+	 * Unmap the VGA registers.
+	 */
+	if (sc->sc_temp_set)
+		bus_space_unmap(pa->pa_memt, sc->sc_temp_memh, 0x10000);
+#endif
 
 	sc->sc_task_state = RADEON_TASK_ATTACH;
 	SIMPLEQ_INIT(&sc->sc_task_u.attach);
@@ -228,14 +264,14 @@ radeon_detach(device_t self, int flags)
 		return error;
 
 	if (sc->sc_task_state == RADEON_TASK_ATTACH)
-		return 0;
+		goto out;
 	if (sc->sc_task_u.workqueue != NULL) {
 		workqueue_destroy(sc->sc_task_u.workqueue);
 		sc->sc_task_u.workqueue = NULL;
 	}
 
 	if (sc->sc_drm_dev == NULL)
-		return 0;
+		goto out;
 	/* XXX errno Linux->NetBSD */
 	error = -drm_pci_detach(sc->sc_drm_dev, flags);
 	if (error)
@@ -243,7 +279,45 @@ radeon_detach(device_t self, int flags)
 		return error;
 	sc->sc_drm_dev = NULL;
 
+out:	pmf_device_deregister(self);
+
 	return 0;
+}
+
+static bool
+radeon_do_suspend(device_t self, const pmf_qual_t *qual)
+{
+	struct radeon_softc *const sc = device_private(self);
+	struct drm_device *const dev = sc->sc_drm_dev;
+	int ret;
+	bool is_console = true; /* XXX */
+
+	if (dev == NULL)
+		return true;
+
+	ret = radeon_suspend_kms(dev, true, is_console);
+	if (ret)
+		return false;
+
+	return true;
+}
+
+static bool
+radeon_do_resume(device_t self, const pmf_qual_t *qual)
+{
+	struct radeon_softc *const sc = device_private(self);
+	struct drm_device *const dev = sc->sc_drm_dev;
+	int ret;
+	bool is_console = true; /* XXX */
+
+	if (dev == NULL)
+		return true;
+
+	ret = radeon_resume_kms(dev, true, is_console);
+	if (ret)
+		return false;
+
+	return true;
 }
 
 static void

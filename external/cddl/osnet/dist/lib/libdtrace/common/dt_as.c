@@ -259,6 +259,8 @@ dt_as(dt_pcb_t *pcb)
 	default:
 		xyerror(D_UNKNOWN, "internal error -- invalid link mode %u\n",
 		    dtp->dt_linkmode);
+		kmask = umask = 0;
+		kbits = ubits = -1u;
 	}
 
 	assert(pcb->pcb_difo == NULL);

@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.h,v 1.137 2014/11/08 17:18:22 skrll Exp $	*/
+/*	$NetBSD: pmap.h,v 1.139 2015/05/12 07:07:16 skrll Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003 Wasabi Systems, Inc.
@@ -78,6 +78,7 @@
 #include "opt_multiprocessor.h"
 #endif
 #include <arm/cpufunc.h>
+#include <arm/locore.h>
 #include <uvm/uvm_object.h>
 #endif
 
@@ -511,9 +512,7 @@ pmap_ptesync(pt_entry_t *ptep, size_t cnt)
 		    cnt * sizeof(pt_entry_t));
 #endif
 	}
-#if ARM_MMU_V7 > 0
-	__asm("dsb");
-#endif
+	arm_dsb();
 }
 
 #define	PDE_SYNC(pdep)			pmap_ptesync((pdep), 1)
@@ -568,10 +567,12 @@ static inline void
 l2pte_set(pt_entry_t *ptep, pt_entry_t pte, pt_entry_t opte)
 {
 	if (l1pte_lpage_p(pte)) {
+		KASSERTMSG((((uintptr_t)ptep / sizeof(pte)) & (L2_L_SIZE / L2_S_SIZE - 1)) == 0, "%p", ptep);
 		for (size_t k = 0; k < L2_L_SIZE / L2_S_SIZE; k++) {
 			*ptep++ = pte;
 		}
 	} else {
+		KASSERTMSG((((uintptr_t)ptep / sizeof(pte)) & (PAGE_SIZE / L2_S_SIZE - 1)) == 0, "%p", ptep);
 		for (size_t k = 0; k < PAGE_SIZE / L2_S_SIZE; k++) {
 			KASSERTMSG(*ptep == opte, "%#x [*%p] != %#x", *ptep, ptep, opte);
 			*ptep++ = pte;
@@ -585,6 +586,7 @@ l2pte_set(pt_entry_t *ptep, pt_entry_t pte, pt_entry_t opte)
 static inline void
 l2pte_reset(pt_entry_t *ptep)
 {
+	KASSERTMSG((((uintptr_t)ptep / sizeof(*ptep)) & (PAGE_SIZE / L2_S_SIZE - 1)) == 0, "%p", ptep);
 	*ptep = 0;
 	for (vsize_t k = 1; k < PAGE_SIZE / L2_S_SIZE; k++) {
 		ptep[k] = 0;

@@ -1,4 +1,4 @@
-/*	$NetBSD: ext2fs_vnops.c,v 1.115 2014/11/09 18:23:28 maxv Exp $	*/
+/*	$NetBSD: ext2fs_vnops.c,v 1.117 2015/04/20 23:03:09 riastradh Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -65,7 +65,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ext2fs_vnops.c,v 1.115 2014/11/09 18:23:28 maxv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ext2fs_vnops.c,v 1.117 2015/04/20 23:03:09 riastradh Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -589,7 +589,7 @@ ext2fs_remove(void *v)
 int
 ext2fs_link(void *v)
 {
-	struct vop_link_args /* {
+	struct vop_link_v2_args /* {
 		struct vnode *a_dvp;
 		struct vnode *a_vp;
 		struct componentname *a_cnp;
@@ -639,7 +639,6 @@ out1:
 out2:
 	VN_KNOTE(vp, NOTE_LINK);
 	VN_KNOTE(dvp, NOTE_WRITE);
-	vput(dvp);
 	return (error);
 }
 
@@ -727,9 +726,9 @@ ext2fs_mkdir(void *v)
 		dirtemplate.dotdot_type = EXT2_FT_DIR;
 	}
 	dirtemplate.dotdot_name[0] = dirtemplate.dotdot_name[1] = '.';
-	error = vn_rdwr(UIO_WRITE, tvp, (void *)&dirtemplate,
-	    sizeof (dirtemplate), (off_t)0, UIO_SYSSPACE,
-	    IO_NODELOCKED|IO_SYNC, cnp->cn_cred, (size_t *)0, NULL);
+	error = ufs_bufio(UIO_WRITE, tvp, (void *)&dirtemplate,
+	    sizeof (dirtemplate), (off_t)0, IO_NODELOCKED|IO_SYNC,
+	    cnp->cn_cred, (size_t *)0, NULL);
 	if (error) {
 		dp->i_e2fs_nlink--;
 		dp->i_flag |= IN_CHANGE;
@@ -895,9 +894,8 @@ ext2fs_symlink(void *v)
 			ip->i_flag |= IN_ACCESS;
 		uvm_vnp_setsize(vp, len);
 	} else
-		error = vn_rdwr(UIO_WRITE, vp, ap->a_target, len, (off_t)0,
-		    UIO_SYSSPACE, IO_NODELOCKED, ap->a_cnp->cn_cred,
-		    (size_t *)0, NULL);
+		error = ufs_bufio(UIO_WRITE, vp, ap->a_target, len, (off_t)0,
+		    IO_NODELOCKED, ap->a_cnp->cn_cred, (size_t *)0, NULL);
 bad:
 	VOP_UNLOCK(vp);
 	if (error)
@@ -927,7 +925,7 @@ ext2fs_readlink(void *v)
 		uiomove((char *)ip->i_din.e2fs_din->e2di_shortlink, isize, ap->a_uio);
 		return (0);
 	}
-	return (VOP_READ(vp, ap->a_uio, 0, ap->a_cred));
+	return (UFS_BUFRD(vp, ap->a_uio, 0, ap->a_cred));
 }
 
 /*

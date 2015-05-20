@@ -1,4 +1,4 @@
-/*	$NetBSD: tcp_subr.c,v 1.257 2014/11/10 18:52:51 maxv Exp $	*/
+/*	$NetBSD: tcp_subr.c,v 1.262 2015/05/19 17:33:43 kefren Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -91,7 +91,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tcp_subr.c,v 1.257 2014/11/10 18:52:51 maxv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tcp_subr.c,v 1.262 2015/05/19 17:33:43 kefren Exp $");
 
 #include "opt_inet.h"
 #include "opt_ipsec.h"
@@ -240,6 +240,7 @@ int	tcp_syn_bucket_limit = 3*TCP_SYN_BUCKET_SIZE;
 struct	syn_cache_head tcp_syn_cache[TCP_SYN_HASH_SIZE];
 
 int	tcp_freeq(struct tcpcb *);
+static int	tcp_iss_secret_init(void);
 
 #ifdef INET
 static void	tcp_mtudisc_callback(struct in_addr);
@@ -637,9 +638,6 @@ int
 tcp_respond(struct tcpcb *tp, struct mbuf *mtemplate, struct mbuf *m,
     struct tcphdr *th0, tcp_seq ack, tcp_seq seq, int flags)
 {
-#ifdef INET6
-	struct rtentry *rt;
-#endif
 	struct route *ro;
 	int error, tlen, win = 0;
 	int hlen;
@@ -878,13 +876,9 @@ tcp_respond(struct tcpcb *tp, struct mbuf *mtemplate, struct mbuf *m,
 		th->th_sum = in6_cksum(m, IPPROTO_TCP, sizeof(struct ip6_hdr),
 				tlen);
 		ip6->ip6_plen = htons(tlen);
-		if (tp && tp->t_in6pcb) {
-			struct ifnet *oifp;
-			ro = &tp->t_in6pcb->in6p_route;
-			oifp = (rt = rtcache_validate(ro)) != NULL ? rt->rt_ifp
-			                                           : NULL;
-			ip6->ip6_hlim = in6_selecthlim(tp->t_in6pcb, oifp);
-		} else
+		if (tp && tp->t_in6pcb)
+			ip6->ip6_hlim = in6_selecthlim_rt(tp->t_in6pcb);
+		else
 			ip6->ip6_hlim = ip6_defhlim;
 		ip6->ip6_flow &= ~IPV6_FLOWINFO_MASK;
 		if (ip6_auto_flowlabel) {
@@ -980,6 +974,9 @@ static struct tcpcb tcpcb_template = {
 
 	.t_partialacks = -1,
 	.t_bytes_acked = 0,
+	.t_sndrexmitpack = 0,
+	.t_rcvoopack = 0,
+	.t_sndzerowin = 0,
 };
 
 /*
@@ -1032,9 +1029,6 @@ tcp_tcpcb_template(void)
 struct tcpcb *
 tcp_newtcpcb(int family, void *aux)
 {
-#ifdef INET6
-	struct rtentry *rt;
-#endif
 	struct tcpcb *tp;
 	int i;
 
@@ -1073,10 +1067,7 @@ tcp_newtcpcb(int family, void *aux)
 	    {
 		struct in6pcb *in6p = (struct in6pcb *)aux;
 
-		in6p->in6p_ip6.ip6_hlim = in6_selecthlim(in6p,
-			(rt = rtcache_validate(&in6p->in6p_route)) != NULL
-			    ? rt->rt_ifp
-			    : NULL);
+		in6p->in6p_ip6.ip6_hlim = in6_selecthlim_rt(in6p);
 		in6p->in6p_ppcb = (void *)tp;
 
 		tp->t_in6pcb = in6p;
@@ -2199,7 +2190,6 @@ tcp_rmx_rtt(struct tcpcb *tp)
 }
 
 tcp_seq	 tcp_iss_seq = 0;	/* tcp initial seq # */
-u_int8_t tcp_iss_secret[16];	/* 128 bits; should be plenty */
 
 /*
  * Get a new sequence value given a tcp control block
@@ -2228,6 +2218,20 @@ tcp_new_iss(struct tcpcb *tp, tcp_seq addin)
 	panic("tcp_new_iss");
 }
 
+static u_int8_t tcp_iss_secret[16];	/* 128 bits; should be plenty */
+
+/*
+ * Initialize RFC 1948 ISS Secret
+ */
+static int
+tcp_iss_secret_init(void)
+{
+	cprng_strong(kern_cprng,
+	    tcp_iss_secret, sizeof(tcp_iss_secret), 0);
+
+	return 0;
+}
+
 /*
  * This routine actually generates a new TCP initial sequence number.
  */
@@ -2237,21 +2241,16 @@ tcp_new_iss1(void *laddr, void *faddr, u_int16_t lport, u_int16_t fport,
 {
 	tcp_seq tcp_iss;
 
-	static bool tcp_iss_gotten_secret;
-
-	/*
-	 * If we haven't been here before, initialize our cryptographic
-	 * hash secret.
-	 */
-	if (tcp_iss_gotten_secret == false) {
-		cprng_strong(kern_cprng,
-			     tcp_iss_secret, sizeof(tcp_iss_secret), FASYNC);
-		tcp_iss_gotten_secret = true;
-	}
-
 	if (tcp_do_rfc1948) {
 		MD5_CTX ctx;
 		u_int8_t hash[16];	/* XXX MD5 knowledge */
+		static ONCE_DECL(tcp_iss_secret_control);
+
+		/*
+		 * If we haven't been here before, initialize our cryptographic
+		 * hash secret.
+		 */
+		RUN_ONCE(&tcp_iss_secret_control, tcp_iss_secret_init);
 
 		/*
 		 * Compute the base value of the ISS.  It is a hash

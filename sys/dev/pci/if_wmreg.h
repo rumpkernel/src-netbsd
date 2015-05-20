@@ -1,4 +1,4 @@
-/*	$NetBSD: if_wmreg.h,v 1.65 2014/10/24 17:58:09 msaitoh Exp $	*/
+/*	$NetBSD: if_wmreg.h,v 1.71 2015/05/16 22:41:59 msaitoh Exp $	*/
 
 /*
  * Copyright (c) 2001 Wasabi Systems, Inc.
@@ -315,6 +315,7 @@ struct livengood_tcpip_ctxdesc {
 #define	CTRL_EXT_SPD_BYPS	(1U << 15) /* speed select bypass */
 #define	CTRL_EXT_IPS1		(1U << 16) /* invert power state bit 1 */
 #define	CTRL_EXT_RO_DIS		(1U << 17) /* relaxed ordering disabled */
+#define	CTRL_EXT_DMA_DYN_CLK	(1U << 19) /* DMA Dynamic Gating Enable */
 #define	CTRL_EXT_LINK_MODE_MASK		0x00C00000
 #define	CTRL_EXT_LINK_MODE_GMII		0x00000000
 #define	CTRL_EXT_LINK_MODE_KMRN		0x00000000
@@ -581,9 +582,6 @@ struct livengood_tcpip_ctxdesc {
 
 #define	DEFAULT_80003ES2LAN_TCTL_EXT_GCEX 0x00010000
 
-#define	WMREG_TQSA_LO	0x0408
-#define	WMREG_TQSA_HI	0x040c
-
 #define	WMREG_TIPG	0x0410	/* Transmit IPG Register */
 #define	TIPG_IPGT(x)	(x)		/* IPG transmit time */
 #define	TIPG_IPGR1(x)	((x) << 10)	/* IPG receive time 1 */
@@ -669,6 +667,7 @@ struct livengood_tcpip_ctxdesc {
 #define	PBA_8K		0x0008
 #define	PBA_10K		0x000a
 #define	PBA_12K		0x000c
+#define	PBA_14K		0x000e
 #define	PBA_16K		0x0010		/* 16K, default Tx allocation */
 #define	PBA_20K		0x0014
 #define	PBA_22K		0x0016
@@ -738,6 +737,9 @@ struct livengood_tcpip_ctxdesc {
 #define WMREG_EITR(x)	(0x01680 + (0x4 * (x)))
 #define EITR_ITR_INT_MASK	0x0000ffff
 
+#define	WMREG_RXPBS	0x2404	/* Rx Packet Buffer Size  */
+#define RXPBS_SIZE_MASK_82576	0x0000007F
+
 #define	WMREG_RDFH	0x2410	/* Receive Data FIFO Head */
 #define	WMREG_RDFT	0x2418	/* Receive Data FIFO Tail */
 #define	WMREG_RDFHS	0x2420	/* Receive Data FIFO Head Saved */
@@ -756,11 +758,14 @@ struct livengood_tcpip_ctxdesc {
 #define	WMREG_TDFTS	0x3428	/* Transmit Data FIFO Tail Saved */
 #define	WMREG_TDFPC	0x3430	/* Transmit Data FIFO Packet Count */
 
-#define	WMREG_TXDCTL	0x3828	/* Trandmit Descriptor Control */
+#define	WMREG_TXDCTL(n)		/* Trandmit Descriptor Control */ \
+	(((n) < 4) ? (0x3828 + ((n) * 0x100)) : (0xe028 + ((n) * 0x40)))
 #define	TXDCTL_PTHRESH(x) ((x) << 0)	/* prefetch threshold */
 #define	TXDCTL_HTHRESH(x) ((x) << 8)	/* host threshold */
 #define	TXDCTL_WTHRESH(x) ((x) << 16)	/* write back threshold */
 /* flags used starting with 82575 ... */
+#define TXDCTL_COUNT_DESC	__BIT(22) /* Enable the counting of desc.
+					   still to be processed. */
 #define TXDCTL_QUEUE_ENABLE  0x02000000 /* Enable specific Tx Queue */
 #define TXDCTL_SWFLSH        0x04000000 /* Tx Desc. write-back flushing */
 #define TXDCTL_PRIORITY      0x08000000
@@ -768,10 +773,11 @@ struct livengood_tcpip_ctxdesc {
 #define	WMREG_TADV	0x382c	/* Transmit Absolute Interrupt Delay Timer */
 #define	WMREG_TSPMT	0x3830	/* TCP Segmentation Pad and Minimum
 				   Threshold (Cordova) */
-#define	WMREG_TARC0	0x3840	/* Tx arbitration count */
-
 #define	TSPMT_TSMT(x)	(x)		/* TCP seg min transfer */
 #define	TSPMT_TSPBP(x)	((x) << 16)	/* TCP seg pkt buf padding */
+
+#define	WMREG_TARC0	0x3840	/* Tx arbitration count (0) */
+#define	WMREG_TARC1	0x3940	/* Tx arbitration count (1) */
 
 #define	WMREG_CRCERRS	0x4000	/* CRC Error Count */
 #define	WMREG_ALGNERRC	0x4004	/* Alignment Error Count */
@@ -798,6 +804,13 @@ struct livengood_tcpip_ctxdesc {
 #define	RXCSUM_IPV6OFL	(1U << 10)	/* IPv6 checksum offload */
 
 #define WMREG_RLPML	0x5004	/* Rx Long Packet Max Length */
+
+#define WMREG_RFCTL	0x5008	/* Receive Filter Control */
+#define WMREG_RFCTL_NFSWDIS	__BIT(6)  /* NFS Write Disable */
+#define WMREG_RFCTL_NFSRDIS	__BIT(7)  /* NFS Read Disable */
+#define WMREG_RFCTL_ACKDIS	__BIT(13) /* ACK Accelerate Disable */
+#define WMREG_RFCTL_IPV6EXDIS	__BIT(16) /* IPv6 Extension Header Disable */
+#define WMREG_RFCTL_NEWIPV6EXDIS __BIT(17) /* New IPv6 Extension Header */
 
 #define	WMREG_WUC	0x5800	/* Wakeup Control */
 #define	WUC_APME		0x00000001 /* APM Enable */
@@ -874,7 +887,14 @@ struct livengood_tcpip_ctxdesc {
 #define	SWFW_SOFT_SHIFT		0	/* software semaphores */
 #define	SWFW_FIRM_SHIFT		16	/* firmware semaphores */
 
+#define WMREG_GCR2	0x5b64	/* 3GPIO Control Register 2 */
+
 #define WMREG_CRC_OFFSET 0x5f50
+
+#define WMREG_EEC	0x12010
+#define EEC_FLASH_DETECTED (1U << 19)	/* FLASH */
+#define EEC_FLUPD	(1U << 23)	/* Update FLASH */
+
 
 /*
  * NVM related values.
@@ -903,15 +923,21 @@ struct livengood_tcpip_ctxdesc {
 #define NVM_SIZE		0x0040
 #define NVM_WORD_SIZE_BASE_SHIFT 6
 
-#define	NVM_OFF_MACADDR		0x0000	/* MAC address offset */
+#define	NVM_OFF_MACADDR		0x0000	/* MAC address offset 0 */
+#define	NVM_OFF_MACADDR1	0x0001	/* MAC address offset 1 */
+#define	NVM_OFF_MACADDR2	0x0002	/* MAC address offset 2 */
 #define NVM_OFF_COMPAT		0x0003
+#define NVM_OFF_ID_LED_SETTINGS	0x0004
 #define	NVM_OFF_CFG1		0x000a	/* config word 1 */
 #define	NVM_OFF_CFG2		0x000f	/* config word 2 */
 #define	NVM_OFF_EEPROM_SIZE	0x0012	/* NVM SIZE */
+#define	NVM_OFF_CFG4		0x0013	/* config word 4 */
 #define	NVM_OFF_CFG3_PORTB	0x0014	/* config word 3 */
 #define NVM_OFF_FUTURE_INIT_WORD1 0x0019
 #define	NVM_OFF_INIT_3GIO_3	0x001a	/* PCIe Initial Configuration Word 3 */
 #define	NVM_OFF_K1_CONFIG	0x001b	/* NVM K1 Config */
+#define	NVM_OFF_LED_1_CFG	0x001c
+#define	NVM_OFF_LED_0_2_CFG	0x001f
 #define	NVM_OFF_SWDPIN		0x0020	/* SWD Pins (Cordova) */
 #define	NVM_OFF_CFG3_PORTA	0x0024	/* config word 3 */
 #define NVM_OFF_ALT_MAC_ADDR_PTR 0x0037	/* to the alternative MAC addresses */
@@ -973,6 +999,34 @@ struct livengood_tcpip_ctxdesc {
  * in 82580's datasheet.
  */
 #define NVM_OFF_LAN_FUNC_82580(x)	((x) ? (0x40 + (0x40 * (x))) : 0)
+
+/* iNVM Registers for i21[01] */
+#define E1000_INVM_DATA_REG(reg)	(0x12120 + 4*(reg))
+#define INVM_SIZE			64 /* Number of INVM Data Registers */
+
+/* iNVM default vaule */
+#define NVM_INIT_CTRL_2_DEFAULT_I211	0x7243
+#define NVM_INIT_CTRL_4_DEFAULT_I211	0x00c1
+#define NVM_LED_1_CFG_DEFAULT_I211	0x0184
+#define NVM_LED_0_2_CFG_DEFAULT_I211	0x200c
+#define NVM_RESERVED_WORD		0xffff
+
+#define INVM_DWORD_TO_RECORD_TYPE(dword)	((dword) & 0x7)
+#define INVM_DWORD_TO_WORD_ADDRESS(dword)	(((dword) & 0x0000FE00) >> 9)
+#define INVM_DWORD_TO_WORD_DATA(dword)		(((dword) & 0xFFFF0000) >> 16)
+
+#define INVM_UNINITIALIZED_STRUCTURE		0x0
+#define INVM_WORD_AUTOLOAD_STRUCTURE		0x1
+#define INVM_CSR_AUTOLOAD_STRUCTURE		0x2
+#define INVM_PHY_REGISTER_AUTOLOAD_STRUCTURE	0x3
+#define INVM_RSA_KEY_SHA256_STRUCTURE		0x4
+#define INVM_INVALIDATED_STRUCTURE		0x5
+
+#define INVM_RSA_KEY_SHA256_DATA_SIZE_IN_DWORDS	8
+#define INVM_CSR_AUTOLOAD_DATA_SIZE_IN_DWORDS	1
+
+/* Word definitions for ID LED Settings */
+#define ID_LED_RESERVED_FFFF 0xFFFF
 
 /* ich8 flash control */
 #define ICH_FLASH_COMMAND_TIMEOUT            5000    /* 5000 uSecs - adjusted */
