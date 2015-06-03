@@ -1,4 +1,4 @@
-/*	$NetBSD: bus.h,v 1.6 2015/06/03 13:55:42 pooka Exp $	*/
+/*	$NetBSD: auich_at_pci.c,v 1.1 2015/06/03 14:06:19 pooka Exp $	*/
 
 /*
  * Copyright (c) 2010 Antti Kantee.  All Rights Reserved.
@@ -25,47 +25,21 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _SYS_RUMP_BUS_H_
-#define _SYS_RUMP_BUS_H_
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: auich_at_pci.c,v 1.1 2015/06/03 14:06:19 pooka Exp $");
 
-/*
- * This is a blanket header since archs are inline/macro-happy.
- *
- * XXX: this file should NOT exist here
- */
+#include <sys/param.h>
+#include <sys/conf.h>
+#include <sys/device.h>
+#include <sys/bus.h>
 
-/* bus space defs */
-typedef unsigned long bus_addr_t;
-typedef unsigned long bus_size_t;
-typedef unsigned long bus_space_tag_t;
-typedef unsigned long bus_space_handle_t;
+#include "rump_private.h"
 
-/* bus dma defs */
-typedef void *bus_dma_tag_t;
-#define BUS_DMA_TAG_VALID(_tag_) ((_tag_) != NULL)
+#include "ioconf.c"
 
-typedef struct {
-	bus_addr_t	ds_addr;
-	bus_size_t	ds_len;
-	vaddr_t		_ds_vacookie;
-	bus_size_t	_ds_sizecookie;
-} bus_dma_segment_t;
+RUMP_COMPONENT(RUMP_COMPONENT_DEV)
+{
 
-typedef struct {
-	bus_size_t _dm_size;
-	int _dm_segcnt;
-	bus_size_t _dm_maxmaxsegsz;
-	bus_size_t _dm_boundary;
-	bus_addr_t _dm_bounce_thresh;
-	int _dm_flags;
-	void *_dm_cookie;
-
-	bus_size_t dm_maxsegsz;
-	bus_size_t dm_mapsize;
-	int dm_nsegs;
-	bus_dma_segment_t dm_segs[1];
-} *bus_dmamap_t;
-
-#include <sys/bus_proto.h>
-
-#endif /* _SYS_RUMP_BUS_H_ */
+	config_init_component(cfdriver_ioconf_pci_auich,
+	    cfattach_ioconf_pci_auich, cfdata_ioconf_pci_auich);
+}
