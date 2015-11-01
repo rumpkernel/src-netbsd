@@ -1,4 +1,4 @@
-/*	$NetBSD: systm.h,v 1.267 2015/03/07 16:34:55 christos Exp $	*/
+/*	$NetBSD: systm.h,v 1.269 2015/10/29 00:27:08 mrg Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1988, 1991, 1993
@@ -164,6 +164,7 @@ extern void (*v_putc)(int); /* Virtual console putc routine */
  */
 void	voidop(void);
 int	nullop(void *);
+void*	nullret(void);
 int	enodev(void);
 int	enosys(void);
 int	enoioctl(void);
@@ -488,6 +489,7 @@ extern int db_fromconsole; /* XXX ddb/ddbvar.h */
 #endif /* _KERNEL */
 
 /* For SYSCALL_DEBUG */
+void scdebug_init(void);
 void scdebug_call(register_t, const register_t[]);
 void scdebug_ret(register_t, int, const register_t[]);
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: compat_defs.h,v 1.101 2015/01/16 18:44:06 christos Exp $	*/
+/*	$NetBSD: compat_defs.h,v 1.103 2015/09/21 21:50:16 pooka Exp $	*/
 
 #ifndef	__NETBSD_COMPAT_DEFS_H__
 #define	__NETBSD_COMPAT_DEFS_H__
@@ -469,6 +469,10 @@ ssize_t pwrite(int, const void *, size_t, off_t);
 int raise_default_signal(int);
 #endif
 
+#if !HAVE_REALLOCARR
+int reallocarr(void *, size_t, size_t);
+#endif
+
 #if !HAVE_SETENV
 int setenv(const char *, const char *, int);
 #endif
@@ -906,6 +910,13 @@ void *setmode(const char *);
 #define LLONG_MIN ((long long)(~LLONG_MAX))
 #endif
 
+#ifndef MAXPATHLEN
+#define MAXPATHLEN	4096
+#endif
+#ifndef PATH_MAX
+#define PATH_MAX	MAXPATHLEN
+#endif
+
 /* <paths.h> */
 
 /* The host's _PATH_BSHELL might be broken, so override it. */
@@ -1144,6 +1155,9 @@ __GEN_ENDIAN_DEC(64, le)
 #endif
 #ifndef MAXPHYS
 #define MAXPHYS (64 * 1024)
+#endif
+#ifndef MAXHOSTNAMELEN
+#define MAXHOSTNAMELEN	256
 #endif
 
 /* XXX needed by makefs; this should be done in a better way */

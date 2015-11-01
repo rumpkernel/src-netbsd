@@ -1,4 +1,4 @@
-/*	$NetBSD: rtsock.c,v 1.171 2015/05/02 17:18:03 rtr Exp $	*/
+/*	$NetBSD: rtsock.c,v 1.174 2015/10/13 21:28:34 rjs Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -61,12 +61,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rtsock.c,v 1.171 2015/05/02 17:18:03 rtr Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rtsock.c,v 1.174 2015/10/13 21:28:34 rjs Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
 #include "opt_mpls.h"
 #include "opt_compat_netbsd.h"
+#include "opt_sctp.h"
 #endif
 
 #include <sys/param.h>
@@ -89,6 +90,11 @@ __KERNEL_RCSID(0, "$NetBSD: rtsock.c,v 1.171 2015/05/02 17:18:03 rtr Exp $");
 #include <net/raw_cb.h>
 
 #include <netmpls/mpls.h>
+
+#ifdef SCTP
+extern void sctp_add_ip_address(struct ifaddr *);
+extern void sctp_delete_ip_address(struct ifaddr *);
+#endif
 
 #if defined(COMPAT_14) || defined(COMPAT_50)
 #include <compat/net/if.h>
@@ -494,16 +500,16 @@ COMPATNAME(route_output)(struct mbuf *m, ...)
 			senderr(EINVAL);
 		}
 		error = rtrequest1(rtm->rtm_type, &info, &saved_nrt);
-		if (error == 0 && saved_nrt) {
+		if (error == 0) {
 			rt_setmetrics(rtm->rtm_inits, rtm, saved_nrt);
-			saved_nrt->rt_refcnt--;
+			rtfree(saved_nrt);
 		}
 		break;
 
 	case RTM_DELETE:
 		error = rtrequest1(rtm->rtm_type, &info, &saved_nrt);
 		if (error == 0) {
-			(rt = saved_nrt)->rt_refcnt++;
+			rt = saved_nrt;
 			goto report;
 		}
 		break;
@@ -515,6 +521,7 @@ COMPATNAME(route_output)(struct mbuf *m, ...)
 		 * info.rti_info[RTAX_NETMASK] before
                  * searching.  It did not used to do that.  --dyoung
 		 */
+		rt = NULL;
 		error = rtrequest1(RTM_GET, &info, &rt);
 		if (error != 0)
 			senderr(error);
@@ -716,8 +723,11 @@ rt_setmetrics(int which, const struct rt_xmsghdr *in, struct rtentry *out)
 	metric(RTV_RTTVAR, rmx_rttvar);
 	metric(RTV_HOPCOUNT, rmx_hopcount);
 	metric(RTV_MTU, rmx_mtu);
-	metric(RTV_EXPIRE, rmx_expire);
 #undef metric
+	if (which & RTV_EXPIRE) {
+		out->rt_rmx.rmx_expire = in->rtm_rmx.rmx_expire ?
+		    time_wall_to_mono(in->rtm_rmx.rmx_expire) : 0;
+	}
 }
 
 static void
@@ -731,8 +741,9 @@ rtm_setmetrics(const struct rtentry *in, struct rt_xmsghdr *out)
 	metric(rmx_rttvar);
 	metric(rmx_hopcount);
 	metric(rmx_mtu);
-	metric(rmx_expire);
 #undef metric
+	out->rtm_rmx.rmx_expire = in->rt_rmx.rmx_expire ?
+	    time_mono_to_wall(in->rt_rmx.rmx_expire) : 0;
 }
 
 static int
@@ -1051,6 +1062,14 @@ COMPATNAME(rt_newaddrmsg)(int cmd, struct ifaddr *ifa, int error,
 
 	KASSERT(ifa != NULL);
 	ifp = ifa->ifa_ifp;
+#ifdef SCTP
+	if (cmd == RTM_ADD) {
+		sctp_add_ip_address(ifa);
+	} else if (cmd == RTM_DELETE) {
+		sctp_delete_ip_address(ifa);
+	}
+#endif
+
 	COMPATCALL(rt_newaddrmsg, (cmd, ifa, error, rt));
 	if (COMPATNAME(route_info).ri_cb.any_count == 0)
 		return;

@@ -1,4 +1,4 @@
-/*	$NetBSD: vnd.c,v 1.243 2015/04/26 15:15:20 mlelstv Exp $	*/
+/*	$NetBSD: vnd.c,v 1.248 2015/08/20 14:40:17 christos Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 2008 The NetBSD Foundation, Inc.
@@ -91,7 +91,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vnd.c,v 1.243 2015/04/26 15:15:20 mlelstv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vnd.c,v 1.248 2015/08/20 14:40:17 christos Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_vnd.h"
@@ -127,6 +127,8 @@ __KERNEL_RCSID(0, "$NetBSD: vnd.c,v 1.243 2015/04/26 15:15:20 mlelstv Exp $");
 #include <dev/dkvar.h>
 #include <dev/vndvar.h>
 
+#include "ioconf.h"
+
 #if defined(VNDDEBUG) && !defined(DEBUG)
 #define DEBUG
 #endif
@@ -156,8 +158,6 @@ struct vndxfer {
 
 #define	VND_MAXPENDING(vnd)	((vnd)->sc_maxactive * 4)
 
-/* called by main() at boot time */
-void	vndattach(int);
 
 static void	vndclear(struct vnd_softc *, int);
 static int	vnddoclear(struct vnd_softc *, int, int, bool);
@@ -245,8 +245,8 @@ vndattach(int num)
 
 	error = config_cfattach_attach(vnd_cd.cd_name, &vnd_ca);
 	if (error)
-		aprint_error("%s: unable to register cfattach\n",
-		    vnd_cd.cd_name);
+		aprint_error("%s: unable to register cfattach, error = %d\n",
+		    vnd_cd.cd_name, error);
 }
 
 static int
@@ -343,6 +343,8 @@ vndopen(dev_t dev, int flags, int mode, struct lwp *l)
 	if ((error = vndlock(sc)) != 0)
 		return error;
 
+	mutex_enter(&sc->sc_dkdev.dk_openlock);
+
 	if ((sc->sc_flags & VNF_CLEARING) != 0) {
 		error = ENXIO;
 		goto done;
@@ -403,6 +405,7 @@ vndopen(dev_t dev, int flags, int mode, struct lwp *l)
 	    sc->sc_dkdev.dk_copenmask | sc->sc_dkdev.dk_bopenmask;
 
  done:
+	mutex_exit(&sc->sc_dkdev.dk_openlock);
 	vndunlock(sc);
 	return error;
 }
@@ -425,6 +428,8 @@ vndclose(dev_t dev, int flags, int mode, struct lwp *l)
 	if ((error = vndlock(sc)) != 0)
 		return error;
 
+	mutex_enter(&sc->sc_dkdev.dk_openlock);
+
 	part = DISKPART(dev);
 
 	/* ...that much closer to allowing unconfiguration... */
@@ -445,6 +450,8 @@ vndclose(dev_t dev, int flags, int mode, struct lwp *l)
 		if ((sc->sc_flags & VNF_KLABEL) == 0)
 			sc->sc_flags &= ~VNF_VLABEL;
 	}
+
+	mutex_exit(&sc->sc_dkdev.dk_openlock);
 
 	vndunlock(sc);
 
@@ -658,7 +665,7 @@ vndthread(void *arg)
 		/* handle a compressed read */
 		if ((obp->b_flags & B_READ) != 0 && (vnd->sc_flags & VNF_COMP)) {
 			off_t bn;
-			
+
 			/* Convert to a byte offset within the file. */
 			bn = obp->b_rawblkno *
 			    vnd->sc_dkdev.dk_label->d_secsize;
@@ -667,7 +674,7 @@ vndthread(void *arg)
 			goto done;
 		}
 #endif /* VND_COMPRESSION */
-		
+
 		/*
 		 * Allocate a header for this transfer and link it to the
 		 * buffer
@@ -743,7 +750,7 @@ vnode_has_op(const struct vnode *vp, int opoffset)
 }
 
 /*
- * Handes the read/write request given in 'bp' using the vnode's VOP_READ
+ * Handles the read/write request given in 'bp' using the vnode's VOP_READ
  * and VOP_WRITE operations.
  *
  * 'obp' is a pointer to the original request fed to the vnd device.
@@ -896,7 +903,7 @@ handle_with_strategy(struct vnd_softc *vnd, const struct buf *obp,
 		 * fsync won't wait for this write which
 		 * has no chance to complete before all nested bufs
 		 * have been queued. But it has to be done
-		 * before the last VOP_STRATEGY() 
+		 * before the last VOP_STRATEGY()
 		 * or the call to nestiobuf_done().
 		 */
 		w_vp = bp->b_vp;
@@ -905,9 +912,9 @@ handle_with_strategy(struct vnd_softc *vnd, const struct buf *obp,
 		mutex_exit(w_vp->v_interlock);
 	}
 	KASSERT(skipped != 0 || nbp != NULL);
-	if (skipped) 
+	if (skipped)
 		nestiobuf_done(bp, skipped, error);
-	else 
+	else
 		VOP_STRATEGY(vp, nbp);
 }
 
@@ -1181,11 +1188,11 @@ vndioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 			int i;
 			u_int32_t comp_size;
 			u_int32_t comp_maxsize;
- 
+
 			/* allocate space for compresed file header */
 			ch = malloc(sizeof(struct vnd_comp_header),
 			M_TEMP, M_WAITOK);
- 
+
 			/* read compressed file header */
 			error = vn_rdwr(UIO_READ, nd.ni_vp, (void *)ch,
 			  sizeof(struct vnd_comp_header), 0, UIO_SYSSPACE,
@@ -1195,7 +1202,7 @@ vndioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 				VOP_UNLOCK(nd.ni_vp);
 				goto close_and_exit;
 			}
- 
+
 			/* save some header info */
 			vnd->sc_comp_blksz = ntohl(ch->block_size);
 			/* note last offset is the file byte size */
@@ -1214,17 +1221,17 @@ vndioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 				error = EINVAL;
 				goto close_and_exit;
 			}
- 
+
 			/* set decompressed file size */
 			vattr.va_size =
 			    ((u_quad_t)vnd->sc_comp_numoffs - 1) *
 			     (u_quad_t)vnd->sc_comp_blksz;
- 
+
 			/* allocate space for all the compressed offsets */
 			vnd->sc_comp_offsets =
 			malloc(sizeof(u_int64_t) * vnd->sc_comp_numoffs,
 			M_DEVBUF, M_WAITOK);
- 
+
 			/* read in the offsets */
 			error = vn_rdwr(UIO_READ, nd.ni_vp,
 			  (void *)vnd->sc_comp_offsets,
@@ -1250,16 +1257,16 @@ vndioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 			}
 			vnd->sc_comp_offsets[vnd->sc_comp_numoffs - 1] =
 			  be64toh(vnd->sc_comp_offsets[vnd->sc_comp_numoffs - 1]);
- 
+
 			/* create compressed data buffer */
 			vnd->sc_comp_buff = malloc(comp_maxsize,
 			  M_DEVBUF, M_WAITOK);
- 
+
 			/* create decompressed buffer */
 			vnd->sc_comp_decombuf = malloc(vnd->sc_comp_blksz,
 			  M_DEVBUF, M_WAITOK);
 			vnd->sc_comp_buffblk = -1;
- 
+
 			/* Initialize decompress stream */
 			memset(&vnd->sc_comp_stream, 0, sizeof(z_stream));
 			vnd->sc_comp_stream.zalloc = vnd_alloc;
@@ -1273,7 +1280,7 @@ vndioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 				error = EINVAL;
 				goto close_and_exit;
 			}
- 
+
 			vnd->sc_flags |= VNF_COMP | VNF_READONLY;
 #else /* !VND_COMPRESSION */
 			VOP_UNLOCK(nd.ni_vp);
@@ -1281,7 +1288,7 @@ vndioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 			goto close_and_exit;
 #endif /* VND_COMPRESSION */
 		}
- 
+
 		VOP_UNLOCK(nd.ni_vp);
 		vnd->sc_vp = nd.ni_vp;
 		vnd->sc_size = btodb(vattr.va_size);	/* note truncation */
@@ -2041,7 +2048,7 @@ static int
 vnd_modcmd(modcmd_t cmd, void *arg)
 {
 	int bmajor = -1, cmajor = -1,  error = 0;
-	
+
 	switch (cmd) {
 	case MODULE_CMD_INIT:
 		error = config_cfdriver_attach(&vnd_cd);
@@ -2055,7 +2062,7 @@ vnd_modcmd(modcmd_t cmd, void *arg)
 			    vnd_cd.cd_name);
 			break;
 		}
-		
+
 		error = devsw_attach("vnd", &vnd_bdevsw, &bmajor,
 		    &vnd_cdevsw, &cmajor);
 		if (error) {
@@ -2063,7 +2070,7 @@ vnd_modcmd(modcmd_t cmd, void *arg)
 			config_cfdriver_detach(&vnd_cd);
 			break;
 		}
-		
+
 		break;
 
 	case MODULE_CMD_FINI:

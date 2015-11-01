@@ -1,4 +1,4 @@
-/*	$NetBSD: autoconf.c,v 1.202 2015/03/15 10:38:58 nakayama Exp $ */
+/*	$NetBSD: autoconf.c,v 1.205 2015/09/06 16:45:09 martin Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -48,7 +48,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.202 2015/03/15 10:38:58 nakayama Exp $");
+__KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.205 2015/09/06 16:45:09 martin Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -93,7 +93,6 @@ __KERNEL_RCSID(0, "$NetBSD: autoconf.c,v 1.202 2015/03/15 10:38:58 nakayama Exp 
 #include <machine/bootinfo.h>
 #include <sparc64/sparc64/cache.h>
 #include <sparc64/sparc64/timerreg.h>
-#include <machine/mdesc.h>
 
 #include <dev/ata/atavar.h>
 #include <dev/pci/pcivar.h>
@@ -159,7 +158,8 @@ static	void get_bootpath_from_prom(void);
  * Kernel 4MB mappings.
  */
 struct tlb_entry *kernel_tlbs;
-int kernel_tlb_slots;
+int kernel_dtlb_slots;
+int kernel_itlb_slots;
 
 /* Global interrupt mappings for all device types.  Match against the OBP
  * 'device_type' property. 
@@ -355,7 +355,11 @@ die_old_boot_loader:
 		boothowto = bi_howto->boothowto;
 
 	LOOKUP_BOOTINFO(bi_count, BTINFO_DTLB_SLOTS);
-	kernel_tlb_slots = bi_count->count;
+	kernel_dtlb_slots = bi_count->count;
+	kernel_itlb_slots = kernel_dtlb_slots-1;
+	bi_count = lookup_bootinfo(BTINFO_ITLB_SLOTS);
+	if (bi_count)
+		kernel_itlb_slots = bi_count->count;
 	LOOKUP_BOOTINFO(bi_tlb, BTINFO_DTLB);
 	kernel_tlbs = &bi_tlb->tlb[0];
 
@@ -476,9 +480,6 @@ get_bootpath_from_prom(void)
 void
 cpu_configure(void)
 {
-	
-	if (CPU_ISSUN4V)
-		mdesc_init();
 	
 	bool userconf = (boothowto & RB_USERCONF) != 0;
 
@@ -838,7 +839,8 @@ dev_path_drive_match(device_t dev, int ctrlnode, int target,
 			snprintf(buf, sizeof(buf), "%s@w%016" PRIx64 ",%d",
 			    name, wwn, lun);
 		else if (ide_node)
-			snprintf(buf, sizeof(buf), "%s@0", name);
+			snprintf(buf, sizeof(buf), "%s@0",
+			    device_is_a(dev, "cd") ? "cdrom" : "disk");
 		else
 			snprintf(buf, sizeof(buf), "%s@%d,%d",
 			    name, target, lun);

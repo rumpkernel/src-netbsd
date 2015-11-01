@@ -1,4 +1,4 @@
-/* $NetBSD: sysmon_envsys_events.c,v 1.115 2015/04/18 14:44:44 mlelstv Exp $ */
+/* $NetBSD: sysmon_envsys_events.c,v 1.118 2015/10/15 13:35:30 bouyer Exp $ */
 
 /*-
  * Copyright (c) 2007, 2008 Juan Romero Pardines.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sysmon_envsys_events.c,v 1.115 2015/04/18 14:44:44 mlelstv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sysmon_envsys_events.c,v 1.118 2015/10/15 13:35:30 bouyer Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -739,18 +739,21 @@ sme_events_check(void *arg)
 		mutex_exit(&sme->sme_work_mtx);
 		return;
 	}
-	mutex_exit(&sme->sme_work_mtx);
-
-	mutex_enter(&sme->sme_mtx);
-	mutex_enter(&sme->sme_work_mtx);
+	if (!mutex_tryenter(&sme->sme_mtx)) {
+		/* can't get lock - try again later */
+		if (!sysmon_low_power)
+			sme_schedule_callout(sme);
+		mutex_exit(&sme->sme_work_mtx);
+		return;
+	}
 	LIST_FOREACH(see, &sme->sme_events_list, see_list) {
 		workqueue_enqueue(sme->sme_wq, &see->see_wk, NULL);
 		see->see_edata->flags |= ENVSYS_FNEED_REFRESH;
 		sme->sme_busy++;
 	}
-	mutex_exit(&sme->sme_work_mtx);
 	if (!sysmon_low_power)
 		sme_schedule_callout(sme);
+	mutex_exit(&sme->sme_work_mtx);
 	mutex_exit(&sme->sme_mtx);
 }
 
@@ -768,7 +771,8 @@ sme_events_worker(struct work *wk, void *arg)
 	envsys_data_t *edata = see->see_edata;
 
 	KASSERT(wk == &see->see_wk);
-	KASSERT(sme != NULL || edata != NULL);
+	KASSERT(sme != NULL);
+	KASSERT(edata != NULL);
 
 	mutex_enter(&sme->sme_mtx);
 	see->see_flags |= SEE_EVENT_WORKING;

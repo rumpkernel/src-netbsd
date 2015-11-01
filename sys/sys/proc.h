@@ -1,4 +1,4 @@
-/*	$NetBSD: proc.h,v 1.321 2015/03/07 16:34:55 christos Exp $	*/
+/*	$NetBSD: proc.h,v 1.323 2015/09/24 14:33:31 christos Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007, 2008 The NetBSD Foundation, Inc.
@@ -458,6 +458,7 @@ extern const struct proclist_desc proclists[];
 
 extern struct pool	ptimer_pool;	/* Memory pool for ptimers */
 
+int		proc_find_locked(struct lwp *, struct proc **, pid_t);
 proc_t *	proc_find_raw(pid_t);
 proc_t *	proc_find(pid_t);		/* Find process by ID */
 struct pgrp *	pgrp_find(pid_t);		/* Find process group by ID */
@@ -475,6 +476,7 @@ int	mtsleep(wchan_t, pri_t, const char *, int, kmutex_t *);
 void	wakeup(wchan_t);
 int	kpause(const char *, bool, int, kmutex_t *);
 void	exit1(struct lwp *, int) __dead;
+int	kill1(struct lwp *l, pid_t pid, ksiginfo_t *ksi, register_t *retval);
 int	do_sys_wait(int *, int *, int, struct rusage *);
 struct proc *proc_alloc(void);
 void	proc0_init(void);
