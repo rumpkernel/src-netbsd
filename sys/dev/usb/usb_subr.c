@@ -1,4 +1,4 @@
-/*	$NetBSD: usb_subr.c,v 1.201 2015/04/11 10:10:14 skrll Exp $	*/
+/*	$NetBSD: usb_subr.c,v 1.203 2015/10/26 15:07:07 skrll Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_subr.c,v 1.18 1999/11/17 22:33:47 n_hibma Exp $	*/
 
 /*
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: usb_subr.c,v 1.201 2015/04/11 10:10:14 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: usb_subr.c,v 1.203 2015/10/26 15:07:07 skrll Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_compat_netbsd.h"
@@ -889,7 +889,8 @@ usbd_attachinterfaces(device_t parent, usbd_device_handle dev,
 			    loc != uiaa.configno)
 				continue;
 			loc = locators[USBIFIFCF_INTERFACE];
-			if (loc != USBIFIFCF_INTERFACE && loc != uiaa.ifaceno)
+			if (loc != USBIFIFCF_INTERFACE_DEFAULT &&
+			    loc != uiaa.ifaceno)
 				continue;
 		}
 		dv = config_found_sm_loc(parent, "usbifif", ilocs, &uiaa,
@@ -1114,7 +1115,7 @@ usbd_new_device(device_t parent, usbd_bus_handle bus, int depth,
 
 	dev->def_ep_desc.bInterval = 0;
 
-	/* doesn't matter, just don't let it uninitialized */
+	/* doesn't matter, just don't leave it uninitialized */
 	dev->def_ep.datatoggle = 0;
 
 	dev->quirks = &usbd_no_quirk;

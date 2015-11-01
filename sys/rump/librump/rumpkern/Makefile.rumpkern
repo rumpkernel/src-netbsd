@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.rumpkern,v 1.159 2015/04/23 14:49:26 pooka Exp $
+#	$NetBSD: Makefile.rumpkern,v 1.165 2015/10/19 16:16:38 pooka Exp $
 #
 
 .include "${RUMPTOP}/Makefile.rump"
@@ -6,6 +6,7 @@
 .include <bsd.own.mk>
 
 LIB=		rump
+COMMENT=	Rump kernel base
 
 MAN=		rump.3 rump_lwproc.3
 
@@ -84,6 +85,7 @@ SRCS+=	init_sysctl_base.c	\
 	kern_rndpool.c		\
 	kern_rndq.c		\
 	kern_rndsink.c		\
+	kern_rwlock_obj.c	\
 	kern_stub.c		\
 	kern_syscall.c		\
 	kern_sysctl.c		\
@@ -93,23 +95,25 @@ SRCS+=	init_sysctl_base.c	\
 	kern_uidinfo.c		\
 	kern_xxx.c		\
 	param.c			\
-	subr_devsw.c		\
 	subr_callback.c		\
 	subr_copy.c		\
 	subr_cprng.c		\
 	subr_device.c		\
+	subr_devsw.c		\
 	subr_evcnt.c		\
 	subr_extent.c		\
 	subr_hash.c		\
 	subr_humanize.c		\
 	subr_iostat.c		\
 	subr_kcpuset.c		\
+	subr_kmem.c		\
 	subr_kobj.c		\
 	subr_log.c		\
 	subr_lwp_specificdata.c	\
 	subr_once.c		\
 	subr_pcq.c		\
 	subr_percpu.c		\
+	subr_pool.c		\
 	subr_prf.c		\
 	subr_pserialize.c	\
 	subr_specificdata.c	\
@@ -156,16 +160,6 @@ SRCS+=	kern_time_50.c
 SRCS+=	rndpseudo_50.c
 .endif
 
-# Set RUMP_UNREAL_ALLOCATORS to "yes" to use memory allocation hypercalls
-# directly instead of the kmem/pool allocators backed by hypercalls.
-# Direct hypercalls may be a few percent faster, but don't emulate
-# all kernel corner cases as well (not to mention if you want to debug the
-# allocators themselves).
-.if defined(RUMP_UNREAL_ALLOCATORS) && ${RUMP_UNREAL_ALLOCATORS} == "yes"
-SRCS+=		memalloc.c
-.else
-SRCS+=		subr_kmem.c subr_pool.c
-.endif
 
 .ifdef RUMP_LOCKDEBUG
 SRCS+=		subr_lockdebug.c

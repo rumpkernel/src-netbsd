@@ -1,4 +1,4 @@
-/*	$NetBSD: if_gif.c,v 1.84 2015/04/20 10:19:54 roy Exp $	*/
+/*	$NetBSD: if_gif.c,v 1.88 2015/08/24 22:21:26 pooka Exp $	*/
 /*	$KAME: if_gif.c,v 1.76 2001/08/20 02:01:02 kjc Exp $	*/
 
 /*
@@ -31,9 +31,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_gif.c,v 1.84 2015/04/20 10:19:54 roy Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_gif.c,v 1.88 2015/08/24 22:21:26 pooka Exp $");
 
+#ifdef _KERNEL_OPT
 #include "opt_inet.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -44,6 +46,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_gif.c,v 1.84 2015/04/20 10:19:54 roy Exp $");
 #include <sys/errno.h>
 #include <sys/ioctl.h>
 #include <sys/time.h>
+#include <sys/socketvar.h>
 #include <sys/syslog.h>
 #include <sys/proc.h>
 #include <sys/protosw.h>
@@ -78,10 +81,10 @@ __KERNEL_RCSID(0, "$NetBSD: if_gif.c,v 1.84 2015/04/20 10:19:54 roy Exp $");
 #include <netinet/ip_encap.h>
 #include <net/if_gif.h>
 
-
 #include <net/net_osdep.h>
 
-void	gifattach(int);
+#include "ioconf.h"
+
 static void	gifintr(void *);
 
 /*
@@ -344,12 +347,16 @@ gifintr(void *arg)
 		switch (sc->gif_psrc->sa_family) {
 #ifdef INET
 		case AF_INET:
+			mutex_enter(softnet_lock);
 			error = in_gif_output(ifp, family, m);
+			mutex_exit(softnet_lock);
 			break;
 #endif
 #ifdef INET6
 		case AF_INET6:
+			mutex_enter(softnet_lock);
 			error = in6_gif_output(ifp, family, m);
+			mutex_exit(softnet_lock);
 			break;
 #endif
 		default:

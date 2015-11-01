@@ -1,4 +1,4 @@
-#	$NetBSD: files.pci,v 1.376 2015/03/28 14:09:59 jmcneill Exp $
+#	$NetBSD: files.pci,v 1.379 2015/10/29 01:56:12 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
 # Included by ports that need it.  Requires that the SCSI files be
@@ -781,6 +781,11 @@ file	dev/pci/if_atw_pci.c		atw_pci
 attach	rtw at pci with rtw_pci
 file	dev/pci/if_rtw_pci.c		rtw_pci
 
+# Realtek RTL8188CE Mini-PCIe
+device	rtwn: ifnet, arp, wlan, firmload
+attach	rtwn at pci
+file	dev/pci/if_rtwn.c		rtwn
+
 # Ralink RT2500/RT2600 PCI/Mini-PCI
 attach	ral at pci with ral_pci
 file	dev/pci/if_ral_pci.c		ral_pci
@@ -1131,13 +1136,17 @@ device	viomb
 attach	viomb at virtio
 file	dev/pci/viomb.c		viomb
 
-device	vioif
+device	vioif: ether, ifnet, arp
 attach	vioif at virtio
 file	dev/pci/if_vioif.c	vioif
 
 device	viornd
 attach	viornd at virtio
-file dev/pci/viornd.c		viornd
+file	dev/pci/viornd.c	viornd
+
+device	vioscsi: scsi
+attach	vioscsi at virtio
+file	dev/pci/vioscsi.c	vioscsi
 
 # Silicon Motion SM712(LynxEM+) frame buffer
 device	lynxfb: wsemuldisplaydev, rasops16

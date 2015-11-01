@@ -1,4 +1,4 @@
-/*	$NetBSD: igphy.c,v 1.23 2014/06/16 16:48:16 msaitoh Exp $	*/
+/*	$NetBSD: igphy.c,v 1.25 2015/10/30 07:35:30 msaitoh Exp $	*/
 
 /*
  * The Intel copyright applies to the analog register setup, and the
@@ -70,9 +70,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: igphy.c,v 1.23 2014/06/16 16:48:16 msaitoh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: igphy.c,v 1.25 2015/10/30 07:35:30 msaitoh Exp $");
 
+#ifdef _KERNEL_OPT
 #include "opt_mii.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -154,6 +156,9 @@ igphyattach(device_t parent, device_t self, void *aux)
 	sc->mii_dev = self;
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
+	sc->mii_mpd_oui = MII_OUI(ma->mii_id1, ma->mii_id2);
+	sc->mii_mpd_model = MII_MODEL(ma->mii_id2);
+	sc->mii_mpd_rev = MII_REV(ma->mii_id2);
 	sc->mii_funcs = &igphy_funcs;
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags;

@@ -1,4 +1,4 @@
-#	$NetBSD: files.acpi,v 1.95 2014/09/14 19:54:05 mrg Exp $
+#	$NetBSD: files.acpi,v 1.97 2015/10/02 05:22:52 msaitoh Exp $
 
 include "dev/acpi/acpica/files.acpica"
 
@@ -18,6 +18,7 @@ device	acpi: acpica, acpiapmbus, acpinodebus, acpiecdtbus, acpihpetbus, acpiwdrt
 attach	acpi at acpibus
 file	dev/acpi/acpi.c			acpi
 file	dev/acpi/acpi_debug.c		acpi
+file	dev/acpi/acpi_mcfg.c		acpi
 file	dev/acpi/acpi_pci.c		acpi
 file	dev/acpi/acpi_pci_link.c	acpi
 file	dev/acpi/acpi_power.c		acpi
@@ -168,6 +169,11 @@ file	dev/acpi/sony_acpi.c		sony_acpi
 device	vald
 attach	vald at acpinodebus with vald_acpi
 file	dev/acpi/vald_acpi.c		vald_acpi
+
+# Toshiba Dynabook hotkeys
+device	valz
+attach	valz at acpinodebus with valz_acpi
+file	dev/acpi/valz_acpi.c		valz_acpi
 
 # Sony SPIC (jog dial etc.)
 attach	spic at acpinodebus with spic_acpi

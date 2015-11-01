@@ -1,4 +1,4 @@
-/*	$NetBSD: armreg.h,v 1.105 2015/05/20 02:59:57 hsuenaga Exp $	*/
+/*	$NetBSD: armreg.h,v 1.109 2015/10/15 07:14:56 skrll Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Ben Harris
@@ -456,6 +456,11 @@
 #define	CORTEXA9_AUXCTL_ONEWAY	0x00000100 /* Allocate in on cache way only */
 #define	CORTEXA9_AUXCTL_PARITY	0x00000200 /* Support parity checking */
 
+/* Cortex-A15 Auxiliary Control Register (CP15 register 1, opcode 1) */
+#define	CORTEXA15_ACTLR_BTB	__BIT(0)  /* Cache and TLB updates broadcast */
+#define	CORTEXA15_ACTLR_SMP	__BIT(6)  /* SMP */
+#define	CORTEXA15_ACTLR_IOBEU	__BIT(15) /* In order issue in Branch Exec Unit */
+
 /* Marvell Feroceon Extra Features Register (CP15 register 1, opcode2 0) */
 #define FC_DCACHE_REPL_LOCK	0x80000000 /* Replace DCache Lock */
 #define FC_DCACHE_STREAM_EN	0x20000000 /* DCache Streaming Switch */
@@ -644,6 +649,22 @@
 /* Defines for ARM Cortex A7/A15 L2CTRL */
 #define L2CTRL_NUMCPU	__BITS(25,24)	// numcpus - 1
 #define L2CTRL_ICPRES	__BIT(23)	// Interrupt Controller is present
+
+/* Translation Table Base Register */
+#define	TTBR_C			__BIT(0)	/* without MPE */
+#define	TTBR_S			__BIT(1)
+#define	TTBR_IMP		__BIT(2)
+#define	TTBR_RGN_MASK		__BITS(4,3)
+#define	 TTBR_RGN_NC		__SHIFTIN(0, TTBR_RGN_MASK)
+#define	 TTBR_RGN_WBWA		__SHIFTIN(1, TTBR_RGN_MASK)
+#define	 TTBR_RGN_WT		__SHIFTIN(2, TTBR_RGN_MASK)
+#define	 TTBR_RGN_WBNWA		__SHIFTIN(3, TTBR_RGN_MASK)
+#define	TTBR_NOS		__BIT(5)
+#define	TTBR_IRGN_MASK		(__BIT(6) | __BIT(0))
+#define	 TTBR_IRGN_NC		0
+#define	 TTBR_IRGN_WBWA		__BIT(6)
+#define	 TTBR_IRGN_WT		__BIT(0)
+#define	 TTBR_IRGN_WBNWA	(__BIT(0) | __BIT(6))
 
 /* Translate Table Base Control Register */
 #define TTBCR_S_EAE	__BIT(31)	// Extended Address Extension
@@ -900,6 +921,7 @@ ARMREG_READ_INLINE(midr, "p15,0,%0,c0,c0,0") /* Main ID Register */
 ARMREG_READ_INLINE(ctr, "p15,0,%0,c0,c0,1") /* Cache Type Register */
 ARMREG_READ_INLINE(tlbtr, "p15,0,%0,c0,c0,3") /* TLB Type Register */
 ARMREG_READ_INLINE(mpidr, "p15,0,%0,c0,c0,5") /* Multiprocess Affinity Register */
+ARMREG_READ_INLINE(revidr, "p15,0,%0,c0,c0,6") /* Revision ID Register */
 ARMREG_READ_INLINE(pfr0, "p15,0,%0,c0,c1,0") /* Processor Feature Register 0 */
 ARMREG_READ_INLINE(pfr1, "p15,0,%0,c0,c1,1") /* Processor Feature Register 1 */
 ARMREG_READ_INLINE(mmfr0, "p15,0,%0,c0,c1,4") /* Memory Model Feature Register 0 */

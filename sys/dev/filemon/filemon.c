@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: filemon.c,v 1.8 2014/07/25 08:10:36 dholland Exp $");
+__KERNEL_RCSID(0, "$NetBSD: filemon.c,v 1.11 2015/08/20 14:40:17 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -44,6 +44,7 @@ __KERNEL_RCSID(0, "$NetBSD: filemon.c,v 1.8 2014/07/25 08:10:36 dholland Exp $")
 #include <sys/kauth.h>
 
 #include "filemon.h"
+#include "ioconf.h"
 
 MODULE(MODULE_CLASS_DRIVER, filemon, NULL);
 
@@ -213,7 +214,7 @@ filemon_open(dev_t dev, int oflags __unused, int mode __unused,
 	struct file *fp;
 	int error, fd;
 
-	/* falloc() will use the descriptor for us. */
+	/* falloc() will fill in the descriptor for us. */
 	if ((error = fd_allocfile(&fp, &fd)) != 0)
 		return error;
 
@@ -307,12 +308,15 @@ filemon_ioctl(struct file * fp, u_long cmd, void *data)
 		mutex_enter(proc_lock);
 		tp = proc_find(*((pid_t *) data));
 		mutex_exit(proc_lock);
+		if (tp == NULL) {
+			error = ESRCH;
+			break;
+		}
 		error = kauth_authorize_process(curproc->p_cred,
 		    KAUTH_PROCESS_CANSEE, tp,
 		    KAUTH_ARG(KAUTH_REQ_PROCESS_CANSEE_ENTRY), NULL, NULL);
 		if (!error) {
 			filemon->fm_pid = tp->p_pid;
-
 		}
 		break;
 
@@ -333,8 +337,6 @@ filemon_load(void *dummy __unused)
 	/* Install the syscall wrappers. */
 	filemon_wrapper_install();
 }
-
-void filemonattach(int);
 
 /*
  * If this gets called we are linked into the kernel

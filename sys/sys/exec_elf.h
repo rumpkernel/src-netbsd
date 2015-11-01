@@ -1,4 +1,4 @@
-/*	$NetBSD: exec_elf.h,v 1.146 2015/05/20 04:08:54 matt Exp $	*/
+/*	$NetBSD: exec_elf.h,v 1.151 2015/11/01 17:44:42 christos Exp $	*/
 
 /*-
  * Copyright (c) 1994 The NetBSD Foundation, Inc.
@@ -305,11 +305,17 @@ typedef struct {
 #define EM_SEP		108	/* Sharp embedded microprocessor */
 #define EM_ARCA		109	/* Arca RISC microprocessor */
 #define EM_UNICORE	110	/* UNICORE from PKU-Unity Ltd. and MPRC Peking University */
+#define EM_ALTERA_NIOS2	113	/* Altera Nios II soft-core processor */
 #define EM_AARCH64	183	/* AArch64 64-bit ARM microprocessor */
-#define EM_RISCV	243	/* RISCV */
+#define EM_AVR32	185	/* Atmel Corporation 32-bit microprocessor family*/
+#define EM_TILE64	187	/* Tilera TILE64 multicore architecture family */
+#define EM_TILEPRO	188	/* Tilera TILEPro multicore architecture family */
+#define EM_MICROBLAZE	189	/* Xilinx MicroBlaze 32-bit RISC soft processor core */
+#define EM_TILEGX	192	/* Tilera TILE-GX multicore architecture family */
+#define EM_Z80		220	/* Zilog Z80 */
+#define EM_RISCV	243	/* RISC-V */
 
 /* Unofficial machine types follow */
-#define EM_AVR32	6317	/* used by NetBSD/avr32 */
 #define EM_ALPHA_EXP	36902	/* used by NetBSD/alpha; obsolete */
 #define EM_NUM		36903
 
@@ -830,6 +836,11 @@ typedef struct {
 #define ELF_NOTE_ABI_OS_KFREEBSD	3
 #define ELF_NOTE_ABI_OS_KNETBSD		4
 
+/* Old gcc style, under the ABI tag */
+#define ELF_NOTE_OGCC_NAMESZ		8
+#define ELF_NOTE_OGCC_NAME		"01.01\0\0\0\0"
+#define ELF_NOTE_OGCC_DESCSZ		0
+
 /*
  * GNU-specific note type: Hardware capabilities
  * name: GNU\0
@@ -889,6 +900,18 @@ typedef struct {
 /* SuSE-specific note name */
 #define ELF_NOTE_SUSE_VERSION_NAME		"SuSE\0\0\0\0"
 
+/* Go-specific note type: buildid
+ * name: Go\0\0
+ * namesz: 4
+ * desc: 
+ *	words[10]
+ * descsz: 40
+ */
+#define ELF_NOTE_TYPE_GO_BUILDID_TAG	4
+#define ELF_NOTE_GO_BUILDID_NAMESZ	4
+#define ELF_NOTE_GO_BUILDID_DESCSZ	40
+#define ELF_NOTE_GO_BUILDID_NAME	"Go\0\0"
+
 /* NetBSD-specific note type: Emulation name.
  * name: NetBSD\0\0
  * namesz: 8
@@ -935,7 +958,7 @@ typedef struct {
 #define ELF_NOTE_PAX_MPROTECT		0x01	/* Force enable Mprotect */
 #define ELF_NOTE_PAX_NOMPROTECT		0x02	/* Force disable Mprotect */
 #define ELF_NOTE_PAX_GUARD		0x04	/* Force enable Segvguard */
-#define ELF_NOTE_PAX_NOGUARD		0x08	/* Force disable Servguard */
+#define ELF_NOTE_PAX_NOGUARD		0x08	/* Force disable Segvguard */
 #define ELF_NOTE_PAX_ASLR		0x10	/* Force enable ASLR */
 #define ELF_NOTE_PAX_NOASLR		0x20	/* Force disable ASLR */
 #define ELF_NOTE_PAX_NAMESZ		4

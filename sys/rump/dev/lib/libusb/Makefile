@@ -1,9 +1,10 @@
-#	$NetBSD: Makefile,v 1.7 2015/05/20 11:53:08 pooka Exp $
+#	$NetBSD: Makefile,v 1.9 2015/10/19 16:16:34 pooka Exp $
 #
 
 .PATH:	${.CURDIR}/../../../../dev/usb
 
 LIB=	rumpdev_usb
+COMMENT=USB support
 
 .if ${MACHINE} == "i386" || ${MACHINE} == "amd64"
 IOCONF= USB.ioconf
@@ -16,8 +17,6 @@ SRCS=	dummy.c
 .endif
 
 #CPPFLAGS+= -DUHUB_DEBUG
-
-CPPFLAGS+=	-I${.CURDIR}/opt
 
 .include <bsd.lib.mk>
 .include <bsd.klinks.mk>
