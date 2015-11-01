@@ -1,11 +1,14 @@
-#	$NetBSD: Makefile,v 1.4 2014/03/13 02:06:16 pooka Exp $
+#	$NetBSD: Makefile,v 1.6 2015/10/19 16:16:38 pooka Exp $
 #
+
+NOLINT=	#defined
 
 .include <bsd.own.mk>
 
 .PATH:	${.CURDIR}/../../../../netbt
 
 LIB=	rumpnet_netbt
+COMMENT=BlueTooth (PF_BLUETOOTH)
 
 SRCS=	bt_proto.c bt_sysctl.c						\
 	hci_event.c hci_ioctl.c hci_link.c hci_misc.c hci_socket.c	\

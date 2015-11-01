@@ -1,4 +1,4 @@
-/*	$NetBSD: sys_sig.c,v 1.43 2014/10/18 08:33:29 snj Exp $	*/
+/*	$NetBSD: sys_sig.c,v 1.45 2015/10/02 16:54:15 christos Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007, 2008 The NetBSD Foundation, Inc.
@@ -66,7 +66,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sys_sig.c,v 1.43 2014/10/18 08:33:29 snj Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sys_sig.c,v 1.45 2015/10/02 16:54:15 christos Exp $");
+
+#include "opt_dtrace.h"
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -78,6 +80,12 @@ __KERNEL_RCSID(0, "$NetBSD: sys_sig.c,v 1.43 2014/10/18 08:33:29 snj Exp $");
 #include <sys/wait.h>
 #include <sys/kmem.h>
 #include <sys/module.h>
+#include <sys/sdt.h>
+
+SDT_PROVIDER_DECLARE(proc);
+SDT_PROBE_DEFINE2(proc, kernel, , signal__clear,
+    "int", 		/* signal */
+    "ksiginfo_t *");	/* signal-info */
 
 int
 sys___sigaction_sigtramp(struct lwp *l,
@@ -211,8 +219,7 @@ sys___sigaltstack14(struct lwp *l, const struct sys___sigaltstack14_args *uap,
 	return 0;
 }
 
-
-static int
+int
 kill1(struct lwp *l, pid_t pid, ksiginfo_t *ksi, register_t *retval)
 {
 	int error;
@@ -834,7 +841,10 @@ out:
 		error = (*storeinf)(&ksi.ksi_info, SCARG(uap, info),
 		    sizeof(ksi.ksi_info));
 	}
-	if (error == 0)
+	if (error == 0) {
 		*retval = ksi.ksi_info._signo;
+		SDT_PROBE(proc, kernel, , signal__clear, *retval,
+		    &ksi, 0, 0, 0);
+	}
 	return error;
 }

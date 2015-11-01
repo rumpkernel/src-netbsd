@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.kmodule.mk,v 1.53 2015/05/02 18:18:13 matt Exp $
+#	$NetBSD: bsd.kmodule.mk,v 1.55 2015/07/09 14:50:08 matt Exp $
 
 # We are not building this with PIE
 MKPIE=no
@@ -37,10 +37,10 @@ CFLAGS+=	${${ACTIVE_CC} == "gcc":? -mlongcall :}
 CFLAGS+=	-fno-pic
 .elif ${MACHINE_CPU} == "riscv"
 CFLAGS+=	-fPIC -Wa,-fno-pic
-.elif ${MACHINE_ARCH} == "mips64eb"
+.elif ${MACHINE_ARCH} == "mips64eb" && !defined(BSD_MK_COMPAT_FILE)
 CFLAGS+=	-mabi=64
 LDFLAGS+=	-Wl,-m,elf64btsmip
-.elif ${MACHINE_ARCH} == "mips64el"
+.elif ${MACHINE_ARCH} == "mips64el" && !defined(BSD_MK_COMPAT_FILE)
 CFLAGS+=	-mabi=64
 LDFLAGS+=	-Wl,-m,elf64ltsmip
 .endif
@@ -176,6 +176,7 @@ ${PROG}: ${KMOD}_tmp.o ${KMOD}_tramp.o
 .endif
 .else
 ${PROG}: ${OBJS} ${DPADD} ${KMODSCRIPT}
+	${_MKTARGET_LINK}
 	${CC} ${LDFLAGS} -nostdlib -r -Wl,-T,${KMODSCRIPT},-d \
 		-Wl,-Map=${.TARGET}.map \
 		-o ${.TARGET} ${OBJS}

@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.own.mk,v 1.854 2015/06/18 22:29:12 pooka Exp $
+#	$NetBSD: bsd.own.mk,v 1.877 2015/10/19 16:17:14 pooka Exp $
 
 # This needs to be before bsd.init.mk
 .if defined(BSD_MK_COMPAT_FILE)
@@ -78,12 +78,15 @@ MKGCCCMDS?=	no
 # We import the old gcc as "gcc.old" when upgrading.  EXTERNAL_GCC_SUBDIR is
 # set to the relevant subdirectory in src/external/gpl3 for his HAVE_GCC.
 #
-.if ${HAVE_GCC} == 48
+.if ${HAVE_GCC} == 5
 EXTERNAL_GCC_SUBDIR=	gcc
+.elif ${HAVE_GCC} == 48
+EXTERNAL_GCC_SUBDIR=	gcc.old
 .else
 EXTERNAL_GCC_SUBDIR=	/does/not/exist
 .endif
-
+.else
+MKGCCCMDS?=	no
 .endif
 
 .if !empty(MACHINE_ARCH:Mearm*)
@@ -110,7 +113,7 @@ HAVE_LIBGCC_EH?=	no
 HAVE_LIBGCC_EH?=	yes
 .endif
 
-HAVE_GDB?=	7
+HAVE_GDB?=	79
 
 .if (${MACHINE_ARCH} == "alpha") || \
     (${MACHINE_ARCH} == "hppa") || \
@@ -343,6 +346,8 @@ TOOL_M4=		${TOOLDIR}/bin/${_TOOL_PREFIX}m4
 TOOL_MACPPCFIXCOFF=	${TOOLDIR}/bin/${_TOOL_PREFIX}macppc-fixcoff
 TOOL_MAKEFS=		${TOOLDIR}/bin/${_TOOL_PREFIX}makefs
 TOOL_MAKEINFO=		${TOOLDIR}/bin/${_TOOL_PREFIX}makeinfo
+TOOL_MAKEKEYS=		${TOOLDIR}/bin/${_TOOL_PREFIX}makekeys
+TOOL_MAKESTRS=		${TOOLDIR}/bin/${_TOOL_PREFIX}makestrs
 TOOL_MAKEWHATIS=	${TOOLDIR}/bin/${_TOOL_PREFIX}makewhatis
 TOOL_MANDOC_ASCII=	${TOOLDIR}/bin/${_TOOL_PREFIX}mandoc -Tascii
 TOOL_MANDOC_HTML=	${TOOLDIR}/bin/${_TOOL_PREFIX}mandoc -Thtml
@@ -449,6 +454,8 @@ TOOL_M4=		m4
 TOOL_MACPPCFIXCOFF=	macppc-fixcoff
 TOOL_MAKEFS=		makefs
 TOOL_MAKEINFO=		makeinfo
+TOOL_MAKEKEYS=		makekeys
+TOOL_MAKESTRS=		makestrs
 TOOL_MAKEWHATIS=	/usr/libexec/makewhatis
 TOOL_MANDOC_ASCII=	mandoc -Tascii
 TOOL_MANDOC_HTML=	mandoc -Thtml
@@ -758,6 +765,10 @@ MKGDB.ia64=	no
 MKPICLIB:=	no
 .endif
 
+# PowerPC64 and AArch64 ABI's are PIC
+MKPICLIB.powerpc64=	no
+#MKPICLIB.aarch64=	no
+
 #
 # On VAX using ELF, all objects are PIC, not just shared libraries,
 # so don't build the _pic version.
@@ -831,11 +842,11 @@ ARM_APCS_FLAGS+=${${ACTIVE_CC} == "clang":? -target ${MACHINE_GNU_ARCH}--netbsde
 GENASSYM_CPPFLAGS+=	${${ACTIVE_CC} == "clang":? -no-integrated-as :}
 
 TARGETS+=	all clean cleandir depend dependall includes \
-		install lint obj regress tags html analyze
+		install lint obj regress tags html analyze describe
 PHONY_NOTMAIN =	all clean cleandir depend dependall distclean includes \
 		install lint obj regress beforedepend afterdepend \
 		beforeinstall afterinstall realinstall realdepend realall \
-		html subdir-all subdir-install subdir-depend analyze
+		html subdir-all subdir-install subdir-depend analyze describe
 .PHONY:		${PHONY_NOTMAIN}
 .NOTMAIN:	${PHONY_NOTMAIN}
 
@@ -906,10 +917,13 @@ MKCOMPAT?=	yes
 .else
 # Don't let this build where it really isn't supported.
 MKCOMPAT:=	no
+MKCOMPATTESTS:=	no
+MKCOMPATX11:=	no
 .endif
 
-.if ${MACHINE_ARCH} == "x86_64" || ${MACHINE_ARCH} == "i386" || \
-    (${MACHINE} == "evbppc" && ${MACHINE_ARCH} == "powerpc")
+.if ${MACHINE_ARCH} == "x86_64" || ${MACHINE_ARCH} == "i386" \
+    || ${MACHINE_ARCH} == "mips64eb" || ${MACHINE_ARCH} == "mips64el" \
+    || (${MACHINE} == "evbppc" && ${MACHINE_ARCH} == "powerpc")
 MKCOMPATMODULES?=	yes
 .else
 MKCOMPATMODULES:=	no
@@ -1004,7 +1018,7 @@ MKKMOD=		no
 #
 _MKVARS.no= \
 	MKBSDGREP MKBSDTAR \
-	MKCATPAGES MKCRYPTO_RC5 MKCTF MKDEBUG \
+	MKCATPAGES MKCOMPATTESTS MKCOMPATX11 MKCRYPTO_RC5 MKCTF MKDEBUG \
 	MKDEBUGLIB MKDTRACE MKEXTSRC MKGROFFHTMLDOC \
 	MKKYUA MKLLD MKLLDB MKLINT \
 	MKMANZ MKMCLINKER MKOBJDIRS \
@@ -1018,26 +1032,10 @@ ${var}?=	${${var}.${MACHINE_ARCH}:Uno}
 .endfor
 
 #
-# Do we default to XFree86 or Xorg for this platform?
-#
-.if \
-    ${MACHINE} == "acorn32"	|| \
-    ${MACHINE} == "alpha"	|| \
-    ${MACHINE} == "amiga"	|| \
-    ${MACHINE} == "mac68k"	|| \
-    ${MACHINE} == "pmax"	|| \
-    ${MACHINE} == "sun3"
-X11FLAVOUR?=	XFree86
-.else
-X11FLAVOUR?=	Xorg
-.endif
-
-#
 # Which platforms build the xorg-server drivers (as opposed
 # to just Xnest and Xvfb.)
 #
-.if ${X11FLAVOUR} == "Xorg"	&& ( \
-    ${MACHINE} == "alpha"	|| \
+.if ${MACHINE} == "alpha"	|| \
     ${MACHINE} == "amd64"	|| \
     ${MACHINE} == "bebox"	|| \
     ${MACHINE} == "cats"	|| \
@@ -1050,7 +1048,9 @@ X11FLAVOUR?=	Xorg
     ${MACHINE} == "hpcmips"	|| \
     ${MACHINE} == "hpcsh"	|| \
     ${MACHINE} == "i386"	|| \
+    ${MACHINE} == "ibmnws"	|| \
     ${MACHINE} == "luna68k"	|| \
+    ${MACHINE} == "mac68k"	|| \
     ${MACHINE} == "macppc"	|| \
     ${MACHINE} == "netwinder"	|| \
     ${MACHINE} == "newsmips"	|| \
@@ -1061,7 +1061,7 @@ X11FLAVOUR?=	Xorg
     ${MACHINE} == "sparc"	|| \
     ${MACHINE} == "sparc64"	|| \
     ${MACHINE} == "vax"		|| \
-    ${MACHINE} == "zaurus"	)
+    ${MACHINE} == "zaurus"
 MKXORG_SERVER?=yes
 .else
 MKXORG_SERVER?=no
@@ -1229,13 +1229,8 @@ X11SRCDIR=		/usr/xsrc
 .endif
 .endif # !defined(X11SRCDIR)
 
-X11SRCDIR.xc?=		${X11SRCDIR}/xfree/xc
 X11SRCDIR.local?=	${X11SRCDIR}/local
-.if ${X11FLAVOUR} == "Xorg"
 X11ROOTDIR?=		/usr/X11R7
-.else
-X11ROOTDIR?=		/usr/X11R6
-.endif
 X11BINDIR?=		${X11ROOTDIR}/bin
 X11ETCDIR?=		/etc/X11
 X11FONTDIR?=		${X11ROOTDIR}/lib/X11/fonts
@@ -1243,7 +1238,7 @@ X11INCDIR?=		${X11ROOTDIR}/include
 X11LIBDIR?=		${X11ROOTDIR}/lib/X11
 X11MANDIR?=		${X11ROOTDIR}/man
 X11SHAREDIR?=		${X11ROOTDIR}/share
-X11USRLIBDIR?=		${X11ROOTDIR}/lib
+X11USRLIBDIR?=		${X11ROOTDIR}/lib${MLIBDIR:D/${MLIBDIR}}
 
 #
 # New modular-xorg based builds
@@ -1251,7 +1246,7 @@ X11USRLIBDIR?=		${X11ROOTDIR}/lib
 X11SRCDIRMIT?=		${X11SRCDIR}/external/mit
 .for _lib in \
 	FS ICE SM X11 XScrnSaver XTrap Xau Xcomposite Xcursor Xdamage \
-	Xdmcp Xevie Xext Xfixes Xfont Xft Xi Xinerama Xmu Xpm \
+	Xdmcp Xevie Xext Xfixes Xfont Xft Xi Xinerama Xmu Xpresent Xpm \
 	Xrandr Xrender Xres Xt Xtst Xv XvMC Xxf86dga Xxf86misc Xxf86vm drm \
 	fontenc xkbfile xkbui Xaw Xfontcache pciaccess xcb \
 	pthread-stubs
@@ -1274,7 +1269,8 @@ X11SRCDIR.${_proto}proto?=		${X11SRCDIRMIT}/${_proto}proto/dist
 	glu glw mesa-demos MesaGLUT MesaLib MesaLib7 \
 	ico iceauth listres lndir \
 	luit xproxymanagementprotocol mkfontdir oclock proxymngr rgb \
-	setxkbmap smproxy twm viewres x11perf xauth xcalc xclipboard \
+	rstart setxkbmap showfont smproxy twm viewres \
+	x11perf xauth xcalc xclipboard \
 	xclock xcmsdb xconsole xditview xdpyinfo xdriinfo xdm \
 	xfd xf86dga xfindproxy xfontsel xfwp xgamma xgc xhost xinit \
 	xkill xload xlogo xlsatoms xlsclients xlsfonts xmag xmessage \
@@ -1303,7 +1299,7 @@ X11SRCDIR.xf86-input-${_i}?=	${X11SRCDIRMIT}/xf86-input-${_i}/dist
 .for _v in \
 	ag10e apm ark ast ati ati-kms chips cirrus crime \
 	geode glint i128 i740 igs imstt intel intel-old mach64 mga \
-	neomagic newport nsc nv nvxbox openchrome pnozz \
+	neomagic newport nouveau nsc nv nvxbox openchrome pnozz \
 	r128 radeonhd rendition \
 	s3 s3virge savage siliconmotion sis suncg14 \
 	suncg6 sunffb sunleo suntcx \
@@ -1317,11 +1313,7 @@ MKRADEONFIRMWARE?=		yes
 .endif
 MKRADEONFIRMWARE?=		no
 
-.if ${X11FLAVOUR} == "Xorg"
 X11DRI?=			yes
-.endif
-
-X11DRI?=			no
 X11LOADABLE?=			yes
 
 
@@ -1428,6 +1420,6 @@ _MKTARGET_YACC?=	${_MKMSG_YACC} ${.CURDIR:T}/${.TARGET}
 TARGETS+=	lintmanpages
 .endif
 
-TESTSBASE=	/usr/tests
+TESTSBASE=	/usr/tests${MLIBDIR:D/${MLIBDIR}}
 
 .endif	# !defined(_BSD_OWN_MK_)

@@ -177,7 +177,13 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#ifndef _NETBSD_SOURCE
+#define _NETBSD_SOURCE /* XXX TBD fix this */
 #include <unistd.h>
+#undef _NETBSD_SOURCE
+#else
+#include <unistd.h>
+#endif
 #include <pthread.h>
 #include <assert.h>
 #if defined(sun)
@@ -208,12 +214,7 @@
 #pragma init(bigheap)
 
 #define	MERGE_PHASE1_BATCH_SIZE		8
-#if 0
-// XXX: bug?
 #define	MERGE_PHASE1_MAX_SLOTS		5
-#else
-#define	MERGE_PHASE1_MAX_SLOTS		1
-#endif
 #define	MERGE_INPUT_THROTTLE_LEN	10
 
 const char *progname;
@@ -399,7 +400,7 @@ wip_add_work(wip_t *slot, tdata_t *pow)
 		slot->wip_nmerged = 1;
 	} else {
 		debug(2, "0x%jx: merging %p into %p\n",
-		    (uintptr_t)pthread_self(),
+		    (uintmax_t)(uintptr_t)pthread_self(),
 		    (void *)pow, (void *)slot->wip_td);
 
 		merge_into_master(pow, slot->wip_td, NULL, 0);
@@ -470,7 +471,7 @@ worker_runphase2(workqueue_t *wq)
 			pthread_mutex_unlock(&wq->wq_queue_lock);
 
 			debug(2, "0x%jx: entering p2 completion barrier\n",
-			    (uintptr_t)pthread_self());
+			    (uintmax_t)(uintptr_t)pthread_self());
 			if (barrier_wait(&wq->wq_bar1)) {
 				pthread_mutex_lock(&wq->wq_queue_lock);
 				wq->wq_alldone = 1;
@@ -498,7 +499,7 @@ worker_runphase2(workqueue_t *wq)
 		pthread_mutex_unlock(&wq->wq_queue_lock);
 
 		debug(2, "0x%jx: merging %p into %p\n",
-		    (uintptr_t)pthread_self(),
+		    (uintmax_t)(uintptr_t)pthread_self(),
 		    (void *)pow1, (void *)pow2);
 		merge_into_master(pow1, pow2, NULL, 0);
 		tdata_free(pow1);
@@ -517,7 +518,7 @@ worker_runphase2(workqueue_t *wq)
 
 		fifo_add(wq->wq_queue, pow2);
 		debug(2, "0x%jx: added %p to queue, len now %d, ninqueue %d\n",
-		    (uintptr_t)pthread_self(), (void *)pow2,
+		    (uintmax_t)(uintptr_t)pthread_self(), (void *)pow2,
 		    fifo_len(wq->wq_queue), wq->wq_ninqueue);
 		pthread_cond_broadcast(&wq->wq_done_cv);
 		pthread_cond_signal(&wq->wq_work_avail);
@@ -533,27 +534,30 @@ worker_thread(workqueue_t *wq)
 {
 	worker_runphase1(wq);
 
-	debug(2, "0x%jx: entering first barrier\n", (uintptr_t)pthread_self());
+	debug(2, "0x%jx: entering first barrier\n",
+	    (uintmax_t)(uintptr_t)pthread_self());
 
 	if (barrier_wait(&wq->wq_bar1)) {
 
 		debug(2, "0x%jx: doing work in first barrier\n",
-		    (uintptr_t)pthread_self());
+		    (uintmax_t)(uintptr_t)pthread_self());
 
 		finalize_phase_one(wq);
 
 		init_phase_two(wq);
 
 		debug(2, "0x%jx: ninqueue is %d, %d on queue\n",
-		    (uintptr_t)pthread_self(),
+		    (uintmax_t)(uintptr_t)pthread_self(),
 		    wq->wq_ninqueue, fifo_len(wq->wq_queue));
 	}
 
-	debug(2, "0x%jx: entering second barrier\n", (uintptr_t)pthread_self());
+	debug(2, "0x%jx: entering second barrier\n",
+	    (uintmax_t)(uintptr_t)pthread_self());
 
 	(void) barrier_wait(&wq->wq_bar2);
 
-	debug(2, "0x%jx: phase 1 complete\n", (uintptr_t)pthread_self());
+	debug(2, "0x%jx: phase 1 complete\n",
+	    (uintmax_t)(uintptr_t)pthread_self());
 
 	worker_runphase2(wq);
 }
@@ -577,8 +581,8 @@ merge_ctf_cb(tdata_t *td, char *name, void *arg)
 	}
 
 	fifo_add(wq->wq_queue, td);
-	debug(1, "Thread 0x%jx announcing %s\n", (uintptr_t)pthread_self(),
-	    name);
+	debug(1, "Thread 0x%jx announcing %s\n",
+	    (uintmax_t)(uintptr_t)pthread_self(), name);
 	pthread_cond_broadcast(&wq->wq_work_avail);
 	pthread_mutex_unlock(&wq->wq_queue_lock);
 
@@ -686,6 +690,7 @@ wq_init(workqueue_t *wq, int nfiles)
 
 	for (i = 0; i < nslots; i++) {
 		pthread_mutex_init(&wq->wq_wip[i].wip_lock, NULL);
+		pthread_cond_init(&wq->wq_wip[i].wip_cv, NULL);
 		wq->wq_wip[i].wip_batchid = wq->wq_next_batchid++;
 	}
 
@@ -789,7 +794,7 @@ main(int argc, char **argv)
 		debug_level = atoi(getenv("CTFMERGE_DEBUG_LEVEL"));
 
 	err = 0;
-	while ((c = getopt(argc, argv, ":cd:D:fgl:L:o:tvw:sS:")) != EOF) {
+	while ((c = getopt(argc, argv, ":cd:D:fgl:L:o:tvw:s")) != EOF) {
 		switch (c) {
 		case 'c':
 			docopy = 1;
@@ -836,9 +841,6 @@ main(int argc, char **argv)
 		case 's':
 			/* use the dynsym rather than the symtab */
 			dynsym = CTF_USE_DYNSYM;
-			break;
-		case 'S':
-			maxslots = atoi(optarg);
 			break;
 		default:
 			usage();

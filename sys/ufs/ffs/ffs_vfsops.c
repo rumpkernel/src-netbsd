@@ -1,4 +1,4 @@
-/*	$NetBSD: ffs_vfsops.c,v 1.333 2015/05/19 06:44:42 martin Exp $	*/
+/*	$NetBSD: ffs_vfsops.c,v 1.336 2015/10/22 11:31:31 maxv Exp $	*/
 
 /*-
  * Copyright (c) 2008, 2009 The NetBSD Foundation, Inc.
@@ -61,7 +61,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ffs_vfsops.c,v 1.333 2015/05/19 06:44:42 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ffs_vfsops.c,v 1.336 2015/10/22 11:31:31 maxv Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_ffs.h"
@@ -899,7 +899,7 @@ static int
 ffs_superblock_validate(struct fs *fs)
 {
 	int32_t i, fs_bshift = 0, fs_fshift = 0, fs_fragshift = 0, fs_frag;
-	int32_t fs_inopb, fs_cgsize;
+	int32_t fs_inopb;
 
 	/* Check the superblock size */
 	if (fs->fs_sbsize > SBLOCKSIZE || fs->fs_sbsize < sizeof(struct fs))
@@ -981,23 +981,9 @@ ffs_superblock_validate(struct fs *fs)
 		return 0;
 
 	/* Check the size of cylinder groups */
-	fs_cgsize = ffs_fragroundup(fs, CGSIZE(fs));
-	if (fs->fs_cgsize != fs_cgsize) {
-		if (fs->fs_cgsize+1 == CGSIZE(fs)) {
-			printf("CGSIZE(fs) miscalculated by one - this file "
-			    "system may have been created by\n"
-			    "  an old (buggy) userland, see\n"
-			    "  http://www.NetBSD.org/"
-			    "docs/ffsv1badsuperblock.html\n");
-		} else {
-			printf("ERROR: cylinder group size mismatch: "
-			    "fs_cgsize = 0x%zx, "
-			    "fs->fs_cgsize = 0x%zx, CGSIZE(fs) = 0x%zx\n",
-			    (size_t)fs_cgsize, (size_t)fs->fs_cgsize,
-			    (size_t)CGSIZE(fs));
-			return 0;
-		}
-	}
+	if ((fs->fs_cgsize < sizeof(struct cg)) ||
+	    (fs->fs_cgsize > fs->fs_bsize))
+		return 0;
 
 	return 1;
 }
@@ -1332,6 +1318,8 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct lwp *l)
 			DPRINTF("bcount %x != fsize %x", bp->b_bcount,
 			    fs->fs_fsize);
 			error = EINVAL;
+			bset = BC_INVAL;
+			goto out;
 		}
 		brelse(bp, BC_INVAL);
 		bp = NULL;
@@ -2267,7 +2255,7 @@ ffs_sbupdate(struct ufsmount *mp, int waitfor)
 {
 	struct fs *fs = mp->um_fs;
 	struct buf *bp;
-	int error = 0;
+	int error;
 	u_int32_t saveflag;
 
 	error = ffs_getblk(mp->um_devvp,

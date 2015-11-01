@@ -1,4 +1,4 @@
-/*	$NetBSD: pci.c,v 1.146 2015/04/27 07:03:58 knakahara Exp $	*/
+/*	$NetBSD: pci.c,v 1.149 2015/10/02 05:22:53 msaitoh Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996, 1997, 1998
@@ -36,9 +36,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pci.c,v 1.146 2015/04/27 07:03:58 knakahara Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pci.c,v 1.149 2015/10/02 05:22:53 msaitoh Exp $");
 
+#ifdef _KERNEL_OPT
 #include "opt_pci.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -66,9 +68,6 @@ int	pciprint(void *, const char *);
 
 #ifdef PCI_MACHDEP_ENUMERATE_BUS
 #define pci_enumerate_bus PCI_MACHDEP_ENUMERATE_BUS
-#else
-int pci_enumerate_bus(struct pci_softc *, const int *,
-    int (*)(const struct pci_attach_args *), struct pci_attach_args *);
 #endif
 
 /*
@@ -563,6 +562,86 @@ pci_get_ht_capability(pci_chipset_tag_t pc, pcitag_t tag, int capid,
 			return 1;
 		}
 		ofs = PCI_CAPLIST_NEXT(reg);
+	}
+
+	return 0;
+}
+
+/*
+ * return number of the devices's MSI vectors
+ * return 0 if the device does not support MSI
+ */
+int
+pci_msi_count(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	pcireg_t reg;
+	uint32_t mmc;
+	int count, offset;
+
+	if (pci_get_capability(pc, tag, PCI_CAP_MSI, &offset, NULL) == 0)
+		return 0;
+
+	reg = pci_conf_read(pc, tag, offset + PCI_MSI_CTL);
+	mmc = PCI_MSI_CTL_MMC(reg);
+	count = 1 << mmc;
+	if (count > PCI_MSI_MAX_VECTORS) {
+		aprint_error("detect an illegal device! The device use reserved MMC values.\n");
+		return 0;
+	}
+
+	return count;
+}
+
+/*
+ * return number of the devices's MSI-X vectors
+ * return 0 if the device does not support MSI-X
+ */
+int
+pci_msix_count(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	pcireg_t reg;
+	int offset;
+
+	if (pci_get_capability(pc, tag, PCI_CAP_MSIX, &offset, NULL) == 0)
+		return 0;
+
+	reg = pci_conf_read(pc, tag, offset + PCI_MSIX_CTL);
+
+	return PCI_MSIX_CTL_TBLSIZE(reg);
+}
+
+int
+pci_get_ext_capability(pci_chipset_tag_t pc, pcitag_t tag, int capid,
+    int *offset, pcireg_t *value)
+{
+	pcireg_t reg;
+	unsigned int ofs;
+
+	/* Only supported for PCI-express devices */
+	if (!pci_get_capability(pc, tag, PCI_CAP_PCIEXPRESS, NULL, NULL))
+		return 0;
+
+	ofs = PCI_EXTCAPLIST_BASE;
+	reg = pci_conf_read(pc, tag, ofs);
+	if (reg == 0xffffffff || reg == 0)
+		return 0;
+
+	for (;;) {
+#ifdef DIAGNOSTIC
+		if ((ofs & 3) || ofs < PCI_EXTCAPLIST_BASE)
+			panic("%s: invalid offset %u", __func__, ofs);
+#endif
+		if (PCI_EXTCAPLIST_CAP(reg) == capid) {
+			if (offset != NULL)
+				*offset = ofs;
+			if (value != NULL)
+				*value = reg;
+			return 1;
+		}
+		ofs = PCI_EXTCAPLIST_NEXT(reg);
+		if (ofs == 0)
+			break;
+		reg = pci_conf_read(pc, tag, ofs);
 	}
 
 	return 0;

@@ -1,4 +1,4 @@
-/* $NetBSD: dwc_gmac.c,v 1.32 2015/02/23 19:05:17 martin Exp $ */
+/* $NetBSD: dwc_gmac.c,v 1.34 2015/08/21 20:12:29 jmcneill Exp $ */
 
 /*-
  * Copyright (c) 2013, 2014 The NetBSD Foundation, Inc.
@@ -41,7 +41,7 @@
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(1, "$NetBSD: dwc_gmac.c,v 1.32 2015/02/23 19:05:17 martin Exp $");
+__KERNEL_RCSID(1, "$NetBSD: dwc_gmac.c,v 1.34 2015/08/21 20:12:29 jmcneill Exp $");
 
 /* #define	DWC_GMAC_DEBUG	1 */
 
@@ -236,6 +236,11 @@ dwc_gmac_attach(struct dwc_gmac_softc *sc, uint32_t mii_clk)
         } else {
                 ifmedia_set(&mii->mii_media, IFM_ETHER|IFM_AUTO);
         }
+
+	/*
+	 * We can support 802.1Q VLAN-sized frames.
+	 */
+	sc->sc_ec.ec_capabilities |= ETHERCAP_VLAN_MTU;
 
 	/*
 	 * Ready, attach interface
@@ -912,7 +917,7 @@ dwc_gmac_queue(struct dwc_gmac_softc *sc, struct mbuf *m0)
 	data->td_active = map;
 
 	bus_dmamap_sync(sc->sc_dmat, map, 0, map->dm_mapsize,
-	    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
+	    BUS_DMASYNC_PREWRITE);
 
 	/* Pass first to device */
 	sc->sc_txq.t_desc[first].ddesc_status =

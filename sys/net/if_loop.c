@@ -1,4 +1,4 @@
-/*	$NetBSD: if_loop.c,v 1.81 2015/04/03 07:55:18 ozaki-r Exp $	*/
+/*	$NetBSD: if_loop.c,v 1.83 2015/08/24 22:21:26 pooka Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -65,14 +65,15 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_loop.c,v 1.81 2015/04/03 07:55:18 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_loop.c,v 1.83 2015/08/24 22:21:26 pooka Exp $");
 
+#ifdef _KERNEL_OPT
 #include "opt_inet.h"
 #include "opt_atalk.h"
-#include "opt_ipx.h"
 #include "opt_mbuftrace.h"
 #include "opt_mpls.h"
 #include "opt_net_mpsafe.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -105,11 +106,6 @@ __KERNEL_RCSID(0, "$NetBSD: if_loop.c,v 1.81 2015/04/03 07:55:18 ozaki-r Exp $")
 #include <netinet6/in6_var.h>
 #include <netinet6/in6_offload.h>
 #include <netinet/ip6.h>
-#endif
-
-#ifdef IPX
-#include <netipx/ipx.h>
-#include <netipx/ipx_if.h>
 #endif
 
 #ifdef MPLS
@@ -308,12 +304,6 @@ looutput(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst,
 		pktq = ip6_pktq;
 		break;
 #endif
-#ifdef IPX
-	case AF_IPX:
-		ifq = &ipxintrq;
-		isr = NETISR_IPX;
-		break;
-#endif
 #ifdef NETATALK
 	case AF_APPLETALK:
 	        ifq = &atintrq2;
@@ -384,12 +374,6 @@ lostart(struct ifnet *ifp)
 		case AF_INET6:
 			m->m_flags |= M_LOOP;
 			pktq = ip6_pktq;
-			break;
-#endif
-#ifdef IPX
-		case AF_IPX:
-			ifq = &ipxintrq;
-			isr = NETISR_IPX;
 			break;
 #endif
 #ifdef NETATALK

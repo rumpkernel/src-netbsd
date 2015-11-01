@@ -1,4 +1,4 @@
-/*	$NetBSD: if.h,v 1.190 2015/05/18 06:38:59 martin Exp $	*/
+/*	$NetBSD: if.h,v 1.193 2015/10/02 03:08:26 ozaki-r Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001 The NetBSD Foundation, Inc.
@@ -123,6 +123,7 @@
 
 #if defined(_KERNEL_OPT)
 #include "opt_compat_netbsd.h"
+#include "opt_gateway.h"
 #endif
 
 struct mbuf;
@@ -213,6 +214,11 @@ struct ifnet_lock;
 #include <sys/condvar.h>
 #include <sys/percpu.h>
 #include <sys/callout.h>
+#ifdef GATEWAY
+#include <sys/mutex.h>
+#else
+#include <sys/rwlock.h>
+#endif
 
 struct ifnet_lock {
 	kmutex_t il_lock;	/* Protects the critical section. */
@@ -244,6 +250,7 @@ TAILQ_HEAD(ifnet_head, ifnet);		/* the actual queue head */
 struct bridge_softc;
 struct bridge_iflist;
 struct callout;
+struct krwlock;
 
 typedef struct ifnet {
 	void	*if_softc;		/* lower-level data for this if */
@@ -345,6 +352,11 @@ typedef struct ifnet {
 #ifdef _KERNEL /* XXX kvm(3) */
 	struct callout *if_slowtimo_ch;
 #endif
+#ifdef GATEWAY
+	struct kmutex	*if_afdata_lock;
+#else
+	struct krwlock	*if_afdata_lock;
+#endif
 } ifnet_t;
  
 #define	if_mtu		if_data.ifi_mtu
@@ -433,6 +445,53 @@ typedef struct ifnet {
 	"\22UDP6CSUM_Tx"	\
 	"\23TSO6"		\
 	"\24LRO"		\
+
+#ifdef GATEWAY
+#define	IF_AFDATA_LOCK_INIT(ifp)	\
+	do { \
+		(ifp)->if_afdata_lock = mutex_obj_alloc(MUTEX_DEFAULT, IPL_NET); \
+	} while (0)
+
+#define	IF_AFDATA_WLOCK(ifp)	mutex_enter((ifp)->if_afdata_lock)
+#define	IF_AFDATA_RLOCK(ifp)	mutex_enter((ifp)->if_afdata_lock)
+#define	IF_AFDATA_WUNLOCK(ifp)	mutex_exit((ifp)->if_afdata_lock)
+#define	IF_AFDATA_RUNLOCK(ifp)	mutex_exit((ifp)->if_afdata_lock)
+#define	IF_AFDATA_LOCK(ifp)	IF_AFDATA_WLOCK(ifp)
+#define	IF_AFDATA_UNLOCK(ifp)	IF_AFDATA_WUNLOCK(ifp)
+#define	IF_AFDATA_TRYLOCK(ifp)	mutex_tryenter((ifp)->if_afdata_lock)
+#define	IF_AFDATA_DESTROY(ifp)	mutex_destroy((ifp)->if_afdata_lock)
+
+#define	IF_AFDATA_LOCK_ASSERT(ifp)	\
+	KASSERT(mutex_owned((ifp)->if_afdata_lock))
+#define	IF_AFDATA_RLOCK_ASSERT(ifp)	\
+	KASSERT(mutex_owned((ifp)->if_afdata_lock))
+#define	IF_AFDATA_WLOCK_ASSERT(ifp)	\
+	KASSERT(mutex_owned((ifp)->if_afdata_lock))
+#define	IF_AFDATA_UNLOCK_ASSERT(ifp)	\
+	KASSERT(!mutex_owned((ifp)->if_afdata_lock))
+
+#else /* GATEWAY */
+#define	IF_AFDATA_LOCK_INIT(ifp)	\
+	do {(ifp)->if_afdata_lock = rw_obj_alloc();} while (0)
+
+#define	IF_AFDATA_WLOCK(ifp)	rw_enter((ifp)->if_afdata_lock, RW_WRITER)
+#define	IF_AFDATA_RLOCK(ifp)	rw_enter((ifp)->if_afdata_lock, RW_READER)
+#define	IF_AFDATA_WUNLOCK(ifp)	rw_exit((ifp)->if_afdata_lock)
+#define	IF_AFDATA_RUNLOCK(ifp)	rw_exit((ifp)->if_afdata_lock)
+#define	IF_AFDATA_LOCK(ifp)	IF_AFDATA_WLOCK(ifp)
+#define	IF_AFDATA_UNLOCK(ifp)	IF_AFDATA_WUNLOCK(ifp)
+#define	IF_AFDATA_TRYLOCK(ifp)	rw_tryenter((ifp)->if_afdata_lock, RW_WRITER)
+#define	IF_AFDATA_DESTROY(ifp)	rw_destroy((ifp)->if_afdata_lock)
+
+#define	IF_AFDATA_LOCK_ASSERT(ifp)	\
+	KASSERT(rw_lock_held((ifp)->if_afdata_lock))
+#define	IF_AFDATA_RLOCK_ASSERT(ifp)	\
+	KASSERT(rw_read_held((ifp)->if_afdata_lock))
+#define	IF_AFDATA_WLOCK_ASSERT(ifp)	\
+	KASSERT(rw_write_held((ifp)->if_afdata_lock))
+#define	IF_AFDATA_UNLOCK_ASSERT(ifp)	\
+	KASSERT(!rw_lock_held((ifp)->if_afdata_lock))
+#endif /* GATEWAY */
 
 #define IFQ_LOCK(_ifq)		if ((_ifq)->ifq_lock) mutex_enter((_ifq)->ifq_lock)
 #define IFQ_UNLOCK(_ifq)	if ((_ifq)->ifq_lock) mutex_exit((_ifq)->ifq_lock)

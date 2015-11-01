@@ -1,4 +1,4 @@
-/*	$NetBSD: usbdi.c,v 1.163 2015/02/09 20:12:47 aymeric Exp $	*/
+/*	$NetBSD: usbdi.c,v 1.165 2015/09/26 13:59:28 skrll Exp $	*/
 
 /*
  * Copyright (c) 1998, 2012 The NetBSD Foundation, Inc.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: usbdi.c,v 1.163 2015/02/09 20:12:47 aymeric Exp $");
+__KERNEL_RCSID(0, "$NetBSD: usbdi.c,v 1.165 2015/09/26 13:59:28 skrll Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_usb.h"
@@ -64,16 +64,6 @@ Static usbd_status usbd_ar_pipe(usbd_pipe_handle);
 Static void usbd_start_next(usbd_pipe_handle);
 Static usbd_status usbd_open_pipe_ival
 	(usbd_interface_handle, u_int8_t, u_int8_t, usbd_pipe_handle *, int);
-
-static inline int
-usbd_xfer_isread(usbd_xfer_handle xfer)
-{
-	if (xfer->rqflags & URQ_REQUEST)
-		return (xfer->request.bmRequestType & UT_READ);
-	else
-		return (xfer->pipe->endpoint->edesc->bEndpointAddress &
-			UE_DIR_IN);
-}
 
 #if defined(USB_DEBUG)
 void
@@ -1006,7 +996,8 @@ usbd_start_next(usbd_pipe_handle pipe)
 	}
 #endif
 
-	KASSERT(mutex_owned(pipe->device->bus->lock));
+	int polling = pipe->device->bus->use_polling;
+	KASSERT(polling || mutex_owned(pipe->device->bus->lock));
 
 	/* Get next request in queue. */
 	xfer = SIMPLEQ_FIRST(&pipe->queue);
@@ -1014,9 +1005,11 @@ usbd_start_next(usbd_pipe_handle pipe)
 	if (xfer == NULL) {
 		pipe->running = 0;
 	} else {
-		mutex_exit(pipe->device->bus->lock);
+		if (!polling)
+			mutex_exit(pipe->device->bus->lock);
 		err = pipe->methods->start(xfer);
-		mutex_enter(pipe->device->bus->lock);
+		if (!polling)
+			mutex_enter(pipe->device->bus->lock);
 
 		if (err != USBD_IN_PROGRESS) {
 			USBHIST_LOG(usbdebug, "error = %d", err, 0, 0, 0);
@@ -1025,7 +1018,7 @@ usbd_start_next(usbd_pipe_handle pipe)
 		}
 	}
 
-	KASSERT(mutex_owned(pipe->device->bus->lock));
+	KASSERT(polling || mutex_owned(pipe->device->bus->lock));
 }
 
 usbd_status
