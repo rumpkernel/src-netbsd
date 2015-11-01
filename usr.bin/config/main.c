@@ -1,4 +1,4 @@
-/*	$NetBSD: main.c,v 1.74 2015/01/22 20:01:22 christos Exp $	*/
+/*	$NetBSD: main.c,v 1.89 2015/09/04 06:01:40 uebayasi Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -45,7 +45,7 @@
 #endif
 
 #include <sys/cdefs.h>
-__RCSID("$NetBSD: main.c,v 1.74 2015/01/22 20:01:22 christos Exp $");
+__RCSID("$NetBSD: main.c,v 1.89 2015/09/04 06:01:40 uebayasi Exp $");
 
 #ifndef MAKE_BOOTSTRAP
 #include <sys/cdefs.h>
@@ -90,6 +90,7 @@ int	vflag;				/* verbose output */
 int	Pflag;				/* pack locators */
 int	Lflag;				/* lint config generation */
 int	Mflag;				/* modular build */
+int	Sflag;				/* suffix rules & subdirectory */
 int	handling_cmdlineopts;		/* currently processing -D/-U options */
 
 int	yyparse(void);
@@ -114,13 +115,15 @@ static	void	dependopts_one(const char *);
 static	void	do_depends(struct nvlist *);
 static	void	do_depend(struct nvlist *);
 static	void	stop(void);
-static	int	do_option(struct hashtab *, struct nvlist ***,
-		    const char *, const char *, const char *);
+static	int	do_option(struct hashtab *, struct nvlist **,
+		    struct nvlist ***, const char *, const char *,
+		    const char *, struct hashtab *);
 static	int	undo_option(struct hashtab *, struct nvlist **,
 		    struct nvlist ***, const char *, const char *);
 static	int	crosscheck(void);
 static	int	badstar(void);
 	int	main(int, char **);
+static	int	mkallsubdirs(void);
 static	int	mksymlinks(void);
 static	int	mkident(void);
 static	int	devbase_has_dead_instances(const char *, void *, void *);
@@ -166,7 +169,7 @@ main(int argc, char **argv)
 
 	pflag = 0;
 	xflag = 0;
-	while ((ch = getopt(argc, argv, "D:LMPU:dgpvb:s:x")) != -1) {
+	while ((ch = getopt(argc, argv, "D:LMPSU:dgpvb:s:x")) != -1) {
 		switch (ch) {
 
 		case 'd':
@@ -223,6 +226,10 @@ main(int argc, char **argv)
 
 		case 's':
 			srcdir = optarg;
+			break;
+
+		case 'S':
+			Sflag = 1;
 			break;
 
 		case 'x':
@@ -429,6 +436,18 @@ main(int argc, char **argv)
 		stop();
 
 	/*
+	 * Copy maxusers to param.
+	 */
+	yyfile = "fixmaxusers";
+	fixmaxusers();
+
+	/*
+	 * Copy makeoptions to params
+	 */
+	yyfile = "fixmkoption";
+	fixmkoption();
+
+	/*
 	 * If working on an ioconf-only config, process here and exit
 	 */
 	if (ioconfname) {
@@ -457,13 +476,6 @@ main(int argc, char **argv)
 	 */
 	yyfile = "fixfiles";
 	if (fixfiles())
-		stop();
-
-	/*
-	 * Fix objects and libraries.
-	 */
-	yyfile = "fixobjects";
-	if (fixobjects())
 		stop();
 
 	/*
@@ -503,11 +515,12 @@ main(int argc, char **argv)
 	/*
 	 * Ready to go.  Build all the various files.
 	 */
-	if (mksymlinks() || mkmakefile() || mkheaders() || mkswap() ||
+	if ((Sflag && mkallsubdirs()) || mksymlinks() || mkmakefile() || mkheaders() || mkswap() ||
 	    mkioconf() || (do_devsw ? mkdevsw() : 0) || mkident() || errors)
 		stop();
 	(void)printf("Build directory is %s\n", builddir);
 	(void)printf("Don't forget to run \"make depend\"\n");
+
 	return 0;
 }
 
@@ -598,10 +611,86 @@ recreate(const char *p, const char *q)
 	int ret;
 
 	if ((ret = unlink(q)) == -1 && errno != ENOENT)
-		warn("unlink(%s)\n", q);
+		warn("unlink(%s)", q);
 	if ((ret = symlink(p, q)) == -1)
 		warn("symlink(%s -> %s)", q, p);
 	return ret;
+}
+
+static void
+mksubdir(char *buf)
+{
+	char *p;
+	struct stat st;
+
+	p = strrchr(buf, '/');
+	if (p != NULL && *p == '/') {
+		*p = '\0';
+		mksubdir(buf);
+		*p = '/';
+	}
+	if (stat(buf, &st) == 0) {
+		if (!S_ISDIR(st.st_mode))
+			errx(EXIT_FAILURE, "not directory %s", buf);
+	} else
+		if (mkdir(buf, 0777) == -1)
+			errx(EXIT_FAILURE, "cannot create %s", buf);
+}
+
+static int
+mksubdirs(struct filelist *fl)
+{
+	struct files *fi;
+	const char *prologue, *prefix, *sep;
+	char buf[MAXPATHLEN];
+
+	TAILQ_FOREACH(fi, fl, fi_next) {
+		if ((fi->fi_flags & FI_SEL) == 0)
+			continue;
+		prefix = sep = "";
+		if (fi->fi_buildprefix != NULL) {
+			prefix = fi->fi_buildprefix;
+			sep = "/";
+		} else {
+			if (fi->fi_prefix != NULL) {
+				prefix = fi->fi_prefix;
+				sep = "/";
+			}
+		}
+		snprintf(buf, sizeof(buf), "%s%s%s", prefix, sep, fi->fi_dir);
+		if (buf[0] == '\0')
+			continue;
+		mksubdir(buf);
+		if (fi->fi_prefix != NULL && fi->fi_buildprefix != NULL) {
+			char org[MAXPATHLEN];
+
+			if (fi->fi_prefix[0] == '/') {
+				prologue = "";
+				sep = "";
+			} else {
+				prologue = srcdir;
+				sep = "/";
+			}
+			snprintf(buf, sizeof(buf), "%s%s%s",
+			    fi->fi_buildprefix, "/", fi->fi_path);
+			snprintf(org, sizeof(org), "%s%s%s%s%s",
+			    prologue, sep, fi->fi_prefix, "/", fi->fi_path);
+			recreate(org, buf);
+			fi->fi_prefix = fi->fi_buildprefix;
+			fi->fi_buildprefix = NULL;
+		}
+	}
+
+	return 0;
+}
+
+static int
+mkallsubdirs(void)
+{
+
+	mksubdirs(&allfiles);
+	mksubdirs(&allofiles);
+	return 0;
 }
 
 /*
@@ -616,30 +705,26 @@ mksymlinks(void)
 	const char *q;
 	struct nvlist *nv;
 
-	snprintf(buf, sizeof(buf), "arch/%s/include", machine);
-	p = sourcepath(buf);
+	p = buf;
+
+	snprintf(buf, sizeof(buf), "%s/arch/%s/include", srcdir, machine);
 	ret = recreate(p, "machine");
 	ret = recreate(p, machine);
-	free(p);
 
 	if (machinearch != NULL) {
-		snprintf(buf, sizeof(buf), "arch/%s/include", machinearch);
-		p = sourcepath(buf);
+		snprintf(buf, sizeof(buf), "%s/arch/%s/include", srcdir, machinearch);
 		q = machinearch;
 	} else {
-		p = estrdup("machine");
+		snprintf(buf, sizeof(buf), "machine");
 		q = machine;
 	}
 
 	ret = recreate(p, q);
-	free(p);
 
 	for (nv = machinesubarches; nv != NULL; nv = nv->nv_next) {
 		q = nv->nv_name;
-		snprintf(buf, sizeof(buf), "arch/%s/include", q);
-		p = sourcepath(buf);
+		snprintf(buf, sizeof(buf), "%s/arch/%s/include", srcdir, q);
 		ret = recreate(p, q);
-		free(p);
 	}
 
 	return (ret);
@@ -986,7 +1071,8 @@ addoption(const char *name, const char *value)
 		cfgwarn("undeclared option `%s' added to IDENT", name);
 	}
 
-	if (do_option(opttab, &nextopt, name, value, "options"))
+	if (do_option(opttab, &options, &nextopt, name, value, "options",
+	    selecttab))
 		return;
 
 	/* make lowercase, then add to select table */
@@ -1028,7 +1114,8 @@ addfsoption(const char *name)
 	 */
 	n = strtolower(name);
 
-	if (do_option(fsopttab, &nextfsopt, name, n, "file-system"))
+	if (do_option(fsopttab, &fsoptions, &nextfsopt, name, n, "file-system",
+	    selecttab))
 		return;
 
 	/* Add to select table. */
@@ -1063,7 +1150,8 @@ void
 addmkoption(const char *name, const char *value)
 {
 
-	(void)do_option(mkopttab, &nextmkopt, name, value, "makeoptions");
+	(void)do_option(mkopttab, &mkoptions, &nextmkopt, name, value,
+		        "makeoptions", NULL);
 }
 
 void
@@ -1102,31 +1190,75 @@ appendcondmkoption(struct condexpr *cond, const char *name, const char *value)
 }
 
 /*
+ * Copy maxusers to param "MAXUSERS".
+ */
+void
+fixmaxusers(void)
+{
+	char str[32];
+
+	snprintf(str, sizeof(str), "%d", maxusers);
+	addoption(intern("MAXUSERS"), intern(str));
+}
+
+/*
+ * Copy makeoptions to params with "makeoptions_" prefix.
+ */
+void
+fixmkoption(void)
+{
+	struct nvlist *nv;
+	char buf[100];
+	const char *name;
+
+	for (nv = mkoptions; nv != NULL; nv = nv->nv_next) {
+		snprintf(buf, sizeof(buf), "makeoptions_%s", nv->nv_name);
+		name = intern(buf);
+		if (!DEFINED_OPTION(name) || !OPT_DEFPARAM(name))
+			continue;
+		addoption(name, intern(nv->nv_str));
+	}
+}
+
+/*
  * Add a name=value pair to an option list.  The value may be NULL.
  */
 static int
-do_option(struct hashtab *ht, struct nvlist ***nppp, const char *name,
-	  const char *value, const char *type)
+do_option(struct hashtab *ht, struct nvlist **npp, struct nvlist ***next,
+	  const char *name, const char *value, const char *type,
+	  struct hashtab *stab)
 {
-	struct nvlist *nv;
+	struct nvlist *nv, *onv;
 
 	/* assume it will work */
 	nv = newnv(name, value, NULL, 0, NULL);
-	if (ht_insert(ht, name, nv) == 0) {
-		**nppp = nv;
-		*nppp = &nv->nv_next;
-		return (0);
-	}
+	if (ht_insert(ht, name, nv) != 0) {
 
-	/* oops, already got that option */
-	nvfree(nv);
-	if ((nv = ht_lookup(ht, name)) == NULL)
-		panic("do_option");
-	if (nv->nv_str != NULL && !OPT_FSOPT(name))
-		cfgerror("already have %s `%s=%s'", type, name, nv->nv_str);
-	else
-		cfgerror("already have %s `%s'", type, name);
-	return (1);
+		/* oops, already got that option - remove it first */
+		if ((onv = ht_lookup(ht, name)) == NULL)
+			panic("do_option 1");
+		if (onv->nv_str != NULL && !OPT_FSOPT(name))
+			cfgwarn("already have %s `%s=%s'", type, name,
+			    onv->nv_str);
+		else
+			cfgwarn("already have %s `%s'", type, name);
+
+		if (undo_option(ht, npp, next, name, type))
+			panic("do_option 2");
+		if (stab != NULL &&
+		    undo_option(stab, NULL, NULL, strtolower(name), type))
+			panic("do_option 3");
+
+		/* now try adding it again */
+		if (ht_insert(ht, name, nv) != 0)
+			panic("do_option 4");
+
+		CFGDBG(2, "opt `%s' replaced", name);
+	}
+	**next = nv;
+	*next = &nv->nv_next;
+
+	return (0);
 }
 
 /*
@@ -1582,6 +1714,7 @@ static int
 extract_config(const char *kname, const char *cname, int cfd)
 {
 	char *ptr;
+	void *base;
 	int found, kfd;
 	struct stat st;
 	off_t i;
@@ -1594,10 +1727,11 @@ extract_config(const char *kname, const char *cname, int cfd)
 		err(EXIT_FAILURE, "cannot open %s", kname);
 	if (fstat(kfd, &st) == -1)
 		err(EXIT_FAILURE, "cannot stat %s", kname);
-	ptr = mmap(0, (size_t)st.st_size, PROT_READ, MAP_FILE | MAP_SHARED,
+	base = mmap(0, (size_t)st.st_size, PROT_READ, MAP_FILE | MAP_SHARED,
 	    kfd, 0);
-	if (ptr == MAP_FAILED)
+	if (base == MAP_FAILED)
 		err(EXIT_FAILURE, "cannot mmap %s", kname);
+	ptr = base;
 
 	/* Scan mmap(2)'ed region, extracting kernel configuration */
 	for (i = 0; i < st.st_size; i++) {
@@ -1629,7 +1763,8 @@ extract_config(const char *kname, const char *cname, int cfd)
 	}
 
 	(void)close(kfd);
-
+	(void)munmap(base, (size_t)st.st_size);
+		
 	return found;
 }
 

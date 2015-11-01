@@ -1,4 +1,4 @@
-/*	$NetBSD: private.h,v 1.40 2015/04/28 17:00:24 christos Exp $	*/
+/*	$NetBSD: private.h,v 1.44 2015/10/09 17:21:45 christos Exp $	*/
 
 #ifndef PRIVATE_H
 #define PRIVATE_H
@@ -31,12 +31,8 @@
 
 /*
 ** Defaults for preprocessor symbols.
-** You can override these in your C compiler options, e.g. '-DHAVE_ADJTIME=0'.
+** You can override these in your C compiler options, e.g. '-DHAVE_GETTEXT=1'.
 */
-
-#ifndef HAVE_ADJTIME
-#define HAVE_ADJTIME		1
-#endif /* !defined HAVE_ADJTIME */
 
 #ifndef HAVE_GETTEXT
 #define HAVE_GETTEXT		0
@@ -49,10 +45,6 @@
 #ifndef HAVE_LINK
 #define HAVE_LINK		1
 #endif /* !defined HAVE_LINK */
-
-#ifndef HAVE_SETTIMEOFDAY
-#define HAVE_SETTIMEOFDAY	3
-#endif /* !defined HAVE_SETTIMEOFDAY */
 
 #ifndef HAVE_STRDUP
 #define HAVE_STRDUP 1
@@ -75,7 +67,7 @@
 #endif /* !defined HAVE_UNISTD_H */
 
 #ifndef HAVE_UTMPX_H
-#define HAVE_UTMPX_H		0
+#define HAVE_UTMPX_H		1
 #endif /* !defined HAVE_UTMPX_H */
 
 #ifndef NETBSD_INSPIRED
@@ -211,7 +203,7 @@ typedef long long	int_fast64_t;
 #  define INT_FAST64_MIN LLONG_MIN
 #  define INT_FAST64_MAX LLONG_MAX
 # else
-#  if (LONG_MAX >> 31) < 0xffffffff
+#  if LONG_MAX >> 31 < 0xffffffff
 Please use a compiler that supports a 64-bit integer type (or wider);
 you may need to compile with "-DHAVE_STDINT_H".
 #  endif
@@ -260,6 +252,18 @@ typedef long intmax_t;
 #  define PRIdMAX "lld"
 # else
 #  define PRIdMAX "ld"
+# endif
+#endif
+
+#ifndef UINT_FAST64_MAX
+# if defined ULLONG_MAX || defined __LONG_LONG_MAX__
+typedef unsigned long long uint_fast64_t;
+# else
+#  if ULONG_MAX >> 31 >> 1 < 0xffffffff
+Please use a compiler that supports a 64-bit integer type (or wider);
+you may need to compile with "-DHAVE_STDINT_H".
+#  endif
+typedef unsigned long	uint_fast64_t;
 # endif
 #endif
 
@@ -395,10 +399,23 @@ void tzset(void);
 ** Some time.h implementations don't declare asctime_r.
 ** Others might define it as a macro.
 ** Fix the former without affecting the latter.
+** Similarly for timezone, daylight, and altzone.
 */
 
 #ifndef asctime_r
 extern char *	asctime_r(struct tm const *restrict, char *restrict);
+#endif
+
+#if defined(USG_COMPAT) && !defined(__NetBSD__)
+# ifndef timezone
+extern long timezone;
+# endif
+# ifndef daylight
+extern int daylight;
+# endif
+#endif
+#if defined ALTZONE && !defined altzone
+extern long altzone;
 #endif
 
 /*
@@ -490,16 +507,21 @@ time_t time2posix_z(timezone_t __restrict, time_t) ATTRIBUTE_PURE;
 #define TYPE_SIGNED(type) (/*CONSTCOND*/((type) -1) < 0)
 #endif /* !defined TYPE_SIGNED */
 
+#define TWOS_COMPLEMENT(t) (/*CONSTCOND*/(t) ~ (t) 0 < 0)
+
+/* Max and min values of the integer type T, of which only the bottom
+   B bits are used, and where the highest-order used bit is considered
+   to be a sign bit if T is signed.  */
+#define MAXVAL(t, b) /*LINTED*/					\
+  ((t) (((t) 1 << ((b) - 1 - TYPE_SIGNED(t)))			\
+	- 1 + ((t) 1 << ((b) - 1 - TYPE_SIGNED(t)))))
+#define MINVAL(t, b)						\
+  ((t) (TYPE_SIGNED(t) ? - TWOS_COMPLEMENT(t) - MAXVAL(t, b) : 0))
+
 #ifdef LOCALTIME_IMPLEMENTATION
-/* The minimum and maximum finite time values.  */
-static time_t const time_t_min =
-  (TYPE_SIGNED(time_t)
-   ? (time_t) -1 << (int)(CHAR_BIT * sizeof (time_t) - 1)
-   : 0);
-static time_t const time_t_max =
-  (TYPE_SIGNED(time_t)
-   ? - (~ 0 < 0) - ((time_t) -1 << (int)(CHAR_BIT * sizeof (time_t) - 1))
-   : -1);
+/* The minimum and maximum finite time values.  This assumes no padding.  */
+static time_t const time_t_min = MINVAL(time_t, TYPE_BIT(time_t));
+static time_t const time_t_max = MAXVAL(time_t, TYPE_BIT(time_t));
 #endif
 
 #ifndef INT_STRLEN_MAXIMUM

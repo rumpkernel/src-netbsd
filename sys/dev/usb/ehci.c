@@ -1,4 +1,4 @@
-/*	$NetBSD: ehci.c,v 1.239 2015/05/11 06:44:36 skrll Exp $ */
+/*	$NetBSD: ehci.c,v 1.246 2015/10/29 00:15:48 mrg Exp $ */
 
 /*
  * Copyright (c) 2004-2012 The NetBSD Foundation, Inc.
@@ -53,11 +53,14 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ehci.c,v 1.239 2015/05/11 06:44:36 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ehci.c,v 1.246 2015/10/29 00:15:48 mrg Exp $");
 
 #include "ohci.h"
 #include "uhci.h"
+
+#ifdef _KERNEL_OPT
 #include "opt_usb.h"
+#endif
 
 #include <sys/param.h>
 
@@ -370,7 +373,7 @@ ehci_init(ehci_softc_t *sc)
 #endif
 
 	mutex_init(&sc->sc_lock, MUTEX_DEFAULT, IPL_SOFTUSB);
-	mutex_init(&sc->sc_intr_lock, MUTEX_DEFAULT, IPL_SCHED);
+	mutex_init(&sc->sc_intr_lock, MUTEX_DEFAULT, IPL_USB);
 	cv_init(&sc->sc_softwake_cv, "ehciab");
 	cv_init(&sc->sc_doorbell, "ehcidi");
 
@@ -421,7 +424,7 @@ ehci_init(ehci_softc_t *sc)
 
 	if (EHCI_HCC_64BIT(cparams)) {
 		/* MUST clear segment register if 64 bit capable. */
-		EWRITE4(sc, EHCI_CTRLDSSEGMENT, 0);
+		EOWRITE4(sc, EHCI_CTRLDSSEGMENT, 0);
 	}
 
 	sc->sc_bus.usbrev = USBREV_2_0;
@@ -446,17 +449,6 @@ ehci_init(ehci_softc_t *sc)
 	}
 	if (sc->sc_vendor_init)
 		sc->sc_vendor_init(sc);
-
-	/*
-	 * If we are doing embedded transaction translation function, force
-	 * the controller to host mode.
-	 */
-	if (sc->sc_flags & EHCIF_ETTF) {
-		uint32_t usbmode = EREAD4(sc, EHCI_USBMODE);
-		usbmode &= ~EHCI_USBMODE_CM;
-		usbmode |= EHCI_USBMODE_CM_HOST;
-		EWRITE4(sc, EHCI_USBMODE, usbmode);
-	}
 
 	/* XXX need proper intr scheduling */
 	sc->sc_rand = 96;
@@ -519,8 +511,8 @@ ehci_init(ehci_softc_t *sc)
 			    EHCI_LINK_QH);
 		}
 		sqh->qh.qh_endp = htole32(EHCI_QH_SET_EPS(EHCI_QH_SPEED_HIGH));
+		sqh->qh.qh_endphub = htole32(EHCI_QH_SET_MULT(1));
 		sqh->qh.qh_curqtd = EHCI_NULL;
-		sqh->next = NULL;
 		sqh->qh.qh_qtd.qtd_next = EHCI_NULL;
 		sqh->qh.qh_qtd.qtd_altnext = EHCI_NULL;
 		sqh->qh.qh_qtd.qtd_status = htole32(EHCI_QTD_HALTED);
@@ -1618,10 +1610,7 @@ Static void
 ehci_dump_qtd(ehci_qtd_t *qtd)
 {
 	USBHIST_FUNC();	USBHIST_CALLED(ehcidebug);
-
-#ifdef USBHIST
 	uint32_t s = le32toh(qtd->qtd_status);
-#endif
 
 	USBHIST_LOGN(ehcidebug, 10,
 	    "     next = 0x%08x  altnext = 0x%08x  status = 0x%08x",
@@ -1658,10 +1647,8 @@ ehci_dump_qtd(ehci_qtd_t *qtd)
 Static void
 ehci_dump_sqh(ehci_soft_qh_t *sqh)
 {
-#ifdef USBHIST
 	ehci_qh_t *qh = &sqh->qh;
 	ehci_link_t link;
-#endif
 	u_int32_t endp, endphub;
 	USBHIST_FUNC();	USBHIST_CALLED(ehcidebug);
 

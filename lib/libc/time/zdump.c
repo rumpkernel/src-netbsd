@@ -1,4 +1,4 @@
-/*	$NetBSD: zdump.c,v 1.40 2014/10/23 21:19:53 christos Exp $	*/
+/*	$NetBSD: zdump.c,v 1.42 2015/08/13 11:21:18 christos Exp $	*/
 /*
 ** This file is in the public domain, so clarified as of
 ** 2009-05-17 by Arthur David Olson.
@@ -6,7 +6,7 @@
 
 #include <sys/cdefs.h>
 #ifndef lint
-__RCSID("$NetBSD: zdump.c,v 1.40 2014/10/23 21:19:53 christos Exp $");
+__RCSID("$NetBSD: zdump.c,v 1.42 2015/08/13 11:21:18 christos Exp $");
 #endif /* !defined lint */
 
 /*
@@ -261,13 +261,15 @@ extern char *	optarg;
 extern int	optind;
 
 /* The minimum and maximum finite time values.  */
+enum { atime_shift = CHAR_BIT * sizeof (time_t) - 2 };
 static time_t	absolute_min_time =
   ((time_t) -1 < 0
-    ? (time_t) -1 << (CHAR_BIT * sizeof (time_t) - 1)
+    ? (- ((time_t) ~ (time_t) 0 < 0)
+       - (((time_t) 1 << atime_shift) - 1 + ((time_t) 1 << atime_shift)))
     : 0);
 static time_t	absolute_max_time =
   ((time_t) -1 < 0
-    ? - (~ 0 < 0) - ((time_t) -1 << (CHAR_BIT * sizeof (time_t) - 1))
+    ? (((time_t) 1 << atime_shift) - 1 + ((time_t) 1 << atime_shift))
    : -1);
 static size_t	longest;
 static char *	progname;
@@ -281,6 +283,9 @@ static time_t hunt(timezone_t, char *, time_t, time_t);
 static void show(timezone_t, char *, time_t, bool);
 static const char *tformat(void);
 static time_t yeartot(intmax_t) ATTRIBUTE_PURE;
+
+/* Unlike <ctype.h>'s isdigit, this also works if c < 0 | c > UCHAR_MAX. */
+#define is_digit(c) ((unsigned)(c) - '0' <= 9)
 
 /* Is A an alphabetic character in the C locale?  */
 static bool
@@ -493,24 +498,15 @@ abbrok(const char *const abbrp, const char *const zone)
 	if (warned)
 		return;
 	cp = abbrp;
-	wp = NULL;
-	while (is_alpha(*cp))
+	while (is_alpha(*cp) || is_digit(*cp) || *cp == '-' || *cp == '+')
 		++cp;
-	if (cp - abbrp == 0)
-		wp = _("lacks alphabetic at start");
-	else if (cp - abbrp < 3)
-		wp = _("has fewer than 3 alphabetics");
+	if (cp - abbrp < 3)
+		wp = _("has fewer than 3 characters");
 	else if (cp - abbrp > 6)
-		wp = _("has more than 6 alphabetics");
-	if (wp == NULL && (*cp == '+' || *cp == '-')) {
-		++cp;
-		if ('0' <= *cp && *cp <= '9')
-			if (*cp++ == '1' && '0' <= *cp && *cp <= '4')
-				cp++;
-		if (*cp != '\0')
-			wp = _("differs from POSIX standard");
-	}
-	if (wp == NULL)
+		wp = _("has more than 6 characters");
+	else if (*cp)
+		wp = _("has characters other than ASCII alphanumerics, '-' or '+'");
+	else
 		return;
 	(void) fflush(stdout);
 	(void) fprintf(stderr,
@@ -752,7 +748,7 @@ main(int argc, char *argv[])
 }
 
 static time_t
-yeartot(const intmax_t y)
+yeartot(intmax_t y)
 {
 	intmax_t	myy, seconds, years;
 	time_t		t;

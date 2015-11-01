@@ -1,4 +1,4 @@
-$NetBSD: pcidevs,v 1.1226 2015/05/16 09:39:22 msaitoh Exp $
+$NetBSD: pcidevs,v 1.1239 2015/10/22 13:17:56 msaitoh Exp $
 
 /*
  * Copyright (c) 1995, 1996 Christopher G. Demetriou
@@ -634,6 +634,7 @@ vendor ASPEED		0x1a03	ASPEED Technology
 vendor EVE		0x1adb	EVE
 vendor QUMRANET		0x1af4	Qumranet
 vendor ASMEDIA		0x1b21  ASMedia
+vendor REDHAT		0x1b36	Red Hat
 vendor FRESCO		0x1b73	Fresco Logic
 vendor QINHENG2		0x1c00	Nanjing QinHeng Electronics (PCIe)
 vendor SYMPHONY2	0x1c1c	Symphony Labs (2nd PCI Vendor ID)
@@ -1164,7 +1165,8 @@ product ASMEDIA ASM1061_01	0x0601	ASM1061 AHCI SATA III Controller
 product ASMEDIA ASM1061_02	0x0602	ASM1061 AHCI SATA III Controller
 product ASMEDIA ASM1061_11	0x0611	ASM1061 AHCI SATA III Controller
 product ASMEDIA ASM1061_12	0x0612	ASM1061 AHCI SATA III Controller
-product	ASMEDIA	ASM1042		0x1042	ASM1042 xHCI USB 3.0
+product	ASMEDIA	ASM1042		0x1042	ASM1042 USB 3.0 Host Controller
+product	ASMEDIA	ASM1042A	0x1142	ASM1042A USB 3.0 Host Controller
 
 /* Asustek products */
 product ASUSTEK HFCPCI		0x0675	ISDN
@@ -2353,6 +2355,9 @@ product MARVELL MV78200		0x7820	MV78200 SoC Discovery Innovation
 product MARVELL MV78230		0x7823	MV78230 SoC Armada XP
 product MARVELL MV78260		0x7826	MV78260 SoC Armada XP
 product MARVELL MV78460		0x7846	MV78460 SoC Armada XP
+product MARVELL 88F6810         0x6810  88F6810 SoC Armada 38x 
+product MARVELL 88F6820         0x6820  88F6820 SoC Armada 38x 
+product MARVELL 88F6828         0x6828  88F6828 SoC Armada 38x 
 product MARVELL 88W8660		0x8660	88W8660 SoC Orion1
 
 product MARVELL2 88SE9120	0x9120	88SE9120 SATA
@@ -2632,13 +2637,14 @@ product INTEL WIFI_LINK_100_2	0x08af	Centrino Wireless-N 100
 product INTEL WIFI_LINK_7260_1	0x08b1	Dual Band Wireless AC 7260
 product INTEL WIFI_LINK_7260_2	0x08b2	Dual Band Wireless AC 7260
 product INTEL WIFI_LINK_3160_1	0x08b3	Dual Band Wireless AC 3160
-product INTEL WIFI_LINK_3160_2	0x08b4	Dual Band Wirelsss AC 3160
+product INTEL WIFI_LINK_3160_2	0x08b4	Dual Band Wireless AC 3160
 product INTEL X1000_I2C_GPIO	0x0934	Quark X1000 I2C and GPIO
 product INTEL X1000_SPI		0x0935	Quark X1000 SPI
 product INTEL X1000_HS_UART	0x0936	Quark X1000 HS-UART
 product INTEL X1000_MAC		0x0937	Quark X1000 10/100 Ethernet MAC
 product INTEL X1000_EHCI	0x0939	Quark X1000 EHCI
 product INTEL X1000_OHCI	0x093a	Quark X1000 OHCI
+product INTEL PCIE_NVME_SSD	0x0953	PCIe NVMe SSD
 product INTEL X1000_HB		0x0958	Quark X1000 Host Bridge
 product INTEL WIFI_LINK_7265_1	0x095a	Dual Band Wireless AC 7265
 product INTEL WIFI_LINK_7265_2	0x095b	Dual Band Wireless AC 7265
@@ -2962,6 +2968,8 @@ product INTEL I218_V		0x1559	I218-V Ethernet Connection
 product INTEL I218_LM		0x155a	I218-LM Ethernet Connection
 product INTEL X540_BYPASS	0x155c	X540 10 GbE Bypass
 product INTEL 82599_BYPASS	0x155d	82599 10 GbE Bypass
+product INTEL I219_LM		0x156f	I219-LM Ethernet Connection
+product INTEL I219_V		0x1570	I219-V Ethernet Connection
 product INTEL XL710_VF_HV	0x1571	XL710 Ethernet Virtual Function
 product INTEL XL710_SFP		0x1572	XL710 SFP+ Ethernet
 product INTEL I210_COPPER_WOF	0x157b	I210 Ethernet (COPPER)
@@ -2977,6 +2985,8 @@ product INTEL I218_LM2		0x15a0	I218-LM Ethernet Connection
 product INTEL I218_V2		0x15a1	I218-V Ethernet Connection
 product INTEL I218_LM3		0x15a2	I218-LM Ethernet Connection
 product INTEL I218_V3		0x15a3	I218-V Ethernet Connection
+product INTEL I219_LM2		0x15b7	I219-LM Ethernet Connection
+product INTEL I219_V2		0x15b8	I219-V Ethernet Connection
 product INTEL CORE5G_HB_1	0x1604	Core 5G Host Bridge
 product INTEL CORE5G_HDA_1	0x160c	Core 5G HD Audio
 product INTEL CORE5G_M_GT1	0x1606	HD Graphics (GT1)
@@ -3476,8 +3486,13 @@ product INTEL 82946GZ_HB	0x2970	82946GZ Host Bridge
 product INTEL 82946GZ_IGD	0x2972	82946GZ	Integrated Graphics Device
 product INTEL 82946GZ_KT	0x2977	82946GZ	KT
 product INTEL 82G35_HB		0x2980	82G35 Host Bridge
+product INTEL 82965_PCIE	0x2981	82G35 PCIe Root Port
 product INTEL 82G35_IGD		0x2982	82G35 Integrated Graphics Device
 product INTEL 82G35_IGD_1	0x2983	82G35 Integrated Graphics Device
+product INTEL 82G35_HECI_1	0x2984	82G35 HECI
+product INTEL 82G35_HECI_2	0x2985	82G35 HECI
+product INTEL 82965_IDE_R	0x2986  82965 IDE-R
+product INTEL 82965Q_KT		0x2987  82965Q KT
 product INTEL 82965Q_HB		0x2990  82965Q Host Bridge
 product INTEL 82965Q_EXP	0x2991  82965Q PCI Express Bridge
 product INTEL 82965Q_IGD	0x2992  82965Q Integrated Graphics Device
@@ -3533,6 +3548,7 @@ product INTEL 82Q45_HB		0x2e10	82Q45 Host Bridge
 product INTEL 82Q45_EXP		0x2e11	82Q45 PCI Express Bridge
 product INTEL 82Q45_IGD		0x2e12	82Q45 Integrated Graphics Device
 product INTEL 82Q45_IGD_1	0x2e13	82Q45 Integrated Graphics Device
+product INTEL 82Q45_KT_1	0x2e17	82Q45 KT
 product INTEL 82G45_HB		0x2e20	82G45 Host Bridge
 product INTEL 82G45_IGD		0x2e22	82G45 Integrated Graphics Device
 product INTEL 82G41_HB		0x2e30	82G41 Host Bridge
@@ -3609,6 +3625,7 @@ product INTEL XE5_V3_IMC0_DDRIO_9 0x2fd8 Xeon E5 v3 IMC DDRIO
 product INTEL XE5_V3_IMC0_DDRIO_A 0x2fd9 Xeon E5 v3 IMC DDRIO
 product INTEL XE5_V3_IMC0_DDRIO_B 0x2fda Xeon E5 v3 IMC DDRIO
 product INTEL XE5_V3_IMC0_DDRIO_C 0x2fdb Xeon E5 v3 IMC DDRIO
+product INTEL WIFI_LINK_3165_1	0x3165	Dual Band Wireless AC 3165
 product INTEL 31244		0x3200	31244 Serial ATA Controller
 product INTEL 82855PM_DDR	0x3340	82855PM MCH Host Controller
 product INTEL 82855PM_AGP	0x3341	82855PM Host-AGP Bridge
@@ -5077,6 +5094,7 @@ product PLANEX FNW_3800_TX	0xab07	FNW-3800-TX 10/100 Ethernet
 product PLX PCI_400	0x1077	VScom PCI-400 4 port serial
 product PLX PCI_800	0x1076	VScom PCI-800 8 port serial
 product PLX PCI_200	0x1103	VScom PCI-200 2 port serial
+product PLX PEX_8111	0x8111	PEX 8111 PCIe-to-PCI Bridge
 product PLX PEX_8112	0x8112	PEX 8112 PCIe-to-PCI Bridge
 product PLX PEX_8114	0x8114	PEX 8114 PCIe-to-PCI/PCI-X Bridge
 product PLX 9030	0x9030	9030 I/O Accelrator
@@ -5286,9 +5304,14 @@ product REALTEK RT8169SC	0x8167	8169SC/8110SC 10/100/1000 Ethernet
 product REALTEK RT8168		0x8168	8168/8111 10/100/1000 Ethernet
 product REALTEK RT8169		0x8169	8169/8110 10/100/1000 Ethernet
 product REALTEK RTL8188CE	0x8176	RTL8188CE Wireless LAN 802.11n PCI-E NIC
+product REALTEK RTL8192CE	0x8178	RTL8192CE Wireless LAN 802.11n PCI-E NIC
 product REALTEK RTL8188EE	0x8179	RTL8188EE Wireless LAN 802.11n PCI-E NIC
 product REALTEK RT8180		0x8180	8180 802.11b
 product REALTEK RT8185		0x8185	8185 802.11a/b/g
+
+/* Red Hat products */
+product REDHAT PPB		0x0001	Qemu PCI-PCI
+product REDHAT QXL		0x0100	QXL Video
 
 /* Renesas products */
 product RENESAS SH7780		0x0002	SH7780 PCI Controller
@@ -5380,8 +5403,9 @@ product S3 SONICVIBES	0xca00	SonicVibes
 product SAFENET SAFEXCEL	0x1141 SafeXcel
 
 /* Samsung Electronics products */
-product SAMSUNGELEC3	XP941	0xa800	XP941 M.2 SSD
-product SAMSUNGELEC3	SM951	0xa801	SM951 M.2 SSD
+product SAMSUNGELEC3	XP941		0xa800	XP941 M.2 SSD
+product SAMSUNGELEC3	SM951		0xa801	SM951 M.2 SSD
+product SAMSUNGELEC3	SM951_NVME	0xa802	SM951 M.2 NVMe SSD
 
 /* Samsung Semiconductor products */
 product SAMSUNGSEMI	KS8920	0x8920	KS8920 10/100 Ethernet

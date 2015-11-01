@@ -1,4 +1,4 @@
-/*	$NetBSD: types.h,v 1.46 2015/04/27 07:03:57 knakahara Exp $	*/
+/*	$NetBSD: types.h,v 1.48 2015/08/27 12:30:50 pooka Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -67,7 +67,7 @@ typedef int		register32_t;
 #define	PRIxREGISTER	"lx"
 #define	PRIxREGISTER32	"x"
 
-typedef	volatile unsigned char		__cpu_simple_lock_t;
+typedef	unsigned char		__cpu_simple_lock_nv_t;
 
 /* __cpu_simple_lock_t used to be a full word. */
 #define	__CPU_SIMPLE_LOCK_PAD
@@ -103,7 +103,9 @@ typedef	volatile unsigned char		__cpu_simple_lock_t;
 #define	__HAVE_MM_MD_DIRECT_MAPPED_IO
 #define	__HAVE_MM_MD_DIRECT_MAPPED_PHYS
 #define	__HAVE_CPU_UAREA_ROUTINES
+#if !defined(NO_PCI_MSI_MSIX)
 #define	__HAVE_PCI_MSI_MSIX
+#endif
 #endif
 #endif
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_time.c,v 1.42 2012/10/02 01:44:28 christos Exp $	*/
+/*	$NetBSD: netbsd32_time.c,v 1.46 2015/10/31 17:04:39 njoly Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Matthew R. Green
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: netbsd32_time.c,v 1.42 2012/10/02 01:44:28 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: netbsd32_time.c,v 1.46 2015/10/31 17:04:39 njoly Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_ntp.h"
@@ -323,16 +323,13 @@ netbsd32___adjtime50(struct lwp *l, const struct netbsd32___adjtime50_args *uap,
 			atv.tv_usec += 1000000;
 			atv.tv_sec--;
 		}
-		(void) copyout(&atv,
-			       SCARG_P32(uap, olddelta), 
-			       sizeof(atv));
+		error = copyout(&atv, SCARG_P32(uap, olddelta), sizeof(atv));
 		if (error)
 			return (error);
 	}
 	
 	if (SCARG_P32(uap, delta)) {
-		error = copyin(SCARG_P32(uap, delta), &atv,
-			       sizeof(struct timeval));
+		error = copyin(SCARG_P32(uap, delta), &atv, sizeof(atv));
 		if (error)
 			return (error);
 
@@ -436,8 +433,8 @@ int
 netbsd32_clock_nanosleep(struct lwp *l, const struct netbsd32_clock_nanosleep_args *uap, register_t *retval)
 {
 	/* {
-		clockid_t clock_id;
-		int flags;
+		syscallarg(clockid_t) clock_id;
+		syscallarg(int) flags;
 		syscallarg(const netbsd32_timespecp_t) rqtp;
 		syscallarg(netbsd32_timespecp_t) rmtp;
 	} */
@@ -447,17 +444,20 @@ netbsd32_clock_nanosleep(struct lwp *l, const struct netbsd32_clock_nanosleep_ar
 
 	error = copyin(SCARG_P32(uap, rqtp), &ts32, sizeof(ts32));
 	if (error)
-		return (error);
+		goto out;
 	netbsd32_to_timespec(&ts32, &rqt);
 
 	error = nanosleep1(l, SCARG(uap, clock_id), SCARG(uap, flags),
 	    &rqt, SCARG_P32(uap, rmtp) ? &rmt : NULL);
 	if (SCARG_P32(uap, rmtp) == NULL || (error != 0 && error != EINTR))
-		return error;
+		goto out;
 
 	netbsd32_from_timespec(&rmt, &ts32);
-	error1 = copyout(&ts32, SCARG_P32(uap, rmtp), sizeof(ts32));
-	return error1 ? error1 : error;
+	if ((error1 = copyout(&ts32, SCARG_P32(uap, rmtp), sizeof(ts32))) != 0)
+		error = error1;
+out:
+	*retval = error;
+	return 0;
 }
 
 static int

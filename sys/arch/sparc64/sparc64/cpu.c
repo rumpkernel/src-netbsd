@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.c,v 1.125 2015/05/07 04:03:38 palle Exp $ */
+/*	$NetBSD: cpu.c,v 1.127 2015/09/06 23:48:39 nakayama Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -52,7 +52,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.125 2015/05/07 04:03:38 palle Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.127 2015/09/06 23:48:39 nakayama Exp $");
 
 #include "opt_multiprocessor.h"
 
@@ -72,10 +72,10 @@ __KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.125 2015/05/07 04:03:38 palle Exp $");
 #include <machine/pmap.h>
 #include <machine/sparc64.h>
 #include <machine/openfirm.h>
+#include <machine/hypervisor.h>
+#include <machine/mdesc.h>
 
 #include <sparc64/sparc64/cache.h>
-#include <sparc64/hypervisor.h>
-#include <sparc64/mdesc.h>
 
 #define SUN4V_MONDO_QUEUE_SIZE	32
 #define SUN4V_QUEUE_ENTRY_SIZE	64
@@ -263,7 +263,7 @@ cpu_dcache_associativity(int node)
 		return prom_getpropint(node, "dcache-associativity", 1);
 }
 
-static int
+int
 cpu_ecache_size(int node)
 {
 	if (CPU_ISSUN4V)
@@ -290,7 +290,7 @@ cpu_ecache_nlines(int node)
 		return prom_getpropint(node, "ecache-nlines", 32768);
 }
 
-static int
+int
 cpu_ecache_associativity(int node)
 {
 	if (CPU_ISSUN4V) {

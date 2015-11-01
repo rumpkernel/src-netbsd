@@ -1,4 +1,4 @@
-/*	$NetBSD: mkdevsw.c,v 1.12 2014/11/10 21:13:04 christos Exp $	*/
+/*	$NetBSD: mkdevsw.c,v 1.14 2015/09/03 13:53:36 uebayasi Exp $	*/
 
 /*
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -34,7 +34,7 @@
 #endif
 
 #include <sys/cdefs.h>
-__RCSID("$NetBSD: mkdevsw.c,v 1.12 2014/11/10 21:13:04 christos Exp $");
+__RCSID("$NetBSD: mkdevsw.c,v 1.14 2015/09/03 13:53:36 uebayasi Exp $");
 
 #include <stdio.h>
 #include <string.h>

@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_ioctl.c,v 1.72 2015/05/20 04:37:45 matt Exp $	*/
+/*	$NetBSD: netbsd32_ioctl.c,v 1.82 2015/08/02 07:37:57 maxv Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Matthew R. Green
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: netbsd32_ioctl.c,v 1.72 2015/05/20 04:37:45 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: netbsd32_ioctl.c,v 1.82 2015/08/02 07:37:57 maxv Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -64,6 +64,11 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_ioctl.c,v 1.72 2015/05/20 04:37:45 matt Exp
 
 #include <net/if.h>
 #include <net/route.h>
+
+#include <net/if_pppoe.h>
+#include <net/if_sppp.h>
+
+#include <net/npf/npf.h>
 
 #include <net/bpf.h>
 #include <netinet/in.h>
@@ -139,7 +144,7 @@ netbsd32_to_if_addrprefreq(const struct netbsd32_if_addrprefreq *ifap32,
 	strlcpy(ifap->ifap_name, ifap32->ifap_name, sizeof(ifap->ifap_name));
 	ifap->ifap_preference = ifap32->ifap_preference;
 	memcpy(&ifap->ifap_addr, &ifap32->ifap_addr,
-	    max(ifap32->ifap_addr.ss_len, _SS_MAXSIZE));
+	    min(ifap32->ifap_addr.ss_len, _SS_MAXSIZE));
 }
 
 static inline void
@@ -160,10 +165,45 @@ netbsd32_to_ifmediareq(struct netbsd32_ifmediareq *s32p, struct ifmediareq *p, u
 }
 
 static inline void
+netbsd32_to_pppoediscparms(struct netbsd32_pppoediscparms *s32p,
+    struct pppoediscparms *p, u_long cmd)
+{
+
+	memcpy(p->ifname, s32p->ifname, sizeof p->ifname);
+	memcpy(p->eth_ifname, s32p->eth_ifname, sizeof p->eth_ifname);
+	p->ac_name = (char *)NETBSD32PTR64(s32p->ac_name);
+	p->ac_name_len = s32p->ac_name_len;
+	p->service_name = (char *)NETBSD32PTR64(s32p->service_name);
+	p->service_name_len = s32p->service_name_len;
+}
+
+static inline void
+netbsd32_to_spppauthcfg(struct netbsd32_spppauthcfg *s32p,
+    struct spppauthcfg *p, u_long cmd)
+{
+
+	memcpy(p->ifname, s32p->ifname, sizeof p->ifname);
+	p->hisauth = s32p->hisauth;
+	p->myauth = s32p->myauth;
+	p->myname_length = s32p->myname_length;
+	p->mysecret_length = s32p->mysecret_length;
+	p->hisname_length = s32p->hisname_length;
+	p->hissecret_length = s32p->hissecret_length;
+	p->myauthflags = s32p->myauthflags;
+	p->hisauthflags = s32p->hisauthflags;
+	p->myname = (char *)NETBSD32PTR64(s32p->myname);
+	p->mysecret = (char *)NETBSD32PTR64(s32p->mysecret);
+	p->hisname = (char *)NETBSD32PTR64(s32p->hisname);
+	p->hissecret = (char *)NETBSD32PTR64(s32p->hissecret);
+}
+
+static inline void
 netbsd32_to_ifdrv(struct netbsd32_ifdrv *s32p, struct ifdrv *p, u_long cmd)
 {
 
-	memcpy(p, s32p, sizeof *s32p);
+	memcpy(p->ifd_name, s32p->ifd_name, sizeof p->ifd_name);
+	p->ifd_cmd = s32p->ifd_cmd;
+	p->ifd_len = s32p->ifd_len;
 	p->ifd_data = (void *)NETBSD32PTR64(s32p->ifd_data);
 }
 
@@ -249,6 +289,13 @@ netbsd32_to_u_long(netbsd32_u_long *s32p, u_long *p, u_long cmd)
 {
 
 	*p = (u_long)*s32p;
+}
+
+static inline void
+netbsd32_to_voidp(netbsd32_voidp *s32p, voidp *p, u_long cmd)
+{
+
+	*p = (void *)NETBSD32PTR64(*s32p);
 }
 
 static inline void
@@ -412,6 +459,30 @@ netbsd32_to_ksyms_gvalue(
 	p->kv_name = NETBSD32PTR64(s32p->kv_name);
 }
 
+static inline void
+netbsd32_to_npf_ioctl_table(
+    const struct netbsd32_npf_ioctl_table *s32p,
+    struct npf_ioctl_table *p,
+    u_long cmd)
+{
+
+	p->nct_cmd = s32p->nct_cmd;
+	p->nct_name = NETBSD32PTR64(s32p->nct_name);
+	switch (s32p->nct_cmd) {
+	case NPF_CMD_TABLE_LOOKUP:
+	case NPF_CMD_TABLE_ADD:
+	case NPF_CMD_TABLE_REMOVE:
+		p->nct_data.ent.alen = s32p->nct_data.ent.alen;
+		p->nct_data.ent.addr = s32p->nct_data.ent.addr;
+		p->nct_data.ent.mask = s32p->nct_data.ent.mask;
+		break;
+	case NPF_CMD_TABLE_LIST:
+		p->nct_data.buf.buf = NETBSD32PTR64(s32p->nct_data.buf.buf);
+		p->nct_data.buf.len = s32p->nct_data.buf.len;
+		break;
+	}
+}
+
 /*
  * handle ioctl conversions from 64-bit kernel -> netbsd32
  */
@@ -476,7 +547,7 @@ netbsd32_from_if_addrprefreq(const struct if_addrprefreq *ifap,
 	strlcpy(ifap32->ifap_name, ifap->ifap_name, sizeof(ifap32->ifap_name));
 	ifap32->ifap_preference = ifap->ifap_preference;
 	memcpy(&ifap32->ifap_addr, &ifap->ifap_addr,
-	    max(ifap->ifap_addr.ss_len, _SS_MAXSIZE));
+	    min(ifap->ifap_addr.ss_len, _SS_MAXSIZE));
 }
 
 static inline void
@@ -500,14 +571,46 @@ netbsd32_from_ifmediareq(struct ifmediareq *p, struct netbsd32_ifmediareq *s32p,
 }
 
 static inline void
+netbsd32_from_pppoediscparms(struct pppoediscparms *p,
+    struct netbsd32_pppoediscparms *s32p, u_long cmd)
+{
+
+	memcpy(s32p->ifname, p->ifname, sizeof s32p->ifname);
+	memcpy(s32p->eth_ifname, p->eth_ifname, sizeof s32p->eth_ifname);
+	NETBSD32PTR32(s32p->ac_name, p->ac_name);
+	s32p->ac_name_len = p->ac_name_len;
+	NETBSD32PTR32(s32p->service_name, p->service_name);
+	s32p->service_name_len = p->service_name_len;
+}
+
+static inline void
+netbsd32_from_spppauthcfg(struct spppauthcfg *p,
+    struct netbsd32_spppauthcfg *s32p, u_long cmd)
+{
+
+	memcpy(s32p->ifname, p->ifname, sizeof s32p->ifname);
+	s32p->hisauth = p->hisauth;
+	s32p->myauth = p->myauth;
+	s32p->myname_length = p->myname_length;
+	s32p->mysecret_length = p->mysecret_length;
+	s32p->hisname_length = p->hisname_length;
+	s32p->hissecret_length = p->hissecret_length;
+	s32p->myauthflags = p->myauthflags;
+	s32p->hisauthflags = p->hisauthflags;
+	NETBSD32PTR32(s32p->myname, p->myname);
+	NETBSD32PTR32(s32p->mysecret, p->mysecret);
+	NETBSD32PTR32(s32p->hisname, p->hisname);
+	NETBSD32PTR32(s32p->hissecret, p->hissecret);
+}
+
+static inline void
 netbsd32_from_ifdrv(struct ifdrv *p, struct netbsd32_ifdrv *s32p, u_long cmd)
 {
 
-	memcpy(s32p, p, sizeof *p);
-/* filled in? */
-#if 0
-	s32p->ifm_data = (netbsd32_u_longp_t)p->ifm_data;
-#endif
+	memcpy(s32p->ifd_name, p->ifd_name, sizeof s32p->ifd_name);
+	s32p->ifd_cmd = p->ifd_cmd;
+	s32p->ifd_len = p->ifd_len;
+	NETBSD32PTR32(s32p->ifd_data, p->ifd_data);
 }
 
 static inline void
@@ -690,6 +793,14 @@ netbsd32_from_u_long(u_long *p, netbsd32_u_long *s32p, u_long cmd)
 }
 
 static inline void
+netbsd32_from_voidp(voidp *p, netbsd32_voidp *s32p, u_long cmd)
+{
+
+	NETBSD32PTR32(*s32p, *p);
+}
+
+
+static inline void
 netbsd32_from_clockctl_settimeofday(
     const struct clockctl_settimeofday *p,
     struct netbsd32_clockctl_settimeofday *s32p,
@@ -753,6 +864,30 @@ netbsd32_from_ksyms_gvalue(
 
 	NETBSD32PTR32(s32p->kv_name, p->kv_name);
 	s32p->kv_value = p->kv_value;
+}
+
+static inline void
+netbsd32_from_npf_ioctl_table(
+    const struct npf_ioctl_table *p,
+    struct netbsd32_npf_ioctl_table *s32p,
+    u_long cmd)
+{
+
+	s32p->nct_cmd = p->nct_cmd;
+	NETBSD32PTR32(s32p->nct_name, p->nct_name);
+	switch (p->nct_cmd) {
+	case NPF_CMD_TABLE_LOOKUP:
+	case NPF_CMD_TABLE_ADD:
+	case NPF_CMD_TABLE_REMOVE:
+		s32p->nct_data.ent.alen = p->nct_data.ent.alen;
+		s32p->nct_data.ent.addr = p->nct_data.ent.addr;
+		s32p->nct_data.ent.mask = p->nct_data.ent.mask;
+		break;
+	case NPF_CMD_TABLE_LIST:
+		NETBSD32PTR32(s32p->nct_data.buf.buf, p->nct_data.buf.buf);
+		s32p->nct_data.buf.len = p->nct_data.buf.len;
+		break;
+	}
 }
 
 /*
@@ -1039,8 +1174,19 @@ netbsd32_ioctl(struct lwp *l, const struct netbsd32_ioctl_args *uap, register_t 
 	case SIOCGIFMEDIA32:
 		IOCTL_STRUCT_CONV_TO(SIOCGIFMEDIA, ifmediareq);
 
+	case PPPOESETPARMS32:
+		IOCTL_STRUCT_CONV_TO(PPPOESETPARMS, pppoediscparms);
+	case PPPOEGETPARMS32:
+		IOCTL_STRUCT_CONV_TO(PPPOEGETPARMS, pppoediscparms);
+	case SPPPGETAUTHCFG32:
+		IOCTL_STRUCT_CONV_TO(SPPPGETAUTHCFG, spppauthcfg);
+	case SPPPSETAUTHCFG32:
+		IOCTL_STRUCT_CONV_TO(SPPPSETAUTHCFG, spppauthcfg);
+
 	case SIOCSDRVSPEC32:
 		IOCTL_STRUCT_CONV_TO(SIOCSDRVSPEC, ifdrv);
+	case SIOCGDRVSPEC32:
+		IOCTL_STRUCT_CONV_TO(SIOCGDRVSPEC, ifdrv);
 
 	case SIOCGETVIFCNT32:
 		IOCTL_STRUCT_CONV_TO(SIOCGETVIFCNT, sioc_vif_req);
@@ -1123,6 +1269,17 @@ netbsd32_ioctl(struct lwp *l, const struct netbsd32_ioctl_args *uap, register_t 
 		IOCTL_STRUCT_CONV_TO(KIOCGSYMBOL, ksyms_gsymbol);
 	case KIOCGVALUE32:
 		IOCTL_STRUCT_CONV_TO(KIOCGVALUE, ksyms_gvalue);
+
+	case IOC_NPF_LOAD32:
+		IOCTL_STRUCT_CONV_TO(IOC_NPF_LOAD, plistref);
+	case IOC_NPF_TABLE32:
+		IOCTL_STRUCT_CONV_TO(IOC_NPF_TABLE, npf_ioctl_table);
+	case IOC_NPF_STATS32:
+		IOCTL_CONV_TO(IOC_NPF_STATS, voidp);
+	case IOC_NPF_SAVE32:
+		IOCTL_STRUCT_CONV_TO(IOC_NPF_SAVE, plistref);
+	case IOC_NPF_RULE32:
+		IOCTL_STRUCT_CONV_TO(IOC_NPF_RULE, plistref);
 
 	default:
 #ifdef NETBSD32_MD_IOCTL
