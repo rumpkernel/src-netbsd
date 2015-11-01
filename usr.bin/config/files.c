@@ -1,4 +1,4 @@
-/*	$NetBSD: files.c,v 1.18 2014/11/17 00:53:15 uebayasi Exp $	*/
+/*	$NetBSD: files.c,v 1.35 2015/09/04 21:32:54 uebayasi Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -45,9 +45,10 @@
 #endif
 
 #include <sys/cdefs.h>
-__RCSID("$NetBSD: files.c,v 1.18 2014/11/17 00:53:15 uebayasi Exp $");
+__RCSID("$NetBSD: files.c,v 1.35 2015/09/04 21:32:54 uebayasi Exp $");
 
 #include <sys/param.h>
+#include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,6 +57,10 @@ __RCSID("$NetBSD: files.c,v 1.18 2014/11/17 00:53:15 uebayasi Exp $");
 #include "defs.h"
 
 extern const char *yyfile;
+
+int nallfiles;
+size_t nselfiles;
+struct files **selfiles;
 
 /*
  * We check that each full path name is unique.  File base names
@@ -81,8 +86,10 @@ initfiles(void)
 	basetab = ht_new();
 	pathtab = ht_new();
 	TAILQ_INIT(&allfiles);
+	TAILQ_INIT(&allcfiles);
+	TAILQ_INIT(&allsfiles);
+	TAILQ_INIT(&allofiles);
 	unchecked = &TAILQ_FIRST(&allfiles);
-	TAILQ_INIT(&allobjects);
 }
 
 void
@@ -91,8 +98,10 @@ addfile(const char *path, struct condexpr *optx, u_char flags, const char *rule)
 	struct files *fi;
 	const char *dotp, *tail;
 	size_t baselen;
+	size_t dirlen;
 	int needc, needf;
 	char base[200];
+	char dir[MAXPATHLEN];
 
 	/* check various errors */
 	needc = flags & FI_NEEDSCOUNT;
@@ -106,13 +115,23 @@ addfile(const char *path, struct condexpr *optx, u_char flags, const char *rule)
 		    path);
 		goto bad;
 	}
+	if (*path == '/') {
+		cfgerror("path must be relative");
+		goto bad;
+	}
 
 	/* find last part of pathname, and same without trailing suffix */
 	tail = strrchr(path, '/');
-	if (tail == NULL)
+	if (tail == NULL) {
+		dirlen = 0;
 		tail = path;
-	else
+	} else {
+		dirlen = (size_t)(tail - path);
 		tail++;
+	}
+	memcpy(dir, path, dirlen);
+	dir[dirlen] = '\0';
+
 	dotp = strrchr(tail, '.');
 	if (dotp == NULL || dotp[1] == 0 ||
 	    (baselen = (size_t)(dotp - tail)) >= sizeof(base)) {
@@ -149,58 +168,54 @@ addfile(const char *path, struct condexpr *optx, u_char flags, const char *rule)
 		goto bad;
 	}
 	memcpy(base, tail, baselen);
-	base[baselen] = 0;
+	base[baselen] = '\0';
 	fi->fi_srcfile = yyfile;
 	fi->fi_srcline = currentline();
 	fi->fi_flags = flags;
 	fi->fi_path = path;
 	fi->fi_tail = tail;
 	fi->fi_base = intern(base);
+	fi->fi_dir = intern(dir);
 	fi->fi_prefix = SLIST_EMPTY(&prefixes) ? NULL :
 			SLIST_FIRST(&prefixes)->pf_prefix;
+	fi->fi_buildprefix = SLIST_EMPTY(&buildprefixes) ? NULL :
+			SLIST_FIRST(&buildprefixes)->pf_prefix;
 	fi->fi_len = strlen(path);
 	fi->fi_suffix = path[fi->fi_len - 1];
 	fi->fi_optx = optx;
 	fi->fi_optf = NULL;
 	fi->fi_mkrule = rule;
 	fi->fi_attr = NULL;
-	TAILQ_INSERT_TAIL(&allfiles, fi, fi_next);
+	fi->fi_order = (int)nallfiles + (includedepth << 16);
+	switch (fi->fi_suffix) {
+	case 'c':
+		TAILQ_INSERT_TAIL(&allcfiles, fi, fi_snext);
+		TAILQ_INSERT_TAIL(&allfiles, fi, fi_next);
+		break;
+	case 'S':
+		fi->fi_suffix = 's';
+		/* FALLTHRU */
+	case 's':
+		TAILQ_INSERT_TAIL(&allsfiles, fi, fi_snext);
+		TAILQ_INSERT_TAIL(&allfiles, fi, fi_next);
+		break;
+	case 'o':
+		TAILQ_INSERT_TAIL(&allofiles, fi, fi_snext);
+		TAILQ_INSERT_TAIL(&allfiles, fi, fi_next);
+		break;
+	default:
+		cfgxerror(fi->fi_srcfile, fi->fi_srcline,
+		    "unknown suffix");
+		break;
+	}
+	CFGDBG(3, "file added `%s' at order score %d", fi->fi_path, fi->fi_order);
+	nallfiles++;
 	return;
  bad:
 	if (optx != NULL) {
 		condexpr_destroy(optx);
 	}
 }
-
-void
-addobject(const char *path, struct condexpr *optx, u_char flags)
-{
-	struct objects *oi;
-
-	/*
-	 * Commit this object to memory.  We will decide later whether it
-	 * will be used after all.
-	 */
-	oi = ecalloc(1, sizeof *oi);
-	if (ht_insert(pathtab, path, oi)) {
-		free(oi);
-		if ((oi = ht_lookup(pathtab, path)) == NULL)
-			panic("addfile: ht_lookup(%s)", path);
-		cfgerror("duplicate file %s", path);
-		cfgxerror(oi->oi_srcfile, oi->oi_srcline,
-		    "here is the original definition");
-	} 
-	oi->oi_srcfile = yyfile;
-	oi->oi_srcline = currentline();
-	oi->oi_flags = flags;
-	oi->oi_path = path;
-	oi->oi_prefix = SLIST_EMPTY(&prefixes) ? NULL :
-			SLIST_FIRST(&prefixes)->pf_prefix;
-	oi->oi_optx = optx;
-	oi->oi_optf = NULL;
-	TAILQ_INSERT_TAIL(&allobjects, oi, oi_next);
-	return;
-}     
 
 static void
 addfiletoattr(const char *name, struct files *fi)
@@ -256,6 +271,21 @@ checkaux(const char *name, void *context)
 	return (0);
 }
 
+static int
+cmpfiles(const void *a, const void *b)
+{
+	const struct files * const *fia = a, * const *fib = b;
+	int sa = (*fia)->fi_order;
+	int sb = (*fib)->fi_order;
+
+	if (sa < sb)
+		return -1;
+	else if (sa > sb)
+		return 1;
+	else
+		return 0;
+}
+
 /*
  * We have finished reading everything.  Tack the files down: calculate
  * selection and counts as needed.  Check that the object files built
@@ -267,6 +297,21 @@ fixfiles(void)
 	struct files *fi, *ofi;
 	struct nvlist *flathead, **flatp;
 	int err, sel;
+	struct config *cf;
+ 	char swapname[100];
+
+	/* Place these files at last. */
+	int onallfiles = nallfiles;
+	nallfiles = 1 << 30;
+	addfile("devsw.c", NULL, 0, NULL);
+	addfile("ioconf.c", NULL, 0, NULL);
+
+	TAILQ_FOREACH(cf, &allcf, cf_next) {
+ 		(void)snprintf(swapname, sizeof(swapname), "swap%s.c",
+ 		    cf->cf_name);
+ 		addfile(intern(swapname), NULL, 0, NULL);
+ 	}
+	nallfiles = onallfiles;
 
 	err = 0;
 	TAILQ_FOREACH(fi, &allfiles, fi_next) {
@@ -316,6 +361,7 @@ fixfiles(void)
 			}
 		}
 		fi->fi_flags |= FI_SEL;
+		nselfiles++;
 		CFGDBG(3, "file selected `%s'", fi->fi_path);
 
 		/* Add other files to the default "netbsd" attribute. */
@@ -325,39 +371,21 @@ fixfiles(void)
 		CFGDBG(3, "file `%s' belongs to attr `%s'", fi->fi_path,
 		    fi->fi_attr->a_name);
 	}
+
+	/* Order files. */
+	selfiles = malloc(nselfiles * sizeof(fi));
+	unsigned i = 0;
+	TAILQ_FOREACH(fi, &allfiles, fi_next) {
+		if ((fi->fi_flags & FI_SEL) == 0)
+			continue;
+		selfiles[i++] = fi;
+	}
+	assert(i <= nselfiles);
+	nselfiles = i;
+	qsort(selfiles, nselfiles, (unsigned)sizeof(fi), cmpfiles);
 	return (err);
 }
 
-/*    
- * We have finished reading everything.  Tack the objects down: calculate
- * selection.
- */   
-int    
-fixobjects(void)
-{     
-	struct objects *oi;
-	struct nvlist *flathead, **flatp;
-	int err, sel; 
- 
-	err = 0;
-	TAILQ_FOREACH(oi, &allobjects, oi_next) {
-		/* Optional: see if it is to be included. */
-		if (oi->oi_optx != NULL) {
-			flathead = NULL;
-			flatp = &flathead;
-			sel = expr_eval(oi->oi_optx,
-			    oi->oi_flags & OI_NEEDSFLAG ? fixfsel :
-			    fixsel,
-			    &flatp);
-			oi->oi_optf = flathead;
-			if (!sel)
-				continue;
-		}
-
-		oi->oi_flags |= OI_SEL;  
-	}
-	return (err);
-}     
 
 /*
  * We have finished reading everything.  Tack the devsws down: calculate

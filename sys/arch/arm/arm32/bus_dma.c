@@ -1,4 +1,4 @@
-/*	$NetBSD: bus_dma.c,v 1.91 2015/02/25 13:52:42 joerg Exp $	*/
+/*	$NetBSD: bus_dma.c,v 1.94 2015/10/18 15:34:08 jmcneill Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -35,7 +35,7 @@
 #include "opt_arm_bus_space.h"
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.91 2015/02/25 13:52:42 joerg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bus_dma.c,v 1.94 2015/10/18 15:34:08 jmcneill Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -734,10 +734,46 @@ _bus_dmamap_load_uio(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
  */
 int
 _bus_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map,
-    bus_dma_segment_t *segs, int nsegs, bus_size_t size, int flags)
+    bus_dma_segment_t *segs, int nsegs, bus_size_t size0, int flags)
 {
 
-	panic("_bus_dmamap_load_raw: not implemented");
+	bus_size_t size;
+	int i, error = 0;
+
+	/*
+	 * Make sure that on error conditions we return "no valid mappings."
+	 */
+	map->dm_mapsize = 0;
+	map->dm_nsegs = 0;
+	KASSERT(map->dm_maxsegsz <= map->_dm_maxmaxsegsz);
+
+	if (size0 > map->_dm_size)
+		return EINVAL;
+
+	for (i = 0, size = size0; i < nsegs && size > 0; i++) {
+		bus_dma_segment_t *ds = &segs[i];
+		bus_size_t sgsize;
+
+		sgsize = MIN(ds->ds_len, size);
+		if (sgsize == 0)
+			continue;
+		error = _bus_dmamap_load_paddr(t, map, ds->ds_addr,
+		    sgsize, false);
+		if (error != 0)
+			break;
+		size -= sgsize;
+	}
+
+	if (error != 0) {
+		map->dm_mapsize = 0;
+		map->dm_nsegs = 0;
+		return error;
+	}
+
+	/* XXX TBD bounce */
+
+	map->dm_mapsize = size0;
+	return 0;
 }
 
 /*
@@ -775,13 +811,19 @@ _bus_dmamap_sync_segment(vaddr_t va, paddr_t pa, vsize_t len, int ops, bool read
 
 	switch (ops) {
 	case BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE:
+#ifdef ARM_MMU_EXTENDED
+		(void)readonly_p;
+#else
 		if (!readonly_p) {
+#endif
 			STAT_INCR(sync_prereadwrite);
 			cpu_dcache_wbinv_range(va, len);
 			cpu_sdcache_wbinv_range(va, pa, len);
 			break;
+#ifndef ARM_MMU_EXTENDED
 		}
 		/* FALLTHROUGH */
+#endif
 
 	case BUS_DMASYNC_PREREAD: {
 		const size_t line_size = arm_dcache_align;
@@ -909,7 +951,8 @@ _bus_dmamap_sync_mbuf(bus_dma_tag_t t, bus_dmamap_t map, bus_size_t offset,
 
 		/*
 		 * We can save a lot of work here if we know the mapping
-		 * is read-only at the MMU:
+		 * is read-only at the MMU and we aren't using the armv6+
+		 * MMU:
 		 *
 		 * If a mapping is read-only, no dirty cache blocks will
 		 * exist for it.  If a writable mapping was made read-only,
@@ -924,9 +967,15 @@ _bus_dmamap_sync_mbuf(bus_dma_tag_t t, bus_dmamap_t map, bus_size_t offset,
 		 * cache), this will have to be revisited.
 		 */
 
-		if ((ds->_ds_flags & _BUS_DMAMAP_COHERENT) == 0)
+		if ((ds->_ds_flags & _BUS_DMAMAP_COHERENT) == 0) {
+			/*
+			 * If we are doing preread (DMAing into the mbuf),
+			 * this mbuf better not be readonly, 
+			 */
+			KASSERT(!(ops & BUS_DMASYNC_PREREAD) || !M_ROMAP(m));
 			_bus_dmamap_sync_segment(va, pa, seglen, ops,
 			    M_ROMAP(m));
+		}
 		voff += seglen;
 		ds_off += seglen;
 		len -= seglen;

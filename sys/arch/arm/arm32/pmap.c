@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.c,v 1.322 2015/05/13 15:33:47 skrll Exp $	*/
+/*	$NetBSD: pmap.c,v 1.326 2015/07/26 00:15:53 matt Exp $	*/
 
 /*
  * Copyright 2003 Wasabi Systems, Inc.
@@ -216,7 +216,7 @@
 
 #include <arm/locore.h>
 
-__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.322 2015/05/13 15:33:47 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.326 2015/07/26 00:15:53 matt Exp $");
 
 //#define PMAP_DEBUG
 #ifdef PMAP_DEBUG
@@ -514,9 +514,9 @@ bool pmap_initialized;
 
 #if defined(ARM_MMU_EXTENDED) && defined(__HAVE_MM_MD_DIRECT_MAPPED_PHYS)
 /*
- * Start of direct-mapped memory
+ * Virtual end of direct-mapped memory
  */
-vaddr_t pmap_directbase = KERNEL_BASE;
+vaddr_t pmap_directlimit;
 #endif
 
 /*
@@ -7206,9 +7206,9 @@ pmap_pte_init_xscale(void)
 	/*
 	 * Disable ECC protection of page table access, for now.
 	 */
-	__asm volatile("mrc p15, 0, %0, c1, c0, 1" : "=r" (auxctl));
+	auxctl = armreg_auxctl_read();
 	auxctl &= ~XSCALE_AUXCTL_P;
-	__asm volatile("mcr p15, 0, %0, c1, c0, 1" : : "r" (auxctl));
+	armreg_auxctl_write(auxctl);
 }
 
 /*
@@ -7261,9 +7261,9 @@ xscale_setup_minidata(vaddr_t l1pt, vaddr_t va, paddr_t pa)
 
 	/* Invalidate data and mini-data. */
 	__asm volatile("mcr p15, 0, %0, c7, c6, 0" : : "r" (0));
-	__asm volatile("mrc p15, 0, %0, c1, c0, 1" : "=r" (auxctl));
+	auxctl = armreg_auxctl_read();
 	auxctl = (auxctl & ~XSCALE_AUXCTL_MD_MASK) | XSCALE_AUXCTL_MD_WB_RWA;
-	__asm volatile("mcr p15, 0, %0, c1, c0, 1" : : "r" (auxctl));
+	armreg_auxctl_write(auxctl);
 }
 
 /*
@@ -7819,13 +7819,7 @@ arm_pmap_alloc_poolpage(int flags)
 	 */
 	if (arm_poolpage_vmfreelist != VM_FREELIST_DEFAULT) {
 		return uvm_pagealloc_strat(NULL, 0, NULL, flags,
-#if defined(__HAVE_MM_MD_DIRECT_MAPPED_PHYS) && defined(ARM_MMU_EXTENDED)
-		    (pmap_directbase < KERNEL_BASE
-			? UVM_PGA_STRAT_ONLY
-			: UVM_PGA_STRAT_FALLBACK),
-#else
 		    UVM_PGA_STRAT_FALLBACK,
-#endif
 		    arm_poolpage_vmfreelist);
 	}
 
@@ -7857,15 +7851,18 @@ pmap_direct_mapped_phys(paddr_t pa, bool *ok_p, vaddr_t va)
 {
 	bool ok = false;
 	if (physical_start <= pa && pa < physical_end) {
+#ifdef KERNEL_BASE_VOFFSET
+		const vaddr_t newva = pa + KERNEL_BASE_VOFFSET;
+#else
+		const vaddr_t newva = KERNEL_BASE + pa - physical_start;
+#endif
 #ifdef ARM_MMU_EXTENDED
-		const vaddr_t newva = pmap_directbase + pa - physical_start;
-		if (newva >= KERNEL_BASE) {
+		if (newva >= KERNEL_BASE && newva < pmap_directlimit) {
+#endif
 			va = newva;
 			ok = true;
+#ifdef ARM_MMU_EXTENDED
 		}
-#else
-		va = KERNEL_BASE + pa - physical_start;
-		ok = true;
 #endif
 	}
 	KASSERT(ok_p);
@@ -7878,7 +7875,7 @@ pmap_map_poolpage(paddr_t pa)
 {
 	bool ok __diagused;
 	vaddr_t va = pmap_direct_mapped_phys(pa, &ok, 0);
-	KASSERT(ok);
+	KASSERTMSG(ok, "pa %#lx not direct mappable", pa);
 #if defined(PMAP_CACHE_VIPT) && !defined(ARM_MMU_EXTENDED)
 	if (arm_cache_prefer_mask != 0) {
 		struct vm_page * const pg = PHYS_TO_VM_PAGE(pa);
@@ -7895,12 +7892,12 @@ paddr_t
 pmap_unmap_poolpage(vaddr_t va)
 {
 	KASSERT(va >= KERNEL_BASE);
-#if defined(ARM_MMU_EXTENDED)
-	return va - pmap_directbase + physical_start;
-#else
 #ifdef PMAP_CACHE_VIVT
 	cpu_idcache_wbinv_range(va, PAGE_SIZE);
 #endif
+#if defined(KERNEL_BASE_VOFFSET)
+        return va - KERNEL_BASE_VOFFSET;
+#else
         return va - KERNEL_BASE + physical_start;
 #endif
 }

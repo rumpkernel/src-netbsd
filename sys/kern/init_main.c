@@ -1,4 +1,4 @@
-/*	$NetBSD: init_main.c,v 1.467 2015/05/06 15:57:08 hannken Exp $	*/
+/*	$NetBSD: init_main.c,v 1.472 2015/10/29 00:27:08 mrg Exp $	*/
 
 /*-
  * Copyright (c) 2008, 2009 The NetBSD Foundation, Inc.
@@ -97,7 +97,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.467 2015/05/06 15:57:08 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.472 2015/10/29 00:27:08 mrg Exp $");
 
 #include "opt_ddb.h"
 #include "opt_ipsec.h"
@@ -115,12 +115,13 @@ __KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.467 2015/05/06 15:57:08 hannken Exp 
 #include "opt_rnd_printf.h"
 #include "opt_splash.h"
 
-#if defined(SPLASHSCREEN) && defined(SPLASHSCREEN_IMAGE)
+#if defined(SPLASHSCREEN) && defined(makeoptions_SPLASHSCREEN_IMAGE)
 extern void *_binary_splash_image_start;
 extern void *_binary_splash_image_end;
 #endif
 
 #include "drvctl.h"
+#include "ether.h"
 #include "ksyms.h"
 
 #include "veriexec.h"
@@ -228,6 +229,7 @@ extern void *_binary_splash_image_end;
 #include <net/bpf.h>
 #include <net/if.h>
 #include <net/raw_cb.h>
+#include <net/if_llatbl.h>
 
 #include <prop/proplib.h>
 
@@ -565,6 +567,9 @@ main(void)
 	 */
 	s = splnet();
 	ifinit();
+#if NETHER > 0
+	lltableinit();
+#endif
 	domaininit(true);
 	if_attachdomain();
 	splx(s);
@@ -595,6 +600,8 @@ main(void)
 	machdep_init();
 
 	procinit_sysctl();
+
+	scdebug_init();
 
 	/*
 	 * Create process 1 (init(8)).  We do this now, as Unix has
@@ -733,6 +740,9 @@ configure(void)
 #if NDRVCTL > 0
 	drvctl_init();
 #endif
+
+	/* Initialize driver modules */
+	module_init_class(MODULE_CLASS_DRIVER);
 
 	userconf_init();
 	if (boothowto & RB_USERCONF)

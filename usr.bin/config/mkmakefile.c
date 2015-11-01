@@ -1,4 +1,4 @@
-/*	$NetBSD: mkmakefile.c,v 1.37 2014/12/15 15:49:25 uebayasi Exp $	*/
+/*	$NetBSD: mkmakefile.c,v 1.68 2015/09/04 10:16:35 uebayasi Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -45,7 +45,7 @@
 #endif
 
 #include <sys/cdefs.h>
-__RCSID("$NetBSD: mkmakefile.c,v 1.37 2014/12/15 15:49:25 uebayasi Exp $");
+__RCSID("$NetBSD: mkmakefile.c,v 1.68 2015/09/04 10:16:35 uebayasi Exp $");
 
 #include <sys/param.h>
 #include <ctype.h>
@@ -62,16 +62,10 @@ __RCSID("$NetBSD: mkmakefile.c,v 1.37 2014/12/15 15:49:25 uebayasi Exp $");
  * Make the Makefile.
  */
 
-static const char *srcpath(struct files *); 
-
-static const char *prefix_prologue(const char *);
-static const char *filetype_prologue(struct filetype *);
-
-
 static void emitdefs(FILE *);
-static void emitfiles(FILE *, int, int);
+static void emitallfiles(FILE *);
 
-static void emitobjs(FILE *);
+static void emitofiles(FILE *);
 static void emitallkobjs(FILE *);
 static int emitallkobjscb(const char *, void *, void *);
 static void emitattrkobjs(FILE *);
@@ -94,8 +88,7 @@ mkmakefile(void)
 	FILE *ifp, *ofp;
 	int lineno;
 	void (*fn)(FILE *);
-	char *ifname;
-	char line[BUFSIZ], buf[200];
+	char line[BUFSIZ], ifname[200];
 
 	/*
 	 * Check if conf/Makefile.kern.inc defines "build_kernel".
@@ -104,8 +97,8 @@ mkmakefile(void)
 	 * unfortunately the "build_kernel" change done around 2014 Aug didn't
 	 * bump that version.  Thus this hack.)
 	 */
-	(void)snprintf(buf, sizeof(buf), "conf/Makefile.kern.inc");
-	ifname = sourcepath(buf);
+	(void)snprintf(ifname, sizeof(ifname), "%s/conf/Makefile.kern.inc",
+	    srcdir);
 	if ((ifp = fopen(ifname, "r")) == NULL) {
 		warn("cannot read %s", ifname);
 		goto bad2;
@@ -121,17 +114,15 @@ mkmakefile(void)
 	/*
 	 * Try a makefile for the port first.
 	 */
-	(void)snprintf(buf, sizeof(buf), "arch/%s/conf/Makefile.%s",
-	    machine, machine);
-	ifname = sourcepath(buf);
+	(void)snprintf(ifname, sizeof(ifname), "%s/arch/%s/conf/Makefile.%s",
+	    srcdir, machine, machine);
 	if ((ifp = fopen(ifname, "r")) == NULL) {
 		/*
 		 * Try a makefile for the architecture second.
 		 */
-		(void)snprintf(buf, sizeof(buf), "arch/%s/conf/Makefile.%s",
-		    machinearch, machinearch);
-		free(ifname);
-		ifname = sourcepath(buf);
+		(void)snprintf(ifname, sizeof(ifname),
+		    "%s/arch/%s/conf/Makefile.%s",
+		    srcdir, machinearch, machinearch);
 		ifp = fopen(ifname, "r");
 	}
 	if (ifp == NULL) {
@@ -154,7 +145,7 @@ mkmakefile(void)
 			continue;
 		}
 		if (strcmp(line, "%OBJS\n") == 0)
-			fn = Mflag ? emitkobjs : emitobjs;
+			fn = Mflag ? emitkobjs : emitofiles;
 		else if (strcmp(line, "%CFILES\n") == 0)
 			fn = emitcfiles;
 		else if (strcmp(line, "%SFILES\n") == 0)
@@ -205,7 +196,6 @@ mkmakefile(void)
 		warn("error renaming Makefile");
 		goto bad2;
 	}
-	free(ifname);
 	return (0);
 
  wrerror:
@@ -217,7 +207,6 @@ mkmakefile(void)
 	(void)fclose(ifp);
 	/* (void)unlink("Makefile.tmp"); */
  bad2:
-	free(ifname);
 	return (1);
 }
 
@@ -268,46 +257,6 @@ emitsubs(FILE *fp, const char *line, const char *file, int lineno)
 	}
 }
 
-/*
- * Return (possibly in a static buffer) the name of the `source' for a
- * file.  If we have `options source', or if the file is marked `always
- * source', this is always the path from the `file' line; otherwise we
- * get the .o from the obj-directory.
- */
-static const char *
-srcpath(struct files *fi)
-{
-#if 1
-	/* Always have source, don't support object dirs for kernel builds. */
-	return (fi->fi_path);
-#else
-	static char buf[MAXPATHLEN];
-
-	if (have_source || (fi->fi_flags & FI_ALWAYSSRC) != 0)
-		return (fi->fi_path);
-	if (objpath == NULL) {
-		cfgerror("obj-directory not set");
-		return (NULL);
-	}
-	(void)snprintf(buf, sizeof buf, "%s/%s.o", objpath, fi->fi_base);
-	return (buf);
-#endif
-}
-
-static const char *
-filetype_prologue(struct filetype *fit)
-{
-
-	return (*fit->fit_path == '/') ? "" : "$S/";
-}
-
-static const char *
-prefix_prologue(const char *path)
-{
-
-	return (*path == '/') ? "" : "$S/";
-}
-
 static void
 emitdefs(FILE *fp)
 {
@@ -327,7 +276,6 @@ emitdefs(FILE *fp)
 		    s ? "\"" : "");
 	}
 	putc('\n', fp);
-	fprintf(fp, "PARAM=-DMAXUSERS=%d\n", maxusers);
 	fprintf(fp, "MACHINE=%s\n", machine);
 
 	const char *subdir = "";
@@ -339,41 +287,56 @@ emitdefs(FILE *fp)
 		subdir = "./";
 	}
 	fprintf(fp, "S=\t%s%s\n", subdir, srcdir);
+	if (Sflag) {
+		fprintf(fp, ".PATH: $S\n");
+		fprintf(fp, "___USE_SUFFIX_RULES___=1\n");
+	}
 	for (nv = mkoptions; nv != NULL; nv = nv->nv_next)
 		fprintf(fp, "%s=%s\n", nv->nv_name, nv->nv_str);
 }
 
 static void
-emitobjs(FILE *fp)
+emitfile(FILE *fp, struct files *fi)
 {
-	struct files *fi;
-	struct objects *oi;
+	const char *defprologue = "$S/";
+	const char *prologue, *prefix, *sep;
 
-	fputs("OBJS= \\\n", fp);
-	TAILQ_FOREACH(fi, &allfiles, fi_next) {
-		if ((fi->fi_flags & FI_SEL) == 0)
-			continue;
-		fprintf(fp, "\t%s.o \\\n", fi->fi_base);
-	}
-	TAILQ_FOREACH(oi, &allobjects, oi_next) {
-		const char *prologue, *prefix, *sep;
-
-		if ((oi->oi_flags & OI_SEL) == 0)
-			continue;
-		prologue = prefix = sep = "";
-		if (*oi->oi_path != '/') {
-			if (oi->oi_prefix != NULL) {
-				prologue = prefix_prologue(oi->oi_path);
-				prefix = oi->oi_prefix;
-				sep = "/";
-			} else {
-				prologue = filetype_prologue(&oi->oi_fit);
-			}
+	if (Sflag)
+		defprologue = "";
+	prologue = prefix = sep = "";
+	if (*fi->fi_path != '/') {
+		prologue = defprologue;
+		if (fi->fi_prefix != NULL) {
+			if (*fi->fi_prefix == '/')
+				prologue = "";
+			prefix = fi->fi_prefix;
+			sep = "/";
 		}
-		fprintf(fp, "\t%s%s%s%s \\\n", prologue, prefix, sep,
-		    oi->oi_path);
 	}
-	putc('\n', fp);
+	fprintf(fp, "%s%s%s%s", prologue, prefix, sep, fi->fi_path);
+}
+
+static void
+emitfilerel(FILE *fp, struct files *fi)
+{
+	const char *prefix, *sep;
+
+	prefix = sep = "";
+	if (*fi->fi_path != '/') {
+		if (fi->fi_prefix != NULL) {
+			prefix = fi->fi_prefix;
+			sep = "/";
+		}
+	}
+	fprintf(fp, "%s%s%s", prefix, sep, fi->fi_path);
+}
+
+static void
+emitofiles(FILE *fp)
+{
+
+	emitallfiles(fp);
+	fprintf(fp, "#%%OFILES\n");
 }
 
 static void
@@ -490,59 +453,37 @@ static void
 emitcfiles(FILE *fp)
 {
 
-	emitfiles(fp, 'c', 0);
+	emitallfiles(fp);
+	fprintf(fp, "#%%CFILES\n");
 }
 
 static void
 emitsfiles(FILE *fp)
 {
 
-	emitfiles(fp, 's', 'S');
+	emitallfiles(fp);
+	fprintf(fp, "#%%SFILES\n");
 }
 
 static void
-emitfiles(FILE *fp, int suffix, int upper_suffix)
+emitallfiles(FILE *fp)
 {
 	struct files *fi;
-	const char *fpath;
- 	struct config *cf;
- 	char swapname[100];
+	static int called;
+	int i;
+	int found = 0;
 
-	fprintf(fp, "%cFILES= \\\n", toupper(suffix));
-	TAILQ_FOREACH(fi, &allfiles, fi_next) {
-		const char *prologue, *prefix, *sep;
-
-		if ((fi->fi_flags & FI_SEL) == 0)
-			continue;
-		fpath = srcpath(fi);
-		if (fi->fi_suffix != suffix && fi->fi_suffix != upper_suffix)
-			continue;
-		prologue = prefix = sep = "";
-		if (*fi->fi_path != '/') {
-			if (fi->fi_prefix != NULL) {
-				prologue = prefix_prologue(fi->fi_prefix);
-				prefix = fi->fi_prefix;
-				sep = "/";
-			} else {
-				prologue = filetype_prologue(&fi->fi_fit);
-			}
-		}
-		fprintf(fp, "\t%s%s%s%s \\\n",
-		    prologue, prefix, sep, fpath);
+	if (called++ != 0)
+		return;
+	for (i = 0; i < (int)nselfiles; i++) {
+		fi = selfiles[i];
+		if (found++ == 0)
+			fprintf(fp, "ALLFILES= \\\n");
+		putc('\t', fp);
+		emitfilerel(fp, fi);
+		fputs(" \\\n", fp);
 	}
- 	/*
- 	 * The allfiles list does not include the configuration-specific
- 	 * C source files.  These files should be eliminated someday, but
- 	 * for now, we have to add them to ${CFILES} (and only ${CFILES}).
- 	 */
- 	if (suffix == 'c') {
- 		TAILQ_FOREACH(cf, &allcf, cf_next) {
- 			(void)snprintf(swapname, sizeof(swapname), "swap%s.c",
- 			    cf->cf_name);
- 			fprintf(fp, "\t%s \\\n", swapname);
- 		}
- 	}
-	putc('\n', fp);
+	fputc('\n', fp);
 }
 
 /*
@@ -552,32 +493,21 @@ static void
 emitrules(FILE *fp)
 {
 	struct files *fi;
-	const char *fpath;
+	int i;
+	int found = 0;
 
-	TAILQ_FOREACH(fi, &allfiles, fi_next) {
-		const char *prologue, *prefix, *sep;
-
-		if ((fi->fi_flags & FI_SEL) == 0)
+	for (i = 0; i < (int)nselfiles; i++) {
+		fi = selfiles[i];
+		if (fi->fi_mkrule == NULL)
 			continue;
-		fpath = srcpath(fi);
-		prologue = prefix = sep = "";
-		if (*fpath != '/') {
-			if (fi->fi_prefix != NULL) {
-				prologue = prefix_prologue(fi->fi_prefix);
-				prefix = fi->fi_prefix;
-				sep = "/";
-			} else {
-				prologue = filetype_prologue(&fi->fi_fit);
- 			}
-		}
-		fprintf(fp, "%s.o: %s%s%s%s\n", fi->fi_base,
-		    prologue, prefix, sep, fpath);
-		if (fi->fi_mkrule != NULL) {
-			fprintf(fp, "\t%s\n\n", fi->fi_mkrule);
-		} else {
-			fprintf(fp, "\t${NORMAL_%c}\n\n", toupper(fi->fi_suffix));
-		}
+		fprintf(fp, "%s.o: ", fi->fi_base);
+		emitfile(fp, fi);
+		putc('\n', fp);
+		fprintf(fp, "\t%s\n\n", fi->fi_mkrule);
+		found++;
 	}
+	if (found == 0)
+		fprintf(fp, "#%%RULES\n");
 }
 
 /*
@@ -589,20 +519,8 @@ static void
 emitload(FILE *fp)
 {
 	struct config *cf;
+	int found = 0;
 
-	fputs(".MAIN: all\n", fp);
-	fputs("all:", fp);
-	TAILQ_FOREACH(cf, &allcf, cf_next) {
-		fprintf(fp, " %s", cf->cf_name);
-		/*
-		 * If we generate multiple configs inside the same build directory
-		 * with a parallel build, strange things may happen, so sequentialize
-		 * them.
-		 */
-		if (cf != TAILQ_LAST(&allcf,conftq))
-			fprintf(fp, " .WAIT");
-	}
-	fputs("\n\n", fp);
 	/*
 	 * Generate the backward-compatible "build_kernel" rule if
 	 * sys/conf/Makefile.kern.inc doesn't define any (pre-2014 Aug).
@@ -610,21 +528,28 @@ emitload(FILE *fp)
 	if (has_build_kernel == 0) {
 		fprintf(fp, "build_kernel: .USE\n"
 		    "\t${SYSTEM_LD_HEAD}\n"
-		    "\t${SYSTEM_LD} swap${.TARGET}.o\n"
+		    "\t${SYSTEM_LD}%s\n"
 		    "\t${SYSTEM_LD_TAIL}\n"
-		    "\n");
+		    "\n",
+		    Sflag ? "" : " swap${.TARGET}.o");
 	}
 	/*
 	 * Generate per-kernel rules.
 	 */
 	TAILQ_FOREACH(cf, &allcf, cf_next) {
+		char swapobj[100];
+
+		if (Sflag) {
+			swapobj[0] = '\0';
+		} else {
+			(void)snprintf(swapobj, sizeof(swapobj), " swap%s.o",
+	 		    cf->cf_name);
+		}
 		fprintf(fp, "KERNELS+=%s\n", cf->cf_name);
-		fprintf(fp, "%s: ${SYSTEM_DEP} swap%s.o vers.o build_kernel\n",
-		    cf->cf_name, cf->cf_name);
-		fprintf(fp, "swap%s.o: swap%s.c\n"
-		    "\t${NORMAL_C}\n\n", cf->cf_name, cf->cf_name);
+		found = 1;
 	}
-	fputs("\n", fp);
+	if (found == 0)
+		fprintf(fp, "#%%LOAD\n");
 }
 
 /*
@@ -636,8 +561,10 @@ emitincludes(FILE *fp)
 	struct prefix *pf;
 
 	SLIST_FOREACH(pf, &allprefixes, pf_next) {
+		const char *prologue = (*pf->pf_prefix == '/') ? "" : "$S/";
+
 		fprintf(fp, "EXTRA_INCLUDES+=\t-I%s%s\n",
-		    prefix_prologue(pf->pf_prefix), pf->pf_prefix);
+		    prologue, pf->pf_prefix);
 	}
 }
 
