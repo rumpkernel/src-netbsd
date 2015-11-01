@@ -1,4 +1,4 @@
-/*	$NetBSD: pthread_types.h,v 1.14 2015/06/26 01:33:08 pooka Exp $	*/
+/*	$NetBSD: pthread_types.h,v 1.17 2015/08/27 12:30:50 pooka Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2008 The NetBSD Foundation, Inc.
@@ -35,8 +35,19 @@
 /*
  * We use the "pthread_spin_t" name internally; "pthread_spinlock_t" is the
  * POSIX spinlock object. 
+ *
+ * C++ expects to be using PTHREAD_FOO_INITIALIZER as a member initializer.
+ * This does not work for volatile types.  Since C++ does not touch the guts
+ * of those types, we do not include volatile in the C++ definitions.
  */
-typedef __cpu_simple_lock_t	pthread_spin_t;
+typedef __cpu_simple_lock_t pthread_spin_t;
+#ifdef __cplusplus
+typedef __cpu_simple_lock_nv_t __pthread_spin_t;
+#define __pthread_volatile
+#else
+typedef pthread_spin_t __pthread_spin_t;
+#define __pthread_volatile volatile
+#endif
 
 /*
  * Copied from PTQ_HEAD in pthread_queue.h
@@ -82,23 +93,6 @@ struct	__pthread_attr_st {
 	int	pta_flags;
 	void	*pta_private;
 };
-
-/*
- * C++ (namely libc++) expects to be using PTHREAD_FOO_INITIALIZER as a
- * member initializer. This does not work for volatile types. Since C++
- * does not touch the guts of those types, we redefine them as non-volatile
- */
-#ifdef __cplusplus
-# ifdef __CPU_SIMPLE_LOCK_PAD
-#  define __pthread_spin_t unsigned char
-# else
-#  define __pthread_spin_t unsigned int
-# endif
-# define __pthread_volatile
-#else /* __cplusplus */
-# define __pthread_spin_t pthread_spin_t
-# define __pthread_volatile volatile
-#endif /* __cplusplus */
 
 /*
  * ptm_owner is the actual lock field which is locked via CAS operation.
