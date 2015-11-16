@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.2 2015/10/19 16:16:33 pooka Exp $
+#	$NetBSD: Makefile,v 1.4 2015/11/16 23:27:08 pooka Exp $
 #
 
 RUMPTOP=${TOPRUMP}
@@ -9,7 +9,8 @@ LIB=	rumpdev_pci_eap
 COMMENT=Ensoniq AudioPCI driver
 
 IOCONF=	PCI_EAP.ioconf
-SRCS=	eap_at_pci.c
+RUMP_COMPONENT=ioconf
+
 SRCS+=	eap.c
 
 CPPFLAGS+= -I${RUMPTOP}/librump/rumpkern -I${RUMPTOP}/../dev

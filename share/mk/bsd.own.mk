@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.own.mk,v 1.877 2015/10/19 16:17:14 pooka Exp $
+#	$NetBSD: bsd.own.mk,v 1.880 2015/11/15 13:50:10 pooka Exp $
 
 # This needs to be before bsd.init.mk
 .if defined(BSD_MK_COMPAT_FILE)
@@ -842,11 +842,13 @@ ARM_APCS_FLAGS+=${${ACTIVE_CC} == "clang":? -target ${MACHINE_GNU_ARCH}--netbsde
 GENASSYM_CPPFLAGS+=	${${ACTIVE_CC} == "clang":? -no-integrated-as :}
 
 TARGETS+=	all clean cleandir depend dependall includes \
-		install lint obj regress tags html analyze describe
+		install lint obj regress tags html analyze describe \
+		rumpdescribe
 PHONY_NOTMAIN =	all clean cleandir depend dependall distclean includes \
 		install lint obj regress beforedepend afterdepend \
 		beforeinstall afterinstall realinstall realdepend realall \
-		html subdir-all subdir-install subdir-depend analyze describe
+		html subdir-all subdir-install subdir-depend analyze describe \
+		rumpdescribe
 .PHONY:		${PHONY_NOTMAIN}
 .NOTMAIN:	${PHONY_NOTMAIN}
 
@@ -1037,6 +1039,7 @@ ${var}?=	${${var}.${MACHINE_ARCH}:Uno}
 #
 .if ${MACHINE} == "alpha"	|| \
     ${MACHINE} == "amd64"	|| \
+    ${MACHINE} == "amiga"	|| \
     ${MACHINE} == "bebox"	|| \
     ${MACHINE} == "cats"	|| \
     ${MACHINE} == "dreamcast"	|| \
@@ -1298,7 +1301,8 @@ X11SRCDIR.xf86-input-${_i}?=	${X11SRCDIRMIT}/xf86-input-${_i}/dist
 
 .for _v in \
 	ag10e apm ark ast ati ati-kms chips cirrus crime \
-	geode glint i128 i740 igs imstt intel intel-old mach64 mga \
+	geode glint i128 i740 igs imstt intel intel-old \
+	modesetting mach64 mga \
 	neomagic newport nouveau nsc nv nvxbox openchrome pnozz \
 	r128 radeonhd rendition \
 	s3 s3virge savage siliconmotion sis suncg14 \
