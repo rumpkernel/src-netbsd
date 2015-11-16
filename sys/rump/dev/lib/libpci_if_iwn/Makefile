@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.2 2015/10/19 16:16:33 pooka Exp $
+#	$NetBSD: Makefile,v 1.4 2015/11/16 23:27:08 pooka Exp $
 #
 
 RUMPTOP=${TOPRUMP}
@@ -9,8 +9,7 @@ LIB=	rumpdev_pci_if_iwn
 COMMENT=Intel wireless device driver
 
 IOCONF=	PCI_IF_IWN.ioconf
-
-SRCS=	iwn_at_pci.c
+RUMP_COMPONENT=ioconf
 
 SRCS+=	if_iwn.c
 
