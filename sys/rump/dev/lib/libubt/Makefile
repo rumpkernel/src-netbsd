@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.4 2015/10/19 16:16:34 pooka Exp $
+#	$NetBSD: Makefile,v 1.6 2015/11/16 23:27:08 pooka Exp $
 #
 
 .PATH:	${.CURDIR}/../../../../dev/usb ${.CURDIR}/../../../../dev/bluetooth
@@ -7,10 +7,9 @@ LIB=	rumpdev_ubt
 COMMENT=USB BlueTooth driver
 
 IOCONF= UBT.ioconf
+RUMP_COMPONENT=ioconf
 
 SRCS=	ubt.c bthub.c
-
-SRCS+=	ubt_at_usb.c
 
 .include <bsd.lib.mk>
 .include <bsd.klinks.mk>
