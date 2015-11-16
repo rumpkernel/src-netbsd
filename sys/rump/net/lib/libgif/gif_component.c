@@ -1,7 +1,8 @@
-/*	$NetBSD: phy_at_mii.c,v 1.1 2014/04/04 14:18:19 pooka Exp $	*/
+/*	$NetBSD: gif_component.c,v 1.1 2015/11/04 23:57:06 knakahara Exp $	*/
 
 /*
- * Copyright (c) 2010 Antti Kantee.  All Rights Reserved.
+ * Copyright (c) 2015 Internet Initiative Japan Inc.
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,20 +27,17 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: phy_at_mii.c,v 1.1 2014/04/04 14:18:19 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gif_component.c,v 1.1 2015/11/04 23:57:06 knakahara Exp $");
 
 #include <sys/param.h>
-#include <sys/conf.h>
-#include <sys/device.h>
-#include <sys/bus.h>
 
 #include "rump_private.h"
+#include "rump_net_private.h"
 
-#include "ioconf.c"
+int gifattach(int);
 
-RUMP_COMPONENT(RUMP_COMPONENT_DEV)
+RUMP_COMPONENT(RUMP_COMPONENT_NET_IF)
 {
 
-	config_init_component(cfdriver_ioconf_phy,
-	    cfattach_ioconf_phy, cfdata_ioconf_phy);
+	gifattach(0);
 }
