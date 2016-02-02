@@ -1,4 +1,4 @@
-/*	$NetBSD: rumperrno2host.h,v 1.1 2015/09/15 14:55:55 pooka Exp $	*/
+/*	$NetBSD: rumperrno2host.h,v 1.3 2016/02/02 01:15:58 pooka Exp $	*/
 
 /*
  *	AUTOMATICALLY GENERATED.  DO NOT EDIT.
