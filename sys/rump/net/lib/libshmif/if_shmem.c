@@ -1,4 +1,4 @@
-/*	$NetBSD: if_shmem.c,v 1.63 2014/08/15 15:03:03 ozaki-r Exp $	*/
+/*	$NetBSD: if_shmem.c,v 1.66 2016/04/19 05:48:10 ozaki-r Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Antti Kantee.  All Rights Reserved.
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_shmem.c,v 1.63 2014/08/15 15:03:03 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_shmem.c,v 1.66 2016/04/19 05:48:10 ozaki-r Exp $");
 
 #include <sys/param.h>
 #include <sys/atomic.h>
@@ -47,11 +47,12 @@ __KERNEL_RCSID(0, "$NetBSD: if_shmem.c,v 1.63 2014/08/15 15:03:03 ozaki-r Exp $"
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 
+#include <rump-sys/kern.h>
+#include <rump-sys/net.h>
+
 #include <rump/rump.h>
 #include <rump/rumpuser.h>
 
-#include "rump_private.h"
-#include "rump_net_private.h"
 #include "shmif_user.h"
 
 static int shmif_clone(struct if_clone *, int);
@@ -186,8 +187,9 @@ allocif(int unit, struct shmif_sc **scp)
 	mutex_init(&sc->sc_mtx, MUTEX_DEFAULT, IPL_NONE);
 	cv_init(&sc->sc_cv, "shmifcv");
 
-	if_attach(ifp);
+	if_initialize(ifp);
 	ether_ifattach(ifp, enaddr);
+	if_register(ifp);
 
 	aprint_verbose("shmif%d: Ethernet address %s\n",
 	    unit, ether_sprintf(enaddr));
@@ -762,10 +764,14 @@ shmif_rcv(void *arg)
 		}
 
 		if (passup) {
+			int bound = curlwp->l_pflag & LP_BOUND;
 			ifp->if_ipackets++;
 			KERNEL_LOCK(1, NULL);
+			/* Prevent LWP migrations between CPUs for psref(9) */
+			curlwp->l_pflag |= LP_BOUND;
 			bpf_mtap(ifp, m);
-			ifp->if_input(ifp, m);
+			if_input(ifp, m);
+			curlwp->l_pflag ^= bound ^ LP_BOUND;
 			KERNEL_UNLOCK_ONE(NULL);
 			m = NULL;
 		}

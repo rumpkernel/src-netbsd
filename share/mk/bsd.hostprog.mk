@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.hostprog.mk,v 1.74 2014/12/01 01:34:30 erh Exp $
+#	$NetBSD: bsd.hostprog.mk,v 1.76 2016/01/01 17:06:21 christos Exp $
 #	@(#)bsd.prog.mk	8.2 (Berkeley) 4/2/94
 
 .include <bsd.init.mk>
@@ -12,11 +12,11 @@ LIBATF_CXX?=	/usr/lib/libatf-c++.a
 LIBBLUETOOTH?=	/usr/lib/libbluetooth.a
 LIBBZ2?=	/usr/lib/libbz2.a
 LIBC?=		/usr/lib/libc.a
-LIBC_PIC?=	/usr/lib/libc_pic.a
-LIBC_SO?=	/usr/lib/libc.so
 LIBCOMPAT?=	/usr/lib/libcompat.a
 LIBCRYPT?=	/usr/lib/libcrypt.a
 LIBCURSES?=	/usr/lib/libcurses.a
+LIBC_PIC?=	/usr/lib/libc_pic.a
+LIBC_SO?=	/usr/lib/libc.so
 LIBDBM?=	/usr/lib/libdbm.a
 LIBDES?=	/usr/lib/libdes.a
 LIBEDIT?=	/usr/lib/libedit.a
@@ -41,11 +41,14 @@ LIBMP?=		/usr/lib/libmp.a
 LIBNTP?=	/usr/lib/libntp.a
 LIBOBJC?=	/usr/lib/libobjc.a
 LIBP2K?=	/usr/lib/libp2k.a
+LIBPANEL?=	/usr/lib/libpanel.a
 LIBPC?=		/usr/lib/libpc.a
 LIBPCAP?=	/usr/lib/libpcap.a
 LIBPCI?=	/usr/lib/libpci.a
 LIBPLOT?=	/usr/lib/libplot.a
 LIBPOSIX?=	/usr/lib/libposix.a
+LIBPTHREAD?=    /usr/lib/libpthread.a
+LIBPTHREAD_DBG?=/usr/lib/libpthread_dbg.a
 LIBPUFFS?=	/usr/lib/libpuffs.a
 LIBQUOTA?=	/usr/lib/libquota.a
 LIBRESOLV?=	/usr/lib/libresolv.a
@@ -61,9 +64,9 @@ LIBSSP?=	/usr/lib/libssp.a
 LIBSTDCXX?=	/usr/lib/libstdc++.a
 LIBSUPCXX?=	/usr/lib/libsupc++.a
 LIBTERMINFO?=	/usr/lib/libterminfo.a
+LIBUKFS?=	/usr/lib/libukfs.a
 LIBUTIL?=	/usr/lib/libutil.a
 LIBWRAP?=	/usr/lib/libwrap.a
-LIBUKFS?=	/usr/lib/libukfs.a
 LIBY?=		/usr/lib/liby.a
 LIBZ?=		/usr/lib/libz.a
 

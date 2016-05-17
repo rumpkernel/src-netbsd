@@ -1,4 +1,4 @@
-/*	$NetBSD: arch.c,v 1.64 2015/10/11 04:51:24 sjg Exp $	*/
+/*	$NetBSD: arch.c,v 1.69 2016/04/06 09:57:00 gson Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -69,14 +69,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: arch.c,v 1.64 2015/10/11 04:51:24 sjg Exp $";
+static char rcsid[] = "$NetBSD: arch.c,v 1.69 2016/04/06 09:57:00 gson Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)arch.c	8.2 (Berkeley) 1/2/94";
 #else
-__RCSID("$NetBSD: arch.c,v 1.64 2015/10/11 04:51:24 sjg Exp $");
+__RCSID("$NetBSD: arch.c,v 1.69 2016/04/06 09:57:00 gson Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -136,7 +136,6 @@ __RCSID("$NetBSD: arch.c,v 1.64 2015/10/11 04:51:24 sjg Exp $");
 
 #include    <ar.h>
 #include    <ctype.h>
-#include    <fcntl.h>
 #include    <stdio.h>
 #include    <stdlib.h>
 #include    <utime.h>
@@ -204,8 +203,7 @@ ArchFree(void *ap)
 	free(Hash_GetValue(entry));
 
     free(a->name);
-    if (a->fnametab)
-	free(a->fnametab);
+    free(a->fnametab);
     Hash_DeleteTable(&a->members);
     free(a);
 }
@@ -261,9 +259,10 @@ Arch_ParseArchive(char **linePtr, Lst nodeLst, GNode *ctxt)
 	    void	*freeIt;
 	    char	*result;
 
-	    result = Var_Parse(cp, ctxt, TRUE, TRUE, &length, &freeIt);
-	    if (freeIt)
-		free(freeIt);
+	    result = Var_Parse(cp, ctxt, VARF_UNDEFERR|VARF_WANTRES,
+			       &length, &freeIt);
+	    free(freeIt);
+
 	    if (result == var_Error) {
 		return(FAILURE);
 	    } else {
@@ -276,7 +275,7 @@ Arch_ParseArchive(char **linePtr, Lst nodeLst, GNode *ctxt)
 
     *cp++ = '\0';
     if (subLibName) {
-	libName = Var_Subst(NULL, libName, ctxt, TRUE, TRUE);
+	libName = Var_Subst(NULL, libName, ctxt, VARF_UNDEFERR|VARF_WANTRES);
     }
 
 
@@ -302,9 +301,10 @@ Arch_ParseArchive(char **linePtr, Lst nodeLst, GNode *ctxt)
 		void	*freeIt;
 		char	*result;
 
-		result = Var_Parse(cp, ctxt, TRUE, TRUE, &length, &freeIt);
-		if (freeIt)
-		    free(freeIt);
+		result = Var_Parse(cp, ctxt, VARF_UNDEFERR|VARF_WANTRES,
+				   &length, &freeIt);
+		free(freeIt);
+
 		if (result == var_Error) {
 		    return(FAILURE);
 		} else {
@@ -355,7 +355,8 @@ Arch_ParseArchive(char **linePtr, Lst nodeLst, GNode *ctxt)
 	    char    *oldMemName = memName;
 	    size_t   sz;
 
-	    memName = Var_Subst(NULL, memName, ctxt, TRUE, TRUE);
+	    memName = Var_Subst(NULL, memName, ctxt,
+				VARF_UNDEFERR|VARF_WANTRES);
 
 	    /*
 	     * Now form an archive spec and recurse to deal with nested
@@ -711,8 +712,7 @@ ArchStatMember(char *archive, char *member, Boolean hash)
 badarch:
     fclose(arch);
     Hash_DeleteTable(&ar->members);
-    if (ar->fnametab)
-	free(ar->fnametab);
+    free(ar->fnametab);
     free(ar);
     return NULL;
 }
@@ -785,7 +785,7 @@ ArchSVR4Entry(Arch *ar, char *name, size_t size, FILE *arch)
 	    }
 	if (DEBUG(ARCH)) {
 	    fprintf(debug_file, "Found svr4 archive name table with %lu entries\n",
-	            (u_long)entry);
+	            (unsigned long)entry);
 	}
 	return 0;
     }
@@ -803,7 +803,7 @@ ArchSVR4Entry(Arch *ar, char *name, size_t size, FILE *arch)
     if (entry >= ar->fnamesize) {
 	if (DEBUG(ARCH)) {
 	    fprintf(debug_file, "SVR4 entry offset %s is greater than %lu\n",
-		   name, (u_long)ar->fnamesize);
+		   name, (unsigned long)ar->fnamesize);
 	}
 	return 2;
     }
@@ -997,10 +997,10 @@ Arch_Touch(GNode *gn)
     arch = ArchFindMember(Var_Value(ARCHIVE, gn, &p1),
 			  Var_Value(MEMBER, gn, &p2),
 			  &arh, "r+");
-    if (p1)
-	free(p1);
-    if (p2)
-	free(p2);
+
+    free(p1);
+    free(p2);
+
     snprintf(arh.ar_date, sizeof(arh.ar_date), "%-12ld", (long) now);
 
     if (arch != NULL) {
@@ -1079,10 +1079,9 @@ Arch_MTime(GNode *gn)
     arhPtr = ArchStatMember(Var_Value(ARCHIVE, gn, &p1),
 			     Var_Value(MEMBER, gn, &p2),
 			     TRUE);
-    if (p1)
-	free(p1);
-    if (p2)
-	free(p2);
+
+    free(p1);
+    free(p2);
 
     if (arhPtr != NULL) {
 	modTime = (time_t)strtol(arhPtr->ar_date, NULL, 10);

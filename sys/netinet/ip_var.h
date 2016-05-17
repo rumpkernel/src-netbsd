@@ -1,4 +1,4 @@
-/*	$NetBSD: ip_var.h,v 1.108 2015/06/04 09:20:00 ozaki-r Exp $	*/
+/*	$NetBSD: ip_var.h,v 1.112 2016/04/28 00:16:56 ozaki-r Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -210,7 +210,8 @@ void	 ip_drainstub(void);
 void	 ip_freemoptions(struct ip_moptions *);
 int	 ip_optcopy(struct ip *, struct ip *);
 u_int	 ip_optlen(struct inpcb *);
-int	 ip_output(struct mbuf *, ...);
+int	 ip_output(struct mbuf *, struct mbuf *, struct route *, int,
+	    struct ip_moptions *, struct socket *);
 int	 ip_fragment(struct mbuf *, struct ifnet *, u_long);
 
 void	 ip_reass_init(void);
@@ -230,15 +231,15 @@ void *	 rip_ctlinput(int, const struct sockaddr *, void *);
 int	 rip_ctloutput(int, struct socket *, struct sockopt *);
 void	 rip_init(void);
 void	 rip_input(struct mbuf *, ...);
-int	 rip_output(struct mbuf *, ...);
+int	 rip_output(struct mbuf *, struct inpcb *);
 int	 rip_usrreq(struct socket *,
 	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct lwp *);
 
 int	ip_setmoptions(struct ip_moptions **, const struct sockopt *sopt);
 int	ip_getmoptions(struct ip_moptions *, struct sockopt *sopt);
 
-int	ip_hresolv_output(struct ifnet * const, struct mbuf * const,
-	    const struct sockaddr * const, struct rtentry *);
+int	ip_if_output(struct ifnet * const, struct mbuf * const,
+	    const struct sockaddr * const, const struct rtentry *);
 
 /* IP Flow interface. */
 void	ipflow_init(void);

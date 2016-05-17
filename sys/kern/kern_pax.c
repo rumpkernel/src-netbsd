@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_pax.c,v 1.33 2015/10/09 02:00:59 christos Exp $	*/
+/*	$NetBSD: kern_pax.c,v 1.43 2016/05/08 20:01:56 christos Exp $	*/
 
 /*
  * Copyright (c) 2015 The NetBSD Foundation, Inc.
@@ -57,7 +57,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_pax.c,v 1.33 2015/10/09 02:00:59 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_pax.c,v 1.43 2016/05/08 20:01:56 christos Exp $");
 
 #include "opt_pax.h"
 
@@ -68,15 +68,19 @@ __KERNEL_RCSID(0, "$NetBSD: kern_pax.c,v 1.33 2015/10/09 02:00:59 christos Exp $
 #include <sys/pax.h>
 #include <sys/sysctl.h>
 #include <sys/kmem.h>
+#include <sys/mman.h>
 #include <sys/fileassoc.h>
 #include <sys/syslog.h>
 #include <sys/vnode.h>
 #include <sys/queue.h>
+#include <sys/bitops.h>
 #include <sys/kauth.h>
 #include <sys/cprng.h>
 
 #ifdef PAX_ASLR_DEBUG
-#define PAX_DPRINTF(_fmt, args...)	uprintf("%s: " _fmt "\n", __func__, ##args)
+#define PAX_DPRINTF(_fmt, args...) \
+	do if (pax_aslr_debug) uprintf("%s: " _fmt "\n", __func__, ##args); \
+	while (/*CONSTCOND*/0)
 #else
 #define PAX_DPRINTF(_fmt, args...)	do {} while (/*CONSTCOND*/0)
 #endif
@@ -93,11 +97,17 @@ int pax_aslr_global = PAX_ASLR;
 #ifndef PAX_ASLR_DELTA_MMAP_LEN
 #define PAX_ASLR_DELTA_MMAP_LEN		((sizeof(void *) * NBBY) / 2)
 #endif
+#ifndef PAX_ASLR_DELTA_MMAP_LEN32
+#define PAX_ASLR_DELTA_MMAP_LEN32	((sizeof(uint32_t) * NBBY) / 2)
+#endif
 #ifndef PAX_ASLR_DELTA_STACK_LSB
 #define PAX_ASLR_DELTA_STACK_LSB	PGSHIFT
 #endif
 #ifndef PAX_ASLR_DELTA_STACK_LEN
-#define PAX_ASLR_DELTA_STACK_LEN 	12
+#define PAX_ASLR_DELTA_STACK_LEN 	PAX_ASLR_DELTA_MMAP_LEN
+#endif
+#ifndef PAX_ASLR_DELTA_STACK_LEN32
+#define PAX_ASLR_DELTA_STACK_LEN32 	PAX_ASLR_DELTA_MMAP_LEN32
 #endif
 
 static bool pax_aslr_elf_flags_active(uint32_t);
@@ -108,6 +118,9 @@ static int pax_mprotect_enabled = 1;
 static int pax_mprotect_global = PAX_MPROTECT;
 static bool pax_mprotect_elf_flags_active(uint32_t);
 #endif /* PAX_MPROTECT */
+#ifdef PAX_MPROTECT_DEBUG
+int pax_mprotect_debug;
+#endif
 
 #ifdef PAX_SEGVGUARD
 #ifndef PAX_SEGVGUARD_EXPIRY
@@ -118,6 +131,18 @@ static bool pax_mprotect_elf_flags_active(uint32_t);
 #endif
 #ifndef	PAX_SEGVGUARD_MAXCRASHES
 #define	PAX_SEGVGUARD_MAXCRASHES	5
+#endif
+
+#ifdef PAX_ASLR_DEBUG
+int pax_aslr_debug;
+/* flag set means disable */
+int pax_aslr_flags;
+uint32_t pax_aslr_rand;
+#define PAX_ASLR_STACK		0x01
+#define PAX_ASLR_STACK_GAP	0x02
+#define PAX_ASLR_MMAP		0x04
+#define PAX_ASLR_EXEC_OFFSET	0x08
+#define PAX_ASLR_FIXED		0x10
 #endif
 
 static int pax_segvguard_enabled = 1;
@@ -179,6 +204,14 @@ SYSCTL_SETUP(sysctl_security_pax_setup, "sysctl security.pax setup")
 				    "all processes."),
 		       NULL, 0, &pax_mprotect_global, 0,
 		       CTL_CREATE, CTL_EOL);
+#ifdef PAX_MPROTECT_DEBUG
+	sysctl_createv(clog, 0, &rnode, NULL,
+		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
+		       CTLTYPE_INT, "debug",
+		       SYSCTL_DESCR("print mprotect changes."),
+		       NULL, 0, &pax_mprotect_debug, 0,
+		       CTL_CREATE, CTL_EOL);
+#endif
 #endif /* PAX_MPROTECT */
 
 #ifdef PAX_SEGVGUARD
@@ -242,6 +275,26 @@ SYSCTL_SETUP(sysctl_security_pax_setup, "sysctl security.pax setup")
 				    "specified, apply to all processes."),
 		       NULL, 0, &pax_aslr_global, 0,
 		       CTL_CREATE, CTL_EOL);
+#ifdef PAX_ASLR_DEBUG
+	sysctl_createv(clog, 0, &rnode, NULL,
+		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
+		       CTLTYPE_INT, "debug",
+		       SYSCTL_DESCR("Pring ASLR selected addresses."),
+		       NULL, 0, &pax_aslr_debug, 0,
+		       CTL_CREATE, CTL_EOL);
+	sysctl_createv(clog, 0, &rnode, NULL,
+		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
+		       CTLTYPE_INT, "flags",
+		       SYSCTL_DESCR("Disable/Enable select ASLR features."),
+		       NULL, 0, &pax_aslr_flags, 0,
+		       CTL_CREATE, CTL_EOL);
+	sysctl_createv(clog, 0, &rnode, NULL,
+		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
+		       CTLTYPE_INT, "rand",
+		       SYSCTL_DESCR("Use the given fixed random value"),
+		       NULL, 0, &pax_aslr_rand, 0,
+		       CTL_CREATE, CTL_EOL);
+#endif
 	sysctl_createv(clog, 0, &rnode, NULL,
 		       CTLFLAG_PERMANENT|CTLFLAG_IMMEDIATE,
 		       CTLTYPE_INT, "mmap_len",
@@ -336,7 +389,11 @@ pax_mprotect_elf_flags_active(uint32_t flags)
 }
 
 void
-pax_mprotect(struct lwp *l, vm_prot_t *prot, vm_prot_t *maxprot)
+pax_mprotect_adjust(
+#ifdef PAX_MPROTECT_DEBUG
+    const char *file, size_t line,
+#endif
+    struct lwp *l, vm_prot_t *prot, vm_prot_t *maxprot)
 {
 	uint32_t flags;
 
@@ -345,9 +402,25 @@ pax_mprotect(struct lwp *l, vm_prot_t *prot, vm_prot_t *maxprot)
 		return;
 
 	if ((*prot & (VM_PROT_WRITE|VM_PROT_EXECUTE)) != VM_PROT_EXECUTE) {
+#ifdef PAX_MPROTECT_DEBUG
+		struct proc *p = l->l_proc;
+		if (pax_mprotect_debug) {
+			printf("%s: %s,%zu: %d.%d (%s): -x\n",
+			    __func__, file, line,
+			    p->p_pid, l->l_lid, p->p_comm);
+		}
+#endif
 		*prot &= ~VM_PROT_EXECUTE;
 		*maxprot &= ~VM_PROT_EXECUTE;
 	} else {
+#ifdef PAX_MPROTECT_DEBUG
+		struct proc *p = l->l_proc;
+		if (pax_mprotect_debug) {
+			printf("%s: %s,%zu: %d.%d (%s): -w\n",
+			    __func__, file, line,
+			    p->p_pid, l->l_lid, p->p_comm);
+		}
+#endif
 		*prot &= ~VM_PROT_WRITE;
 		*maxprot &= ~VM_PROT_WRITE;
 	}
@@ -384,13 +457,28 @@ pax_aslr_active(struct lwp *l)
 }
 
 void
-pax_aslr_init_vm(struct lwp *l, struct vmspace *vm)
+pax_aslr_init_vm(struct lwp *l, struct vmspace *vm, struct exec_package *ep)
 {
 	if (!pax_aslr_active(l))
 		return;
 
-	vm->vm_aslr_delta_mmap = PAX_ASLR_DELTA(cprng_fast32(),
-	    PAX_ASLR_DELTA_MMAP_LSB, PAX_ASLR_DELTA_MMAP_LEN);
+#ifdef PAX_ASLR_DEBUG
+	if (pax_aslr_flags & PAX_ASLR_MMAP)
+		return;
+#endif
+
+	uint32_t len = (ep->ep_flags & EXEC_32) ?
+	    PAX_ASLR_DELTA_MMAP_LEN32 : PAX_ASLR_DELTA_MMAP_LEN;
+
+	uint32_t rand = cprng_fast32();
+#ifdef PAX_ASLR_DEBUG
+	if (pax_aslr_flags & PAX_ASLR_FIXED)
+		rand = pax_aslr_rand;
+#endif
+	vm->vm_aslr_delta_mmap = PAX_ASLR_DELTA(rand,
+	    PAX_ASLR_DELTA_MMAP_LSB, len);
+
+	PAX_DPRINTF("delta_mmap=%#jx/%u", vm->vm_aslr_delta_mmap, len);
 }
 
 void
@@ -398,19 +486,64 @@ pax_aslr_mmap(struct lwp *l, vaddr_t *addr, vaddr_t orig_addr, int f)
 {
 	if (!pax_aslr_active(l))
 		return;
+#ifdef PAX_ASLR_DEBUG
+	char buf[256];
+
+	if (pax_aslr_flags & PAX_ASLR_MMAP)
+		return;
+
+	if (pax_aslr_debug)
+		snprintb(buf, sizeof(buf), MAP_FMT, f);
+	else
+		buf[0] = '\0';
+#endif
 
 	if (!(f & MAP_FIXED) && ((orig_addr == 0) || !(f & MAP_ANON))) {
-		PAX_DPRINTF("applying to 0x%lx orig_addr=0x%lx f=%x",
-		    (unsigned long)*addr, (unsigned long)orig_addr, f);
+		PAX_DPRINTF("applying to %#jx orig_addr=%#jx f=%s",
+		    (uintmax_t)*addr, (uintmax_t)orig_addr, buf);
 		if (!(l->l_proc->p_vmspace->vm_map.flags & VM_MAP_TOPDOWN))
 			*addr += l->l_proc->p_vmspace->vm_aslr_delta_mmap;
 		else
 			*addr -= l->l_proc->p_vmspace->vm_aslr_delta_mmap;
-		PAX_DPRINTF("result 0x%lx", *addr);
+		PAX_DPRINTF("result %#jx", (uintmax_t)*addr);
 	} else {
-		PAX_DPRINTF("not applying to 0x%lx orig_addr=0x%lx f=%x",
-		    (unsigned long)*addr, (unsigned long)orig_addr, f);
+		PAX_DPRINTF("not applying to %#jx orig_addr=%#jx f=%s",
+		    (uintmax_t)*addr, (uintmax_t)orig_addr, buf);
 	}
+}
+
+#define	PAX_TRUNC(a, b)	((a) & ~((b) - 1))
+vaddr_t
+pax_aslr_exec_offset(struct exec_package *epp, vaddr_t align)
+{
+	size_t pax_align, l2, delta;
+	uint32_t rand;
+	vaddr_t offset;
+
+	if (!pax_aslr_epp_active(epp))
+		goto out;
+
+#ifdef PAX_ASLR_DEBUG
+	if (pax_aslr_flags & PAX_ASLR_EXEC_OFFSET)
+		goto out;
+#endif
+
+	pax_align = align == 0 ? PGSHIFT : align;
+	l2 = ilog2(pax_align);
+
+	rand = cprng_fast32();
+#ifdef PAX_ASLR_DEBUG
+	if (pax_aslr_flags & PAX_ASLR_FIXED)
+		rand = pax_aslr_rand;
+#endif
+	delta = PAX_ASLR_DELTA(rand, l2, PAX_ASLR_DELTA_EXEC_LEN);
+	offset = PAX_TRUNC(delta, pax_align) + PAGE_SIZE;
+
+	PAX_DPRINTF("rand=%#x l2=%#zx pax_align=%#zx delta=%#zx offset=%#jx",
+	    rand, l2, pax_align, delta, (uintmax_t)offset);
+	return offset;
+out:
+	return MAX(align, PAGE_SIZE);
 }
 
 void
@@ -418,16 +551,48 @@ pax_aslr_stack(struct exec_package *epp, u_long *max_stack_size)
 {
 	if (!pax_aslr_epp_active(epp))
 		return;
+#ifdef PAX_ASLR_DEBUG
+	if (pax_aslr_flags & PAX_ASLR_STACK)
+		return;
+#endif
 
-	u_long d = PAX_ASLR_DELTA(cprng_fast32(),
-	    PAX_ASLR_DELTA_STACK_LSB,
-	    PAX_ASLR_DELTA_STACK_LEN);
-	PAX_DPRINTF("stack 0x%lx d=0x%lx 0x%lx",
-	    epp->ep_minsaddr, d, epp->ep_minsaddr - d);
-	epp->ep_minsaddr -= d;
+	uint32_t len = (epp->ep_flags & EXEC_32) ?
+	    PAX_ASLR_DELTA_STACK_LEN32 : PAX_ASLR_DELTA_STACK_LEN;
+	uint32_t rand = cprng_fast32();
+#ifdef PAX_ASLR_DEBUG
+	if (pax_aslr_flags & PAX_ASLR_FIXED)
+		rand = pax_aslr_rand;
+#endif
+	u_long d = PAX_ASLR_DELTA(rand, PAX_ASLR_DELTA_STACK_LSB, len);
+	d &= (*max_stack_size / 4) - 1;
+ 	u_long newminsaddr = (u_long)STACK_GROW(epp->ep_minsaddr, d);
+	PAX_DPRINTF("old minsaddr=%#jx delta=%#lx new minsaddr=%#lx",
+	    (uintmax_t)epp->ep_minsaddr, d, newminsaddr);
+	epp->ep_minsaddr = (vaddr_t)newminsaddr;
 	*max_stack_size -= d;
 	if (epp->ep_ssize > *max_stack_size)
 		epp->ep_ssize = *max_stack_size;
+}
+
+uint32_t
+pax_aslr_stack_gap(struct exec_package *epp)
+{
+	if (!pax_aslr_epp_active(epp))
+		return 0;
+
+#ifdef PAX_ASLR_DEBUG
+	if (pax_aslr_flags & PAX_ASLR_STACK_GAP)
+		return 0;
+#endif
+
+	uint32_t rand = cprng_fast32();
+#ifdef PAX_ASLR_DEBUG
+	if (pax_aslr_flags & PAX_ASLR_FIXED)
+		rand = pax_aslr_rand;
+#endif
+	rand %= PAGE_SIZE;
+	PAX_DPRINTF("stack gap=%#x\n", rand);
+	return rand;
 }
 #endif /* PAX_ASLR */
 

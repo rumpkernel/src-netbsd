@@ -1,4 +1,4 @@
-/*	$NetBSD: quote_calc.y,v 1.1.1.1 2013/04/06 14:45:30 christos Exp $	*/
+/*	$NetBSD: quote_calc.y,v 1.1.1.3 2016/01/09 21:59:45 christos Exp $	*/
 
 %{
 # include <stdio.h>

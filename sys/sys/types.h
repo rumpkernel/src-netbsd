@@ -1,4 +1,4 @@
-/*	$NetBSD: types.h,v 1.95 2015/08/27 12:30:51 pooka Exp $	*/
+/*	$NetBSD: types.h,v 1.97 2016/04/03 02:08:42 christos Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1991, 1993, 1994
@@ -162,7 +162,6 @@ typedef	__gid_t		gid_t;		/* group id */
 #define	gid_t		__gid_t
 #endif
 
-typedef	int		idtype_t;	/* type of the id */
 typedef	uint32_t	id_t;		/* group id, process id or user id */
 typedef	uint64_t	ino_t;		/* inode number */
 typedef	long		key_t;		/* IPC key (for Sys V IPC) */
@@ -260,9 +259,9 @@ typedef int32_t __devmajor_t, __devminor_t;
 #define	major(x)	((devmajor_t)(((uint32_t)(x) & 0x000fff00) >>  8))
 #define	minor(x)	((devminor_t)((((uint32_t)(x) & 0xfff00000) >> 12) | \
 				   (((uint32_t)(x) & 0x000000ff) >>  0)))
-#define	makedev(x,y)	((dev_t)((((x) <<  8) & 0x000fff00) | \
-				 (((y) << 12) & 0xfff00000) | \
-				 (((y) <<  0) & 0x000000ff)))
+#define	makedev(x,y)	((dev_t)((((dev_t)(x) <<  8) & 0x000fff00U) | \
+				 (((dev_t)(y) << 12) & 0xfff00000U) | \
+				 (((dev_t)(y) <<  0) & 0x000000ffU)))
 #endif
 
 #ifdef	_BSD_CLOCK_T_

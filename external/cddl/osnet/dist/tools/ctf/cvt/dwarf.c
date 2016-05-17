@@ -181,14 +181,17 @@ tdesc_size(tdesc_t *tdp)
 		switch (tdp->t_type) {
 		case INTRINSIC:
 		case POINTER:
+		case REFERENCE:
 		case ARRAY:
 		case FUNCTION:
 		case STRUCT:
 		case UNION:
+		case CLASS:
 		case ENUM:
 			return (tdp->t_size);
 
 		case FORWARD:
+			debug(3, "type is forward for %#x\n", tdp->t_id);
 			return (0);
 
 		case TYPEDEF:
@@ -199,10 +202,11 @@ tdesc_size(tdesc_t *tdp)
 			continue;
 
 		case 0: /* not yet defined */
+			debug(3, "type is undefined for %#x\n", tdp->t_id);
 			return (0);
 
 		default:
-			terminate("tdp %u: tdesc_size on unknown type %d\n",
+			terminate("tdp %u: tdesc_size on unknown type %#x\n",
 			    tdp->t_id, tdp->t_type);
 		}
 	}
@@ -220,11 +224,14 @@ tdesc_bitsize(tdesc_t *tdp)
 		case FUNCTION:
 		case STRUCT:
 		case UNION:
+		case CLASS:
 		case ENUM:
 		case POINTER:
+		case REFERENCE:
 			return (tdp->t_size * NBBY);
 
 		case FORWARD:
+			debug(3, "bitsize is forward for %d\n", tdp->t_id);
 			return (0);
 
 		case TYPEDEF:
@@ -235,6 +242,7 @@ tdesc_bitsize(tdesc_t *tdp)
 			continue;
 
 		case 0: /* not yet defined */
+			debug(3, "bitsize is undefined for %d\n", tdp->t_id);
 			return (0);
 
 		default:
@@ -664,10 +672,12 @@ tdesc_array_create(dwarf_t *dw, Dwarf_Die dim, tdesc_t *arrtdp,
 
 	if ((dim2 = die_sibling(dw, dim)) == NULL) {
 		ctdp = arrtdp;
+		debug(3, "die %ju: sibling type %#x for dimension\n",
+		    (uintmax_t)die_off(dw, dim), ctdp->t_id);
 	} else if (die_tag(dw, dim2) == DW_TAG_subrange_type) {
 		ctdp = xcalloc(sizeof (tdesc_t));
 		ctdp->t_id = mfgtid_next(dw);
-		debug(3, "die %ju: creating new type %u for sub-dimension\n",
+		debug(3, "die %ju: creating new type %#x for sub-dimension\n",
 		    (uintmax_t)die_off(dw, dim2), ctdp->t_id);
 		tdesc_array_create(dw, dim2, arrtdp, ctdp);
 	} else {
@@ -693,6 +703,10 @@ tdesc_array_create(dwarf_t *dw, Dwarf_Die dim, tdesc_t *arrtdp,
 		ar->ad_nelems = uval + 1;
 	else if (die_signed(dw, dim, DW_AT_upper_bound, &sval, 0))
 		ar->ad_nelems = sval + 1;
+	else if (die_unsigned(dw, dim, DW_AT_count, &uval, 0))
+		ar->ad_nelems = uval + 1;
+	else if (die_signed(dw, dim, DW_AT_count, &sval, 0))
+		ar->ad_nelems = sval + 1;
 	else
 		ar->ad_nelems = 0;
 
@@ -702,6 +716,8 @@ tdesc_array_create(dwarf_t *dw, Dwarf_Die dim, tdesc_t *arrtdp,
 	 */
 	ar->ad_idxtype = tdesc_intr_long(dw);
 	ar->ad_contents = ctdp;
+	debug(3, "die %ju: hi mom sibling type %#x for dimension\n",
+	    (uintmax_t)die_off(dw, dim), ctdp->t_id);
 
 	if (ar->ad_contents->t_size != 0) {
 		dimtdp->t_size = ar->ad_contents->t_size * ar->ad_nelems;
@@ -728,6 +744,17 @@ die_array_create(dwarf_t *dw, Dwarf_Die arr, Dwarf_Off off, tdesc_t *tdp)
 	    die_tag(dw, dim) != DW_TAG_subrange_type)
 		terminate("die %ju: failed to retrieve array bounds\n",
 		    (uintmax_t)off);
+
+	if (arrtdp->t_type == 0) {
+		/*
+		 * Add the die that contains the type of the array elements
+		 * to the the ones we process; XXX: no public API for that?
+		 */
+		extern Dwarf_Die _dwarf_die_find(Dwarf_Die, Dwarf_Unsigned);
+		Dwarf_Die elem = _dwarf_die_find(arr, arrtdp->t_id);
+		if (elem != NULL)
+		    die_create_one(dw, elem);
+	}
 
 	tdesc_array_create(dw, dim, arrtdp, tdp);
 
@@ -775,11 +802,13 @@ die_array_resolve(tdesc_t *tdp, tdesc_t **tdpp __unused, void *private)
 	if (tdp->t_flags & TDESC_F_RESOLVED)
 		return (1);
 
-	debug(3, "trying to resolve array %d (cont %d)\n", tdp->t_id,
-	    tdp->t_ardef->ad_contents->t_id);
+	debug(3, "trying to resolve array %#x (cont %#x/%d)\n", tdp->t_id,
+	    tdp->t_ardef->ad_contents->t_id,
+	    tdp->t_ardef->ad_contents->t_size);
 
-	if ((sz = tdesc_size(tdp->t_ardef->ad_contents)) == 0) {
-		debug(3, "unable to resolve array %s (%d) contents %d\n",
+	if ((sz = tdesc_size(tdp->t_ardef->ad_contents)) == 0 &&
+	    (tdp->t_ardef->ad_contents->t_flags & TDESC_F_RESOLVED) == 0) {
+		debug(3, "unable to resolve array %s (%#x) contents %#x\n",
 		    tdesc_name(tdp), tdp->t_id,
 		    tdp->t_ardef->ad_contents->t_id);
 
@@ -790,7 +819,7 @@ die_array_resolve(tdesc_t *tdp, tdesc_t **tdpp __unused, void *private)
 	tdp->t_size = sz * tdp->t_ardef->ad_nelems;
 	tdp->t_flags |= TDESC_F_RESOLVED;
 
-	debug(3, "resolved array %d: %u bytes\n", tdp->t_id, tdp->t_size);
+	debug(3, "resolved array %#x: %u bytes\n", tdp->t_id, tdp->t_size);
 
 	return (1);
 }
@@ -961,9 +990,9 @@ die_sou_create(dwarf_t *dw, Dwarf_Die str, Dwarf_Off off, tdesc_t *tdp,
 
 	tdp->t_type = (die_isdecl(dw, str) ? FORWARD : type);
 
-	debug(3, "die %ju: creating %s %s\n", (uintmax_t)off,
+	debug(3, "die %ju: creating %s %s <%d>\n", (uintmax_t)off,
 	    (tdp->t_type == FORWARD ? "forward decl" : typename),
-	    tdesc_name(tdp));
+	    tdesc_name(tdp), tdp->t_id);
 
 	if (tdp->t_type == FORWARD) {
 		hash_add(dw->dw_fwdhash, tdp);
@@ -1011,7 +1040,7 @@ die_sou_create(dwarf_t *dw, Dwarf_Die str, Dwarf_Off off, tdesc_t *tdp,
 			ml->ml_name = NULL;
 
 		ml->ml_type = die_lookup_pass1(dw, mem, DW_AT_type);
-		debug(3, "die_sou_create(): ml_type = %p t_id = %d\n",
+		debug(3, "die_sou_create(): ml_type = %p t_id = %#x\n",
 		    ml->ml_type, ml->ml_type->t_id);
 
 		if (die_mem_offset(dw, mem, DW_AT_data_member_location,
@@ -1135,6 +1164,12 @@ die_union_create(dwarf_t *dw, Dwarf_Die die, Dwarf_Off off, tdesc_t *tdp)
 	die_sou_create(dw, die, off, tdp, UNION, "union");
 }
 
+static void
+die_class_create(dwarf_t *dw, Dwarf_Die die, Dwarf_Off off, tdesc_t *tdp)
+{
+	die_sou_create(dw, die, off, tdp, CLASS, "class");
+}
+
 /*ARGSUSED1*/
 static int
 die_sou_resolve(tdesc_t *tdp, tdesc_t **tdpp __unused, void *private)
@@ -1160,11 +1195,17 @@ die_sou_resolve(tdesc_t *tdp, tdesc_t **tdpp __unused, void *private)
 
 			/*
 			 * For empty members, or GCC/C99 flexible array
-			 * members, a size of 0 is correct.
+			 * members, a size of 0 is correct. Structs and unions
+			 * consisting of flexible array members will also have
+			 * size 0.
 			 */
 			if (mt->t_members == NULL)
 				continue;
 			if (mt->t_type == ARRAY && mt->t_ardef->ad_nelems == 0)
+				continue;
+			if ((mt->t_flags & TDESC_F_RESOLVED) != 0 &&
+			    (mt->t_type == STRUCT || mt->t_type == UNION ||
+			     mt->t_type == CLASS))
 				continue;
 
 			if (mt->t_type == STRUCT && 
@@ -1325,7 +1366,7 @@ die_funcptr_create(dwarf_t *dw, Dwarf_Die die, Dwarf_Off off, tdesc_t *tdp)
 static intr_t *
 die_base_name_parse(const char *name, char **newp)
 {
-	char buf[100];
+	char buf[1024];
 	char const *base;
 	char *c;
 	int nlong = 0, nshort = 0, nchar = 0, nint = 0;
@@ -1568,7 +1609,7 @@ die_through_create(dwarf_t *dw, Dwarf_Die die, Dwarf_Off off, tdesc_t *tdp,
 		tdp->t_tdesc = tdesc_intr_void(dw);
 	}
 
-	if (type == POINTER)
+	if (type == POINTER || type == REFERENCE)
 		tdp->t_size = dw->dw_ptrsz;
 
 	tdp->t_flags |= TDESC_F_RESOLVED;
@@ -1599,6 +1640,12 @@ static void
 die_pointer_create(dwarf_t *dw, Dwarf_Die die, Dwarf_Off off, tdesc_t *tdp)
 {
 	die_through_create(dw, die, off, tdp, POINTER, "pointer");
+}
+
+static void
+die_reference_create(dwarf_t *dw, Dwarf_Die die, Dwarf_Off off, tdesc_t *tdp)
+{
+	die_through_create(dw, die, off, tdp, REFERENCE, "reference");
 }
 
 static void
@@ -1776,10 +1823,12 @@ static const die_creator_t die_creators[] = {
 	{ DW_TAG_enumeration_type,	0,		die_enum_create },
 	{ DW_TAG_lexical_block,		DW_F_NOTDP,	die_lexblk_descend },
 	{ DW_TAG_pointer_type,		0,		die_pointer_create },
+	{ DW_TAG_reference_type,	0,		die_reference_create },
 	{ DW_TAG_structure_type,	0,		die_struct_create },
 	{ DW_TAG_subroutine_type,	0,		die_funcptr_create },
 	{ DW_TAG_typedef,		0,		die_typedef_create },
 	{ DW_TAG_union_type,		0,		die_union_create },
+	{ DW_TAG_class_type,		0,		die_class_create },
 	{ DW_TAG_base_type,		0,		die_base_create },
 	{ DW_TAG_const_type,		0,		die_const_create },
 	{ DW_TAG_subprogram,		DW_F_NOTDP,	die_function_create },
@@ -1851,10 +1900,12 @@ static tdtrav_cb_f die_resolvers[] = {
 	NULL,
 	NULL,			/* intrinsic */
 	NULL,			/* pointer */
+	NULL,			/* reference */
 	die_array_resolve,	/* array */
 	NULL,			/* function */
 	die_sou_resolve,	/* struct */
 	die_sou_resolve,	/* union */
+	die_sou_resolve,	/* class */
 	die_enum_resolve,	/* enum */
 	die_fwd_resolve,	/* forward */
 	NULL,			/* typedef */
@@ -1868,10 +1919,12 @@ static tdtrav_cb_f die_fail_reporters[] = {
 	NULL,
 	NULL,			/* intrinsic */
 	NULL,			/* pointer */
+	NULL,			/* reference */
 	die_array_failed,	/* array */
 	NULL,			/* function */
 	die_sou_failed,		/* struct */
 	die_sou_failed,		/* union */
+	die_sou_failed,		/* class */
 	NULL,			/* enum */
 	NULL,			/* forward */
 	NULL,			/* typedef */
@@ -2019,8 +2072,15 @@ dw_read(tdata_t *td, Elf *elf, char *filename __unused)
 	}
 
 	if ((rc = dwarf_next_cu_header_b(dw.dw_dw, &hdrlen, &vers, &abboff,
-	    &addrsz, &offsz, NULL, &nxthdr, &dw.dw_err)) != DW_DLV_OK)
+	    &addrsz, &offsz, NULL, &nxthdr, &dw.dw_err)) != DW_DLV_OK) {
+		if (dwarf_errno(dw.dw_err) == DW_DLE_NO_ENTRY) {
+			/*
+			 * There's no DWARF section...
+			 */
+			return (0);
+		}
 		terminate("rc = %d %s\n", rc, dwarf_errmsg(dw.dw_err));
+	}
 
 	if ((cu = die_sibling(&dw, NULL)) == NULL)
 		goto out;
@@ -2088,4 +2148,5 @@ dw_read(tdata_t *td, Elf *elf, char *filename __unused)
 out:
 	terminate("file does not contain dwarf type data "
 	    "(try compiling with -g)\n");
+	return -1;
 }

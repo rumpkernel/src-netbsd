@@ -1,4 +1,4 @@
-/*	$NetBSD: atapi_wdc.c,v 1.119 2012/07/31 15:59:57 bouyer Exp $	*/
+/*	$NetBSD: atapi_wdc.c,v 1.122 2016/05/02 19:18:29 christos Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Manuel Bouyer.
@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: atapi_wdc.c,v 1.119 2012/07/31 15:59:57 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: atapi_wdc.c,v 1.122 2016/05/02 19:18:29 christos Exp $");
 
 #ifndef ATADEBUG
 #define ATADEBUG
@@ -298,11 +298,14 @@ wdc_atapi_probe_device(struct atapibus_softc *sc, int target)
 		sa.sa_inqbuf.type =  ATAPI_CFG_TYPE(id->atap_config);
 		sa.sa_inqbuf.removable = id->atap_config & ATAPI_CFG_REMOV ?
 		    T_REMOV : T_FIXED;
-		scsipi_strvis((u_char *)model, 40, id->atap_model, 40);
-		scsipi_strvis((u_char *)serial_number, 20, id->atap_serial,
-		    20);
-		scsipi_strvis((u_char *)firmware_revision, 8,
-		    id->atap_revision, 8);
+		strnvisx(model, sizeof(model), id->atap_model,
+		    sizeof(id->atap_model), VIS_TRIM|VIS_SAFE|VIS_OCTAL);
+		strnvisx(serial_number, sizeof(serial_number),
+		    id->atap_serial, sizeof(id->atap_serial),
+		    VIS_TRIM|VIS_SAFE|VIS_OCTAL);
+		strnvisx(firmware_revision, sizeof(firmware_revision),
+		    id->atap_revision, sizeof(id->atap_revision),
+		    VIS_TRIM|VIS_SAFE|VIS_OCTAL);
 		sa.sa_inqbuf.vendor = model;
 		sa.sa_inqbuf.product = serial_number;
 		sa.sa_inqbuf.revision = firmware_revision;
@@ -476,7 +479,7 @@ wdc_atapi_start(struct ata_channel *chp, struct ata_xfer *xfer)
 		 * disable interrupts, all commands here should be quick
 		 * enough to be able to poll, and we don't go here that often
 		 */
-		 bus_space_write_1(wdr->ctl_iot, wdr->ctl_ioh, wd_aux_ctlr,
+		bus_space_write_1(wdr->ctl_iot, wdr->ctl_ioh, wd_aux_ctlr,
 		     WDCTL_4BIT | WDCTL_IDS);
 		if (wdc->select)
 			wdc->select(chp, xfer->c_drive);
@@ -873,7 +876,7 @@ again:
 		}
 #endif
 		wdc->dataout_pio(chp, drvp->drive_flags,
-	    	    (char *)xfer->c_databuf + xfer->c_skip, len);
+		    (char *)xfer->c_databuf + xfer->c_skip, len);
 
 #if NATA_PIOBM
 	end_piobm_dataout:
@@ -930,7 +933,7 @@ again:
 	end_piobm_datain:
 #endif
 		if (xfer->c_lenoff > 0)
-			wdcbit_bucket(chp, len - xfer->c_bcount);
+			wdcbit_bucket(chp, xfer->c_lenoff);
 
 		xfer->c_skip += len;
 		xfer->c_bcount -= len;

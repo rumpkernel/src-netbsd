@@ -1,10 +1,10 @@
-/*	$NetBSD: usbdevs.h,v 1.694 2015/10/18 09:37:14 nonaka Exp $	*/
+/*	$NetBSD: usbdevs.h,v 1.706 2016/04/23 10:15:32 skrll Exp $	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	NetBSD: usbdevs,v 1.702 2015/10/18 09:36:11 nonaka Exp
+ *	NetBSD: usbdevs,v 1.684.2.6 2016/04/22 13:43:55 skrll Exp
  */
 
 /*
@@ -324,6 +324,7 @@
 #define	USB_VENDOR_ARASAN	0x07da		/* Arasan Chip Systems */
 #define	USB_VENDOR_ALLIEDCABLE	0x07e6		/* Allied Cable */
 #define	USB_VENDOR_STSN	0x07ef		/* STSN */
+#define	USB_VENDOR_CENTURY	0x07f7		/* CENTURY Corporation */
 #define	USB_VENDOR_BEWAN	0x07fa		/* Bewan */
 #define	USB_VENDOR_ZOOM	0x0803		/* Zoom Telephonics */
 #define	USB_VENDOR_BROADLOGIC	0x0827		/* BroadLogic */
@@ -871,10 +872,23 @@
 #define	USB_PRODUCT_APPLE_IPOD_TOUCH_4G	0x129e		/* iPod Touch 4G */
 #define	USB_PRODUCT_APPLE_IPHONE_3G	0x1292		/* iPhone 3G */
 #define	USB_PRODUCT_APPLE_IPHONE_3GS	0x1294		/* iPhone 3GS */
+#define	USB_PRODUCT_APPLE_IPHONE_4	0x1297		/* iPhone 4 */
+#define	USB_PRODUCT_APPLE_IPHONE_4_VZW	0x129c		/* iPhone 4 (VZW) */
+#define	USB_PRODUCT_APPLE_IPHONE_4S	0x12a0		/* iPhone 4S */
+#define	USB_PRODUCT_APPLE_IPHONE_5	0x12a8		/* iPhone 5 */
 #define	USB_PRODUCT_APPLE_IPAD	0x129a		/* Apple iPad */
+#define	USB_PRODUCT_APPLE_IPAD_2	0x12a2		/* Apple iPad 2 */
+#define	USB_PRODUCT_APPLE_IPAD_3	0x12a6		/* Apple iPad 3 */
+#define	USB_PRODUCT_APPLE_IPAD_MINI	0x12ab		/* Apple iPad Mini */
 #define	USB_PRODUCT_APPLE_ETHERNET	0x1402		/* Apple USB to Ethernet */
 #define	USB_PRODUCT_APPLE_BLUETOOTH2	0x8205		/* Bluetooth */
-#define	USB_PRODUCT_APPLE_BLUETOOTH_HOST_C	0x821f		/* Bluetooth USB Host Controller */
+#define	USB_PRODUCT_APPLE_BLUETOOTH_HOST_1	0x8213		/* Bluetooth USB Host Controller MacBookPro 7,1 */
+#define	USB_PRODUCT_APPLE_BLUETOOTH_HOST_2	0x8215		/* Bluetooth USB Host Controller iMac 11,1 */
+#define	USB_PRODUCT_APPLE_BLUETOOTH_HOST_3	0x821a		/* Bluetooth USB Host Controller MacBookPro 8,2 */
+#define	USB_PRODUCT_APPLE_BLUETOOTH_HOST_4	0x821b		/* Bluetooth USB Host Controller MacBookAir 3,1 3,2 */
+#define	USB_PRODUCT_APPLE_BLUETOOTH_HOST_5	0x821f		/* Bluetooth USB Host Controller MacBookAir 4,1 */
+#define	USB_PRODUCT_APPLE_BLUETOOTH_HOST_6	0x8281		/* Bluetooth USB Host Controller MacMini 5,1 */
+#define	USB_PRODUCT_APPLE_BLUETOOTH_HOST_7	0x828f		/* Bluetooth USB Host Controller MacBookAir 6,1 */
 #define	USB_PRODUCT_APPLE_BLUETOOTH	0x8300		/* Bluetooth */
 
 /* ArkMicroChips products */
@@ -1063,6 +1077,9 @@
 #define	USB_PRODUCT_BELKIN_F6D4050V2	0x935b		/* F6D4050 ver 2 */
 #define	USB_PRODUCT_BELKIN_RTL8192SU_3	0x945a		/* RTL8192SU */
 #define	USB_PRODUCT_BELKIN_F7D1101V2	0x945b		/* F7D1101 v2 */
+
+/* CENTURY Corporation products */
+#define	USB_PRODUCT_CENTURY_CTUSB1HUB	0x0023		/* CT-USB1HUB */
 
 /* Bewan products */
 #define	USB_PRODUCT_BEWAN_BWIFI_USB54AR	0x1196		/* BWIFI-USB54AR */
@@ -1311,6 +1328,7 @@
 #define	USB_PRODUCT_DISPLAYLINK_LD220	0x0100		/* Samsung LD220 */
 #define	USB_PRODUCT_DISPLAYLINK_LD190	0x0102		/* Samsung LD190 */
 #define	USB_PRODUCT_DISPLAYLINK_U70	0x0103		/* Samsung U70 */
+#define	USB_PRODUCT_DISPLAYLINK_POLARIS2	0x0117		/* Polaris2 USB dock */
 #define	USB_PRODUCT_DISPLAYLINK_VCUD60	0x0136		/* Rextron DVI */
 #define	USB_PRODUCT_DISPLAYLINK_CONV	0x0138		/* StarTech CONV-USB2DVI */
 #define	USB_PRODUCT_DISPLAYLINK_DLDVI	0x0141		/* DisplayLink DVI */
@@ -1332,6 +1350,8 @@
 #define	USB_PRODUCT_DISPLAYLINK_LUM70	0x02a9		/* Lilliput UM-70 */
 #define	USB_PRODUCT_DISPLAYLINK_LCD8000UD_DVI	0x02b8		/* LCD-8000UD-DVI */
 #define	USB_PRODUCT_DISPLAYLINK_LDEWX015U	0x02e3		/* Logitec LDE-WX015U */
+#define	USB_PRODUCT_DISPLAYLINK_MIMO	0x0335		/* DisplayLink MIMO */
+#define	USB_PRODUCT_DISPLAYLINK_PLUGABLE	0x0377		/* Plugable docking station */
 #define	USB_PRODUCT_DISPLAYLINK_LT1421WIDE	0x03e0		/* Lenovo ThinkVision LT1421 Wide */
 #define	USB_PRODUCT_DISPLAYLINK_SD_U2VDH	0x046d		/* AREA SD-U2VDH */
 #define	USB_PRODUCT_DISPLAYLINK_UM7X0	0x401a		/* nanovision MiMo */
@@ -2136,6 +2156,7 @@
 #define	USB_PRODUCT_MELCO_WLIUCG301N	0x016f		/* WLI-UC-G301N */
 #define	USB_PRODUCT_MELCO_WLIUCGNM	0x01a2		/* WLI-UC-GNM */
 #define	USB_PRODUCT_MELCO_WLIUCGNM2T	0x01ee		/* WLI-UC-GNM2T */
+#define	USB_PRODUCT_MELCO_WIU2300D	0x0241		/* WI-U2-300D */
 
 /* Merlin products */
 #define	USB_PRODUCT_MERLIN_V620	0x1110		/* Merlin V620 */
@@ -2208,6 +2229,8 @@
 #define	USB_PRODUCT_MICROSOFT_XBOX_360_WIRELESS_RECEIVER	0x0291		/* Xbox 360 Wireless Receiver */
 #define	USB_PRODUCT_MICROSOFT_24GHZ_XCVR10	0x071d		/* 2.4GHz Transceiver V1.0 */
 #define	USB_PRODUCT_MICROSOFT_24GHZ_XCVR20	0x071f		/* 2.4GHz Transceiver V2.0 */
+#define	USB_PRODUCT_MICROSOFT_CM6000	0x077d		/* Comfort Mouse 6000 */
+
 
 /* Microtech products */
 #define	USB_PRODUCT_MICROTECH_SCSIDB25	0x0004		/* USB-SCSI-DB25 */
@@ -2259,12 +2282,13 @@
 
 /* MosChip Semiconductor */
 #define	USB_PRODUCT_MOSCHIP_MCS7703	0x7703		/* MCS7703 USB Serial Adapter */
-#define	USB_PRODUCT_MOSCHIP_MCS7780	0x7780		/* Fast IrDA Adapter */
-#define	USB_PRODUCT_MOSCHIP_MCS7781	0x7781		/* Fast IrDA Adapter */
-#define	USB_PRODUCT_MOSCHIP_MCS7784	0x7784		/* Slow IrDA Adapter */
+#define	USB_PRODUCT_MOSCHIP_MCS7780	0x7780		/* MCS7780 Fast IrDA Adapter */
+#define	USB_PRODUCT_MOSCHIP_MCS7781	0x7781		/* MCS7781 Fast IrDA Adapter */
+#define	USB_PRODUCT_MOSCHIP_MCS7784	0x7784		/* MCS7784 Slow IrDA Adapter */
 #define	USB_PRODUCT_MOSCHIP_MCS7810	0x7810		/* MCS7810 USB Serial Adapter */
 #define	USB_PRODUCT_MOSCHIP_MCS7820	0x7820		/* MCS7820 USB Serial Adapter */
-#define	USB_PRODUCT_MOSCHIP_MCS7830	0x7830		/* Ethernet Adapter */
+#define	USB_PRODUCT_MOSCHIP_MCS7830	0x7830		/* MCS7830 Ethernet Adapter */
+#define	USB_PRODUCT_MOSCHIP_MCS7832	0x7832		/* MCS7832 Ethernet Adapter */
 #define	USB_PRODUCT_MOSCHIP_MCS7840	0x7840		/* MCS7840 USB Serial Adapter */
 
 /* Motorola products */
@@ -2326,6 +2350,7 @@
 #define	USB_PRODUCT_NETCHIP_TURBOCONNECT	0x1080		/* Turbo-Connect */
 #define	USB_PRODUCT_NETCHIP_CLIK40	0xa140		/* Clik! 40 */
 #define	USB_PRODUCT_NETCHIP_ETHERNETGADGET	0xa4a2		/* Linux Ethernet/RNDIS gadget on pxa210/25x/26x */
+#define	USB_PRODUCT_NETCHIP_NET2270	0xa612		/* USB-IDE Bridge */
 
 /* Netgear products */
 #define	USB_PRODUCT_NETGEAR_EA101	0x1001		/* Ethernet adapter */
@@ -2656,6 +2681,8 @@
 
 /* Qualcomm products */
 #define	USB_PRODUCT_QUALCOMM_CDMA_MSM	0x6000		/* CDMA Technologies MSM phone */
+#define	USB_PRODUCT_QUALCOMM_NTT_DOCOMO_L05A_MODEM	0x6124		/* NTT DOCOMO L-05A */
+#define	USB_PRODUCT_QUALCOMM_NTT_DOCOMO_L05A_STORAGE	0x613a		/* NTT DOCOMO L-05A */
 #define	USB_PRODUCT_QUALCOMM_NTT_DOCOMO_L02C_MODEM	0x618f		/* NTT DOCOMO L-02C */
 #define	USB_PRODUCT_QUALCOMM_NTT_DOCOMO_L02C_STORAGE	0x61dd		/* NTT DOCOMO L-02C */
 #define	USB_PRODUCT_QUALCOMM_MSM_HSDPA	0x6613		/* HSDPA MSM */
@@ -2727,6 +2754,7 @@
 #define	USB_PRODUCT_REALTEK_RTL8187	0x8187		/* RTL8187 */
 #define	USB_PRODUCT_REALTEK_RTL8187B_0	0x8189		/* RTL8187B */
 #define	USB_PRODUCT_REALTEK_RTL8188CUS	0x818a		/* RTL8188CUS */
+#define	USB_PRODUCT_REALTEK_RTL8188CU_3	0x8191		/* RTL8188CU */
 #define	USB_PRODUCT_REALTEK_RTL8187B_1	0x8197		/* RTL8187B */
 #define	USB_PRODUCT_REALTEK_RTL8187B_2	0x8198		/* RTL8187B */
 #define	USB_PRODUCT_REALTEK_RTL8712	0x8712		/* RTL8712 */

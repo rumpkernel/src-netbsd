@@ -1,4 +1,4 @@
-/*	$NetBSD: ip6_input.c,v 1.152 2015/08/24 22:21:27 pooka Exp $	*/
+/*	$NetBSD: ip6_input.c,v 1.158 2016/04/04 07:37:07 ozaki-r Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -62,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ip6_input.c,v 1.152 2015/08/24 22:21:27 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ip6_input.c,v 1.158 2016/04/04 07:37:07 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_gateway.h"
@@ -127,11 +127,6 @@ __KERNEL_RCSID(0, "$NetBSD: ip6_input.c,v 1.152 2015/08/24 22:21:27 pooka Exp $"
 #include <netinet6/ip6protosw.h>
 
 #include "faith.h"
-#include "gif.h"
-
-#if NGIF > 0
-#include <netinet6/in6_gif.h>
-#endif
 
 #include <net/net_osdep.h>
 
@@ -141,8 +136,6 @@ u_char ip6_protox[IPPROTO_MAX];
 struct in6_ifaddr *in6_ifaddr;
 pktqueue_t *ip6_pktq __read_mostly;
 
-extern callout_t in6_tmpaddrtimer_ch;
-
 int ip6_forward_srcrt;			/* XXX */
 int ip6_sourcecheck;			/* XXX */
 int ip6_sourcecheck_interval;		/* XXX */
@@ -151,7 +144,7 @@ pfil_head_t *inet6_pfil_hook;
 
 percpu_t *ip6stat_percpu;
 
-static void ip6_init2(void *);
+static void ip6_init2(void);
 static void ip6intr(void *);
 static struct m_tag *ip6_setdstifaddr(struct mbuf *, const struct in6_ifaddr *);
 
@@ -191,7 +184,7 @@ ip6_init(void)
 	frag6_init();
 	ip6_desync_factor = cprng_fast32() % MAX_TEMP_DESYNC_FACTOR;
 
-	ip6_init2(NULL);
+	ip6_init2();
 #ifdef GATEWAY
 	ip6flow_init(ip6_hashsize);
 #endif
@@ -203,12 +196,8 @@ ip6_init(void)
 }
 
 static void
-ip6_init2(void *dummy)
+ip6_init2(void)
 {
-
-	/* nd6_timer_init */
-	callout_init(&nd6_timer_ch, CALLOUT_MPSAFE);
-	callout_reset(&nd6_timer_ch, hz, nd6_timer, NULL);
 
 	/* timer for regeneranation of temporary addresses randomize ID */
 	callout_init(&in6_tmpaddrtimer_ch, CALLOUT_MPSAFE);
@@ -487,7 +476,6 @@ ip6_input(struct mbuf *m)
 	 */
 	if (rt != NULL &&
 	    (rt->rt_flags & (RTF_HOST|RTF_GATEWAY)) == RTF_HOST &&
-	    !(rt->rt_flags & RTF_CLONED) &&
 #if 0
 	    /*
 	     * The check below is redundant since the comparison of
@@ -511,10 +499,9 @@ ip6_input(struct mbuf *m)
 			goto hbhcheck;
 		} else {
 			/* address is not ready, so discard the packet. */
-			nd6log((LOG_INFO,
-			    "ip6_input: packet to an unready address %s->%s\n",
+			nd6log(LOG_INFO, "packet to an unready address %s->%s\n",
 			    ip6_sprintf(&ip6->ip6_src),
-			    ip6_sprintf(&ip6->ip6_dst)));
+			    ip6_sprintf(&ip6->ip6_dst));
 
 			goto bad;
 		}
@@ -1611,6 +1598,8 @@ const u_char inet6ctlerrmap[PRC_NCMDS] = {
 	ENOPROTOOPT
 };
 
+extern int sysctl_net_inet6_addrctlpolicy(SYSCTLFN_ARGS);
+
 static int
 sysctl_net_inet6_ip6_stats(SYSCTLFN_ARGS)
 {
@@ -1776,15 +1765,6 @@ sysctl_net_inet6_ip6_setup(struct sysctllog **clog)
 		       NULL, 0, &ip6_defmcasthlim, 0,
 		       CTL_NET, PF_INET6, IPPROTO_IPV6,
 		       IPV6CTL_DEFMCASTHLIM, CTL_EOL);
-#if NGIF > 0
-	sysctl_createv(clog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
-		       CTLTYPE_INT, "gifhlim",
-		       SYSCTL_DESCR("Default hop limit for a gif tunnel datagram"),
-		       NULL, 0, &ip6_gif_hlim, 0,
-		       CTL_NET, PF_INET6, IPPROTO_IPV6,
-		       IPV6CTL_GIF_HLIM, CTL_EOL);
-#endif /* NGIF */
 	sysctl_createv(clog, 0, NULL, NULL,
 		       CTLFLAG_PERMANENT,
 		       CTLTYPE_STRING, "kame_version",
@@ -1819,15 +1799,6 @@ sysctl_net_inet6_ip6_setup(struct sysctllog **clog)
 		       IPV6CTL_V6ONLY, CTL_EOL);
 	sysctl_createv(clog, 0, NULL, NULL,
 		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
-		       CTLTYPE_INT, "auto_linklocal",
-		       SYSCTL_DESCR("Default value of per-interface flag for "
-		                    "adding an IPv6 link-local address to "
-				    "interfaces when attached"),
-		       NULL, 0, &ip6_auto_linklocal, 0,
-		       CTL_NET, PF_INET6, IPPROTO_IPV6,
-		       IPV6CTL_AUTO_LINKLOCAL, CTL_EOL);
-	sysctl_createv(clog, 0, NULL, NULL,
-		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
 		       CTLTYPE_INT, "anonportmin",
 		       SYSCTL_DESCR("Lowest ephemeral port number to assign"),
 		       sysctl_net_inet_ip_ports, 0, &ip6_anonportmin, 0,
@@ -1858,6 +1829,23 @@ sysctl_net_inet6_ip6_setup(struct sysctllog **clog)
 		       CTL_NET, PF_INET6, IPPROTO_IPV6,
 		       IPV6CTL_LOWPORTMAX, CTL_EOL);
 #endif /* IPNOPRIVPORTS */
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
+		       CTLTYPE_INT, "auto_linklocal",
+		       SYSCTL_DESCR("Default value of per-interface flag for "
+		                    "adding an IPv6 link-local address to "
+				    "interfaces when attached"),
+		       NULL, 0, &ip6_auto_linklocal, 0,
+		       CTL_NET, PF_INET6, IPPROTO_IPV6,
+		       IPV6CTL_AUTO_LINKLOCAL, CTL_EOL);
+	sysctl_createv(clog, 0, NULL, NULL,
+		       CTLFLAG_PERMANENT|CTLFLAG_READONLY,
+		       CTLTYPE_STRUCT, "addctlpolicy",
+		       SYSCTL_DESCR("Return the current address control"
+			   " policy"),
+		       sysctl_net_inet6_addrctlpolicy, 0, NULL, 0,
+		       CTL_NET, PF_INET6, IPPROTO_IPV6,
+		       IPV6CTL_ADDRCTLPOLICY, CTL_EOL);
 	sysctl_createv(clog, 0, NULL, NULL,
 		       CTLFLAG_PERMANENT|CTLFLAG_READWRITE,
 		       CTLTYPE_INT, "use_tempaddr",

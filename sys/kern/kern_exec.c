@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_exec.c,v 1.421 2015/10/22 11:48:02 maxv Exp $	*/
+/*	$NetBSD: kern_exec.c,v 1.428 2016/05/08 20:00:21 christos Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -59,7 +59,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_exec.c,v 1.421 2015/10/22 11:48:02 maxv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_exec.c,v 1.428 2016/05/08 20:00:21 christos Exp $");
 
 #include "opt_exec.h"
 #include "opt_execfmt.h"
@@ -133,6 +133,9 @@ static int copyinargstrs(struct execve_data * restrict, char * const *,
     execve_fetch_element_t, char **, size_t *, void (*)(const void *, size_t));
 static int exec_sigcode_map(struct proc *, const struct emul *);
 
+#ifdef DEBUG
+#define DEBUG_EXEC
+#endif
 #ifdef DEBUG_EXEC
 #define DPRINTF(a) printf a
 #define COPYPRINTF(s, a, b) printf("%s, %d: copyout%s @%p %zu\n", __func__, \
@@ -181,6 +184,11 @@ struct exec_entry {
 void	syscall(void);
 #endif
 
+/* NetBSD autoloadable syscalls */
+#ifdef MODULAR
+#include <kern/syscalls_autoload.c>
+#endif
+
 /* NetBSD emul struct */
 struct emul emul_netbsd = {
 	.e_name =		"netbsd",
@@ -194,6 +202,9 @@ struct emul emul_netbsd = {
 	.e_errno =		NULL,
 	.e_nosys =		SYS_syscall,
 	.e_nsysent =		SYS_NSYSENT,
+#endif
+#ifdef MODULAR
+	.e_sc_autoload =	netbsd_syscalls_autoload,
 #endif
 	.e_sysent =		sysent,
 #ifdef SYSCALL_DEBUG
@@ -751,7 +762,7 @@ execve_loadvm(struct lwp *l, const char *path, char * const *args,
 	 */
 
 #ifdef PAX_ASLR
-#define	ASLR_GAP(epp)	(pax_aslr_epp_active(epp) ? (cprng_fast32() % PAGE_SIZE) : 0)
+#define	ASLR_GAP(epp)	pax_aslr_stack_gap(epp)
 #else
 #define	ASLR_GAP(epp)	0
 #endif
@@ -842,7 +853,9 @@ execve_dovmcmds(struct lwp *l, struct execve_data * restrict data)
 	/* create the new process's VM space by running the vmcmds */
 	KASSERTMSG(epp->ep_vmcmds.evs_used != 0, "%s: no vmcmds", __func__);
 
+#ifdef TRACE_EXEC
 	DUMPVMCMDS(epp, 0, 0);
+#endif
 
 	base_vcp = NULL;
 
@@ -1152,7 +1165,7 @@ execve_runproc(struct lwp *l, struct execve_data * restrict data,
 	vm->vm_minsaddr = (void *)epp->ep_minsaddr;
 
 #ifdef PAX_ASLR
-	pax_aslr_init_vm(l, vm);
+	pax_aslr_init_vm(l, vm, epp);
 #endif /* PAX_ASLR */
 
 	/* Now map address space. */
@@ -1310,7 +1323,9 @@ execve_runproc(struct lwp *l, struct execve_data * restrict data,
 	pathbuf_stringcopy_put(data->ed_pathbuf, data->ed_pathstring);
 	pathbuf_destroy(data->ed_pathbuf);
 	PNBUF_PUT(data->ed_resolvedpathbuf);
+#ifdef TRACE_EXEC
 	DPRINTF(("%s finished\n", __func__));
+#endif
 	return EJUSTRETURN;
 
  exec_abort:
@@ -1342,7 +1357,7 @@ execve_runproc(struct lwp *l, struct execve_data * restrict data,
 	/* Acquire the sched-state mutex (exit1() will release it). */
 	if (!is_spawn) {
 		mutex_enter(p->p_lock);
-		exit1(l, W_EXITCODE(error, SIGABRT));
+		exit1(l, error, SIGABRT);
 	}
 
 	return error;
@@ -1919,7 +1934,7 @@ exec_sigcode_map(struct proc *p, const struct emul *e)
 
 	/* Just a hint to uvm_map where to put it. */
 	va = e->e_vm_default_addr(p, (vaddr_t)p->p_vmspace->vm_daddr,
-	    round_page(sz));
+	    round_page(sz), p->p_vmspace->vm_map.flags & VM_MAP_TOPDOWN);
 
 #ifdef __alpha__
 	/*
@@ -2221,7 +2236,7 @@ spawn_return(void *arg)
 	 * A NetBSD specific workaround is POSIX_SPAWN_RETURNERROR as
 	 * flag bit in the attrp argument to posix_spawn(2), see above.
 	 */
-	exit1(l, W_EXITCODE(127, 0));
+	exit1(l, 127, 0);
 }
 
 void

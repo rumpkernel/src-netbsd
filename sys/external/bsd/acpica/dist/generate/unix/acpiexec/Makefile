@@ -40,6 +40,7 @@ HEADERS = \
 
 OBJECTS = \
 	$(OBJDIR)/acgetline.o\
+	$(OBJDIR)/acfileio.o\
 	$(OBJDIR)/aeexec.o\
 	$(OBJDIR)/aehandlers.o\
 	$(OBJDIR)/aeinitfile.o\
@@ -105,6 +106,7 @@ OBJECTS = \
 	$(OBJDIR)/evxfgpe.o\
 	$(OBJDIR)/evxfregn.o\
 	$(OBJDIR)/exconfig.o\
+	$(OBJDIR)/exconcat.o\
 	$(OBJDIR)/exconvrt.o\
 	$(OBJDIR)/excreate.o\
 	$(OBJDIR)/exdebug.o\
@@ -127,6 +129,7 @@ OBJECTS = \
 	$(OBJDIR)/exstoren.o\
 	$(OBJDIR)/exstorob.o\
 	$(OBJDIR)/exsystem.o\
+	$(OBJDIR)/extrace.o\
 	$(OBJDIR)/exutils.o\
 	$(OBJDIR)/getopt.o\
 	$(OBJDIR)/hwacpi.o\
@@ -198,6 +201,7 @@ OBJECTS = \
 	$(OBJDIR)/tbxfroot.o\
 	$(OBJDIR)/utaddress.o\
 	$(OBJDIR)/utalloc.o\
+	$(OBJDIR)/utascii.o\
 	$(OBJDIR)/utbuffer.o\
 	$(OBJDIR)/utcache.o\
 	$(OBJDIR)/utcopy.o\
@@ -207,7 +211,6 @@ OBJECTS = \
 	$(OBJDIR)/uterror.o\
 	$(OBJDIR)/uteval.o\
 	$(OBJDIR)/utexcep.o\
-	$(OBJDIR)/utfileio.o\
 	$(OBJDIR)/utglobal.o\
 	$(OBJDIR)/uthex.o\
 	$(OBJDIR)/utids.o\
@@ -244,10 +247,14 @@ CFLAGS += \
     -DACPI_CHECKSUM_ABORT=TRUE
 endif
 
+ifneq ($(HOST),_QNX)
 LDFLAGS += -lpthread
+endif
 
 ifneq ($(HOST),_APPLE)
+ifneq ($(HOST),_QNX)
 LDFLAGS += -lrt
+endif
 endif
 
 #

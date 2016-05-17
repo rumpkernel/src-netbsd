@@ -1,4 +1,4 @@
-/*	$NetBSD: msdosfs_vnops.c,v 1.93 2015/04/04 12:34:44 riastradh Exp $	*/
+/*	$NetBSD: msdosfs_vnops.c,v 1.96 2016/02/01 16:53:23 christos Exp $	*/
 
 /*-
  * Copyright (C) 1994, 1995, 1997 Wolfgang Solfrank.
@@ -48,7 +48,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: msdosfs_vnops.c,v 1.93 2015/04/04 12:34:44 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: msdosfs_vnops.c,v 1.96 2016/02/01 16:53:23 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1394,6 +1394,7 @@ msdosfs_readdir(void *v)
 	int ncookies = 0, nc = 0;
 	off_t offset, uio_off;
 	int chksum = -1;
+	uint16_t namlen;
 
 #ifdef MSDOSFS_DEBUG
 	printf("msdosfs_readdir(): vp %p, uio %p, cred %p, eofflagp %p\n",
@@ -1541,7 +1542,10 @@ msdosfs_readdir(void *v)
 				if (pmp->pm_flags & MSDOSFSMNT_SHORTNAME)
 					continue;
 				chksum = win2unixfn((struct winentry *)dentp,
-				    dirbuf, chksum);
+				    dirbuf, chksum, &namlen,
+				    pmp->pm_flags & MSDOSFSMNT_UTF8);
+				if (chksum != -1)
+					dirbuf->d_namlen = namlen;
 				continue;
 			}
 
@@ -1584,6 +1588,7 @@ msdosfs_readdir(void *v)
 				    pmp->pm_flags & MSDOSFSMNT_SHORTNAME);
 			else
 				dirbuf->d_name[dirbuf->d_namlen] = 0;
+			namlen = dirbuf->d_namlen;
 			chksum = -1;
 			dirbuf->d_reclen = _DIRENT_SIZE(dirbuf);
 			if (uio->uio_resid < dirbuf->d_reclen) {

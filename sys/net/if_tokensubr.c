@@ -1,4 +1,4 @@
-/*	$NetBSD: if_tokensubr.c,v 1.71 2015/08/31 08:05:20 ozaki-r Exp $	*/
+/*	$NetBSD: if_tokensubr.c,v 1.76 2016/04/28 00:16:56 ozaki-r Exp $	*/
 
 /*
  * Copyright (c) 1982, 1989, 1993
@@ -92,7 +92,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_tokensubr.c,v 1.71 2015/08/31 08:05:20 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_tokensubr.c,v 1.76 2016/04/28 00:16:56 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
@@ -143,7 +143,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_tokensubr.c,v 1.71 2015/08/31 08:05:20 ozaki-r Ex
 #define RCF_SINGLEROUTE (2 << 8) | TOKEN_RCF_FRAME2 | TOKEN_RCF_BROADCAST_SINGLE
 
 static int	token_output(struct ifnet *, struct mbuf *,
-			     const struct sockaddr *, struct rtentry *);
+			     const struct sockaddr *, const struct rtentry *);
 static void	token_input(struct ifnet *, struct mbuf *);
 
 /*
@@ -154,7 +154,7 @@ static void	token_input(struct ifnet *, struct mbuf *);
  */
 static int
 token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
-    struct rtentry *rt)
+    const struct rtentry *rt)
 {
 	uint16_t etype;
 	int error = 0;
@@ -169,7 +169,6 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 	struct token_rif bcastrif;
 	struct ifnet *ifp = ifp0;
 	size_t riflen = 0;
-	ALTQ_DECL(struct altq_pktattr pktattr;)
 
 #if NCARP > 0
 	if (ifp->if_type == IFT_CARP) {
@@ -197,7 +196,7 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 	 * If the queueing discipline needs packet classification,
 	 * do it before prepending link headers.
 	 */
-	IFQ_CLASSIFY(&ifp->if_snd, m, dst->sa_family, &pktattr);
+	IFQ_CLASSIFY(&ifp->if_snd, m, dst->sa_family);
 
 	switch (dst->sa_family) {
 
@@ -219,12 +218,12 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
  */
 		else {
 			struct llentry *la;
-			if (!arpresolve(ifp, rt, m, dst, edst))
+			if (!arpresolve(ifp, rt, m, dst, edst, sizeof(edst)))
 				return (0);	/* if not yet resolved */
 			la = rt->rt_llinfo;
 			KASSERT(la != NULL);
-			KASSERT(la->la_opaque != NULL);
-			rif = la->la_opaque;
+			TOKEN_RIF_LLE_ASSERT(la);
+			rif = TOKEN_RIF_LLE(la);
 			riflen = (ntohs(rif->tr_rcf) & TOKEN_RCF_LEN_MASK) >> 8;
 		}
 		/* If broadcasting on a simplex interface, loopback a copy. */
@@ -370,7 +369,7 @@ send:
 	}
 #endif /* NCARP > 0 */
 
-	return ifq_enqueue(ifp, m ALTQ_COMMA ALTQ_DECL(&pktattr));
+	return ifq_enqueue(ifp, m);
 bad:
 	if (m)
 		m_freem(m);
@@ -501,7 +500,7 @@ token_ifattach(struct ifnet *ifp, void *lla)
 	ifp->if_dlt = DLT_IEEE802;
 	ifp->if_mtu = ISO88025_MTU;
 	ifp->if_output = token_output;
-	ifp->if_input = token_input;
+	ifp->_if_input = token_input;
 	ifp->if_broadcastaddr = tokenbroadcastaddr;
 #ifdef IFF_NOTRAILERS
 	ifp->if_flags |= IFF_NOTRAILERS;

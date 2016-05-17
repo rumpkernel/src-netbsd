@@ -1,4 +1,4 @@
-/*	$NetBSD: if_et.c,v 1.9 2015/06/29 12:27:41 maxv Exp $	*/
+/*	$NetBSD: if_et.c,v 1.11 2016/02/17 20:02:41 christos Exp $	*/
 /*	$OpenBSD: if_et.c,v 1.11 2008/06/08 06:18:07 jsg Exp $	*/
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_et.c,v 1.9 2015/06/29 12:27:41 maxv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_et.c,v 1.11 2016/02/17 20:02:41 christos Exp $");
 
 #include "opt_inet.h"
 #include "vlan.h"
@@ -1759,7 +1759,7 @@ et_rxeof(struct et_softc *sc)
 				bpf_mtap(ifp, m);
 
 				ifp->if_ipackets++;
-				(*ifp->if_input)(ifp, m);
+				if_percpuq_enqueue(ifp->if_percpuq, m);
 			}
 		} else {
 			ifp->if_ierrors++;
@@ -2053,11 +2053,6 @@ et_newbuf(struct et_rxbuf_data *rbd, int buf_idx, int init, int len0)
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, sc->sc_mbuf_tmp_dmap, m,
 				     init ? BUS_DMA_WAITOK : BUS_DMA_NOWAIT);
 	if (error) {
-		if (!error) {
-			bus_dmamap_unload(sc->sc_dmat, sc->sc_mbuf_tmp_dmap);
-			error = EFBIG;
-			aprint_error_dev(sc->sc_dev, "too many segments?!\n");
-		}
 		m_freem(m);
 
 		/* XXX for debug */

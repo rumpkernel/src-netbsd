@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2015, Intel Corp.
+ * Copyright (C) 2000 - 2016, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -643,7 +643,8 @@ typedef UINT64                          ACPI_INTEGER;
 #define ACPI_NOTIFY_SHUTDOWN_REQUEST    (UINT8) 0x0C
 #define ACPI_NOTIFY_AFFINITY_UPDATE     (UINT8) 0x0D
 
-#define ACPI_NOTIFY_MAX                 0x0D
+#define ACPI_GENERIC_NOTIFY_MAX         0x0D
+#define ACPI_SPECIFIC_NOTIFY_MAX        0x84
 
 /*
  * Types associated with ACPI names and objects. The first group of
@@ -675,6 +676,7 @@ typedef UINT32                          ACPI_OBJECT_TYPE;
 #define ACPI_TYPE_DEBUG_OBJECT          0x10
 
 #define ACPI_TYPE_EXTERNAL_MAX          0x10
+#define ACPI_NUM_TYPES                  (ACPI_TYPE_EXTERNAL_MAX + 1)
 
 /*
  * These are object types that do not map directly to the ACPI
@@ -696,6 +698,7 @@ typedef UINT32                          ACPI_OBJECT_TYPE;
 #define ACPI_TYPE_LOCAL_SCOPE           0x1B  /* 1 Name, multiple ObjectList Nodes */
 
 #define ACPI_TYPE_NS_NODE_MAX           0x1B  /* Last typecode used within a NS Node */
+#define ACPI_TOTAL_TYPES                (ACPI_TYPE_NS_NODE_MAX + 1)
 
 /*
  * These are special object types that never appear in
@@ -1231,7 +1234,7 @@ UINT32 (*ACPI_INTERFACE_HANDLER) (
 #define ACPI_PCICLS_STRING_SIZE         7   /* Includes null terminator */
 
 
-/* Structures used for device/processor HID, UID, CID, and SUB */
+/* Structures used for device/processor HID, UID, CID */
 
 typedef struct acpi_pnp_device_id
 {
@@ -1266,7 +1269,6 @@ typedef struct acpi_device_info
     UINT64                          Address;            /* _ADR value */
     ACPI_PNP_DEVICE_ID              HardwareId;         /* _HID value */
     ACPI_PNP_DEVICE_ID              UniqueId;           /* _UID value */
-    ACPI_PNP_DEVICE_ID              SubsystemId;        /* _SUB value */
     ACPI_PNP_DEVICE_ID              ClassCode;          /* _CLS value */
     ACPI_PNP_DEVICE_ID_LIST         CompatibleIdList;   /* _CID list <must be last> */
 
@@ -1282,13 +1284,12 @@ typedef struct acpi_device_info
 #define ACPI_VALID_ADR                  0x0002
 #define ACPI_VALID_HID                  0x0004
 #define ACPI_VALID_UID                  0x0008
-#define ACPI_VALID_SUB                  0x0010
 #define ACPI_VALID_CID                  0x0020
 #define ACPI_VALID_CLS                  0x0040
 #define ACPI_VALID_SXDS                 0x0100
 #define ACPI_VALID_SXWS                 0x0200
 
-/* Flags for _STA return value (CurrentStatus above) */
+/* Flags for _STA method */
 
 #define ACPI_STA_DEVICE_PRESENT         0x01
 #define ACPI_STA_DEVICE_ENABLED         0x02
@@ -1325,7 +1326,7 @@ typedef struct acpi_mem_space_context
  */
 typedef struct acpi_memory_list
 {
-    char                            *ListName;
+    const char                      *ListName;
     void                            *ListHead;
     UINT16                          ObjectSize;
     UINT16                          MaxDepth;

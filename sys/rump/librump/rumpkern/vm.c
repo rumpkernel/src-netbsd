@@ -1,4 +1,4 @@
-/*	$NetBSD: vm.c,v 1.167 2015/06/02 14:07:48 pooka Exp $	*/
+/*	$NetBSD: vm.c,v 1.169 2016/01/26 23:12:18 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007-2011 Antti Kantee.  All Rights Reserved.
@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vm.c,v 1.167 2015/06/02 14:07:48 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vm.c,v 1.169 2016/01/26 23:12:18 pooka Exp $");
 
 #include <sys/param.h>
 #include <sys/atomic.h>
@@ -55,8 +55,6 @@ __KERNEL_RCSID(0, "$NetBSD: vm.c,v 1.167 2015/06/02 14:07:48 pooka Exp $");
 
 #include <machine/pmap.h>
 
-#include <rump/rumpuser.h>
-
 #include <uvm/uvm.h>
 #include <uvm/uvm_ddb.h>
 #include <uvm/uvm_pdpolicy.h>
@@ -64,8 +62,10 @@ __KERNEL_RCSID(0, "$NetBSD: vm.c,v 1.167 2015/06/02 14:07:48 pooka Exp $");
 #include <uvm/uvm_readahead.h>
 #include <uvm/uvm_device.h>
 
-#include "rump_private.h"
-#include "rump_vfs_private.h"
+#include <rump-sys/kern.h>
+#include <rump-sys/vfs.h>
+
+#include <rump/rumpuser.h>
 
 kmutex_t uvm_pageqlock; /* non-free page lock */
 kmutex_t uvm_fpageqlock; /* free page lock, non-gpl license */
@@ -700,7 +700,7 @@ ubc_purge(struct uvm_object *uobj)
 }
 
 vaddr_t
-uvm_default_mapaddr(struct proc *p, vaddr_t base, vsize_t sz)
+uvm_default_mapaddr(struct proc *p, vaddr_t base, vsize_t sz, int topdown)
 {
 
 	return 0;

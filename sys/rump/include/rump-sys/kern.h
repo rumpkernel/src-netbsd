@@ -1,4 +1,4 @@
-/*	$NetBSD: kern.h,v 1.1 2016/01/26 23:12:17 pooka Exp $	*/
+/*	$NetBSD: kern.h,v 1.3 2016/02/08 18:18:19 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007-2011 Antti Kantee.  All Rights Reserved.
@@ -144,7 +144,7 @@ typedef void	(*rump_proc_vfs_release_fn)(struct proc *);
 extern rump_proc_vfs_init_fn rump_proc_vfs_init;
 extern rump_proc_vfs_release_fn rump_proc_vfs_release;
 
-extern struct cpu_info *rump_cpu;
+extern struct cpu_info rump_bootcpu;
 
 extern bool rump_ttycomponent;
 
@@ -228,13 +228,13 @@ struct rump_sysproxy_ops {
 };
 extern struct rump_sysproxy_ops rump_sysproxy_ops;
 #define rump_sysproxy_copyin(arg, raddr, laddr, len)			\
- 	rump_sysproxy_ops.rspo_copyin(arg, raddr, laddr, len)
+	rump_sysproxy_ops.rspo_copyin(arg, raddr, laddr, len)
 #define rump_sysproxy_copyinstr(arg, raddr, laddr, lenp)		\
- 	rump_sysproxy_ops.rspo_copyinstr(arg, raddr, laddr, lenp)
+	rump_sysproxy_ops.rspo_copyinstr(arg, raddr, laddr, lenp)
 #define rump_sysproxy_copyout(arg, laddr, raddr, len)			\
- 	rump_sysproxy_ops.rspo_copyout(arg, laddr, raddr, len)
+	rump_sysproxy_ops.rspo_copyout(arg, laddr, raddr, len)
 #define rump_sysproxy_copyoutstr(arg, laddr, raddr, lenp)		\
- 	rump_sysproxy_ops.rspo_copyoutstr(arg, laddr, raddr, lenp)
+	rump_sysproxy_ops.rspo_copyoutstr(arg, laddr, raddr, lenp)
 #define rump_sysproxy_anonmmap(arg, howmuch, addr)			\
 	rump_sysproxy_ops.rspo_anonmmap(arg, howmuch, addr)
 #define rump_sysproxy_raise(arg, signo)					\
