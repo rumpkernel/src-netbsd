@@ -1,6 +1,7 @@
-/*	Id: lib.in,v 1.17 2013/10/13 15:24:03 schwarze Exp  */
+/*	$Id: lib.in,v 1.19 2015/12/17 22:31:12 christos Exp $ */
 /*
  * Copyright (c) 2009 Kristaps Dzonsons <kristaps@bsd.lv>
+ * Copyright (c) 2009, 2012 Joerg Sonnenberger <joerg@netbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -82,6 +83,7 @@ LINE("libnetpgpverify",	"Netpgp Verification (libnetpgpverify, \\-lnetpgpverify)
 LINE("libnpf",		"NPF Packet Filter Library (libnpf, \\-lnpf)")
 LINE("libossaudio",	"OSS Audio Emulation Library (libossaudio, \\-lossaudio)")
 LINE("libpam",		"Pluggable Authentication Module Library (libpam, \\-lpam)")
+LINE("libpanel",	"Z-order for curses windows (libpanel, \\-lpanel)")
 LINE("libpcap",		"Capture Library (libpcap, \\-lpcap)")
 LINE("libpci",		"PCI Bus Access Library (libpci, \\-lpci)")
 LINE("libpmc",		"Performance Counters Library (libpmc, \\-lpmc)")

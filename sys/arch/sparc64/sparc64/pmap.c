@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.c,v 1.299 2015/09/08 13:18:06 nakayama Exp $	*/
+/*	$NetBSD: pmap.c,v 1.302 2016/04/17 14:32:03 martin Exp $	*/
 /*
  *
  * Copyright (C) 1996-1999 Eduardo Horvath.
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.299 2015/09/08 13:18:06 nakayama Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.302 2016/04/17 14:32:03 martin Exp $");
 
 #undef	NO_VCACHE /* Don't forget the locked TLB in dostart */
 #define	HWREF
@@ -49,6 +49,7 @@ __KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.299 2015/09/08 13:18:06 nakayama Exp $");
 #include <sys/cpu.h>
 
 #include <sys/exec_aout.h>	/* for MID_* */
+#include <sys/reboot.h>
 
 #include <uvm/uvm.h>
 
@@ -157,6 +158,25 @@ static int ctx_alloc(struct pmap *);
 static bool pmap_is_referenced_locked(struct vm_page *);
 
 static void ctx_free(struct pmap *, struct cpu_info *);
+
+/* set dmmu secondary context */
+static __inline void
+dmmu_set_secondary_context(uint ctx)
+{
+	if (!CPU_ISSUN4V)
+		__asm volatile(
+			"stxa %0,[%1]%2;	"
+			"membar #Sync		"
+			: : "r" (ctx), "r" (CTX_SECONDARY), "n" (ASI_DMMU)
+			: "memory");
+	else
+		__asm volatile(
+			"stxa %0,[%1]%2;	"
+			"membar #Sync		"
+			: : "r" (ctx), "r" (CTX_SECONDARY), "n" (ASI_MMU_CONTEXTID)
+			: "memory");
+		
+}
 
 /*
  * Check if any MMU has a non-zero context
@@ -708,6 +728,10 @@ pmap_bootstrap(u_long kernelstart, u_long kernelend)
 	int prom_memlist_size;
 
 	BDPRINTF(PDB_BOOT, ("Entered pmap_bootstrap.\n"));
+
+	/* XXX - incomplete spinup code for SUN4V */
+	if (CPU_ISSUN4V)
+		boothowto |= RB_MD1;
 
 	cache_setup_funcs();
 
@@ -1418,7 +1442,7 @@ pmap_growkernel(vaddr_t maxkvaddr)
 	}
 	DPRINTF(PDB_GROW, ("pmap_growkernel(%lx...%lx)\n", kbreak, maxkvaddr));
 	/* Align with the start of a page table */
-	for (kbreak &= (-1 << PDSHIFT); kbreak < maxkvaddr;
+	for (kbreak &= ((~0ULL) << PDSHIFT); kbreak < maxkvaddr;
 	     kbreak += (1 << PDSHIFT)) {
 		if (pseg_get(pm, kbreak) & TLB_V)
 			continue;

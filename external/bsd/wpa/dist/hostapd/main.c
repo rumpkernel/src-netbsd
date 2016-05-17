@@ -170,7 +170,8 @@ static int hostapd_driver_init(struct hostapd_iface *iface)
 
 		if (global.drv_priv[i] == NULL &&
 		    wpa_drivers[i]->global_init) {
-			global.drv_priv[i] = wpa_drivers[i]->global_init();
+			global.drv_priv[i] =
+				wpa_drivers[i]->global_init(iface->interfaces);
 			if (global.drv_priv[i] == NULL) {
 				wpa_printf(MSG_ERROR, "Failed to initialize "
 					   "driver '%s'",
@@ -407,9 +408,16 @@ static int hostapd_global_run(struct hapd_interfaces *ifaces, int daemonize,
 	}
 #endif /* EAP_SERVER_TNC */
 
-	if (daemonize && os_daemonize(pid_file)) {
-		wpa_printf(MSG_ERROR, "daemon: %s", strerror(errno));
-		return -1;
+	if (daemonize) {
+		if (os_daemonize(pid_file)) {
+			wpa_printf(MSG_ERROR, "daemon: %s", strerror(errno));
+			return -1;
+		}
+		if (eloop_sock_requeue()) {
+			wpa_printf(MSG_ERROR, "eloop_sock_requeue: %s",
+				   strerror(errno));
+			return -1;
+		}
 	}
 
 	eloop_run();

@@ -1,4 +1,4 @@
-/*	$NetBSD: locore.s,v 1.384 2015/04/05 20:34:00 palle Exp $	*/
+/*	$NetBSD: locore.s,v 1.391 2016/05/10 19:24:00 palle Exp $	*/
 
 /*
  * Copyright (c) 2006-2010 Matthew R. Green
@@ -129,7 +129,7 @@
 	
 #ifdef SUN4V
 	.macro	SET_MMU_CONTEXTID_SUN4V ctxid,ctx
-	stxa	\ctxid, [\ctx] ASI_MMU;
+	stxa	\ctxid, [\ctx] ASI_MMU_CONTEXTID;
 	.endm
 #endif	
 		
@@ -355,6 +355,35 @@ cputyp:	.word	CPU_SUN4U ! Default to sun4u
 #define CLRTT
 #endif
 
+
+/*
+ * Some macros to load and store a register window
+ */
+
+	.macro	SPILL storer,base,size,asi
+
+	.irpc n,01234567
+		\storer %l\n, [\base + (\n * \size)] \asi
+	.endr
+	.irpc n,01234567
+		\storer %i\n, [\base + ((8+\n) * \size)] \asi
+	.endr
+
+	.endm
+
+	
+	.macro FILL loader, base, size, asi
+	
+	.irpc n,01234567
+		\loader [\base + (\n * \size)] \asi, %l\n
+	.endr
+
+	.irpc n,01234567
+		\loader [\base + ((8+\n) * \size)] \asi, %i\n
+	.endr
+	
+	.endm
+	
 /*
  * Here are some oft repeated traps as macros.
  */
@@ -1042,7 +1071,8 @@ _C_LABEL(trapbase_sun4v):
 	HARDINT4V(15)						! 0x04f = level 15 interrupt
 	sun4v_trap_entry 44					! 0x050-0x07b
 	VTRAP(T_CPU_MONDO, sun4v_cpu_mondo)			! 0x07c = cpu mondo
-	sun4v_trap_entry 3					! 0x07d-0x07f
+	VTRAP(T_DEV_MONDO, sun4v_dev_mondo)			! 0x07d = dev mondo
+	sun4v_trap_entry 2					! 0x07e-0x07f
 	SPILL64(uspill8_sun4vt0,ASI_AIUS)			! 0x080 spill_0_normal -- used to save user windows in user mode
 	SPILL32(uspill4_sun4vt0,ASI_AIUS)			! 0x084 spill_1_normal
 	SPILLBOTH(uspill8_sun4vt0,uspill4_sun4vt0,ASI_AIUS)	! 0x088 spill_2_normal
@@ -1075,7 +1105,9 @@ _C_LABEL(trapbase_sun4v):
 	sun4v_trap_entry_spill_fill_fail 1			! 0x0f4 fill_5_other
 	sun4v_trap_entry_spill_fill_fail 1			! 0x0f8 fill_6_other
 	sun4v_trap_entry_spill_fill_fail 1			! 0x0fc fill_7_other
-	sun4v_trap_entry 256					! 0x100-0x1ff
+	sun4v_trap_entry 1					! 0x100
+	BPT							! 0x101 = pseudo breakpoint instruction
+	sun4v_trap_entry 254					! 0x102-0x1ff
 	!
 	! trap level 1
 	!
@@ -1954,7 +1986,7 @@ winfixfill:
 #if 0 /* Need to switch over to new stuff to fix WDR bug */
 	wrpr	%g5, %cwp				! Restore cwp from before fill trap -- regs should now be consisent
 	wrpr	%g2, %g0, %tl				! Restore trap level -- we need to reuse it
-	set	return_from_trap, %g4
+	set	return_from_trap, %g4			! XXX - need to set %g1 to tstate
 	set	CTX_PRIMARY, %g7
 	wrpr	%g4, 0, %tpc
 	stxa	%g0, [%g7] ASI_DMMU
@@ -2975,8 +3007,8 @@ Lslowtrap_reenter:
 	call	_C_LABEL(trap)			! trap(tf, type, pc, pstate)
 	 nop
 
-	ba,a,pt	%icc, return_from_trap
-	 nop
+	b	return_from_trap
+	 ldx	[%sp + CC64FSZ + STKB + TF_TSTATE], %g1	! Load this for return_from_trap
 	NOTREACHED
 #if 1
 /*
@@ -3364,7 +3396,7 @@ syscall_setup:
 return_from_syscall:
 	wrpr	%g0, PSTATE_KERN, %pstate	! Disable intterrupts
 	wrpr	%g0, 0, %tl			! Return to tl==0
-	ba,a,pt	%icc, return_from_trap
+	b	return_from_trap
 	 nop
 	NOTREACHED
 
@@ -3561,6 +3593,8 @@ ret_from_intr_vector:
 	 nop				! XXX spitfire bug?
 
 sun4v_cpu_mondo:
+! XXX Rework this when a UP kernel works - crash for now	
+	sir			
 	mov	0x3c0, %g1			 ! CPU Mondo Queue Head
 	ldxa	[%g1] ASI_QUEUE, %g2		 ! fetch index value for head
 	set	CPUINFO_VA, %g3
@@ -3585,7 +3619,45 @@ sun4v_cpu_mondo:
 	retry
 	NOTREACHED
 
-	
+sun4v_dev_mondo:
+	mov	0x3d0, %g1			! Dev Mondo Queue Head
+	ldxa	[%g1] ASI_QUEUE, %g2		! fetch index value
+	mov	0x3d8, %g1			! Dev Mondo Queue Tail
+	ldxa	[%g1] ASI_QUEUE, %g4		! fetch index value
+	cmp	%g2, %g4			! head = queue? 
+	bne,pt 	%xcc, 2f			! unsually not the case
+	 nop
+	retry					! unlikely, ingnore interrupt
+2:	
+	set	CPUINFO_VA, %g3			 ! fetch cpuinfo pa
+	LDPTR	[%g3 + CI_PADDR], %g3		 ! fetch intstack pa
+	set	CPUINFO_VA-INTSTACK, %g4	 ! offset to cpuinfo
+	add	%g4, %g3, %g3			 ! %g3 is now cpuifo
+	add	%g3, CI_DEVMQ, %g3		 ! calc offset to devmq
+	ldxa	[%g3] ASI_PHYS_CACHED, %g3	 ! fetch address of devmq
+	ldxa	[%g3 + %g2] ASI_PHYS_CACHED, %g5 !
+	add	%g2, 64, %g2			 ! each element is 64 bytes 		
+	and	%g2, 0x7ff, %g2			 ! assume 32 elements
+	mov	0x3d0, %g1			 ! Dev Mondo Queue Head
+	stxa	%g2, [%g1] ASI_QUEUE		 ! ajust head index value
+	membar	#Sync
+
+	cmp	%g5, MAXINTNUM			! out of bounds?
+	bgeu,pn	%xcc, 2f
+	 nop					! no just continue
+
+	sethi	%hi(_C_LABEL(intrlev)), %g3
+	or	%g3, %lo(_C_LABEL(intrlev)), %g3
+	sllx	%g5, 3, %g5		! Calculate entry number
+	ldx	[%g3 + %g5], %g5	! We have a pointer to the handler
+1:
+	brnz,pt	%g5, setup_sparcintr	! branch if valid handle
+	 nop
+
+	ba,a	3b			! log if invalid handle
+	 nop
+2:
+	sir				! out of bounds - crash
 /*
  * Ultra1 and Ultra2 CPUs use soft interrupts for everything.  What we do
  * on a soft interrupt, is we should check which bits in SOFTINT(%asr22)
@@ -3879,6 +3951,12 @@ sparc_intr_retry:
 	stx	%g0, [%l1]		! Clear intr source
 	membar	#Sync			! Should not be needed
 0:
+	ldx	[%l2 + IH_ACK], %l1	! ih->ih_ack
+	brz,pn	%l1, 1f
+	 nop
+	jmpl	%l1, %o7		! (*ih->ih_ack)(ih)
+	 mov	%l2, %o0
+1:	
 	cmp	%l7, -1
 	bne,pn	CCCR, 2b		! 'Nother?
 	 mov	%l7, %l2
@@ -3928,8 +4006,8 @@ intrcmplt:
 	ldub	[%sp + CC64FSZ + STKB + TF_OLDPIL], %l3	! restore old %pil
 	wrpr	%l3, 0, %pil
 
-	ba,a,pt	%icc, return_from_trap
-	 nop
+	b	return_from_trap
+	 ldx	[%sp + CC64FSZ + STKB + TF_TSTATE], %g1	! Load this for return_from_trap
 
 #ifdef notyet
 /*
@@ -3962,6 +4040,7 @@ zshard:
  * registers are:
  *
  *	[%sp + CC64FSZ + STKB] => trap frame
+ *      %g1 => tstate from trap frame
  *
  * We must load all global, out, and trap registers from the trap frame.
  *
@@ -3987,7 +4066,7 @@ return_from_trap:
 	!!
 	!! We'll make sure we flush our pcb here, rather than later.
 	!!
-	ldx	[%sp + CC64FSZ + STKB + TF_TSTATE], %g1
+!	ldx	[%sp + CC64FSZ + STKB + TF_TSTATE], %g1	! already passed in, no need to reload
 	btst	TSTATE_PRIV, %g1			! returning to userland?
 
 	!!
@@ -4076,12 +4155,30 @@ return_from_trap:
  *
  */
 rft_kernel:
-	rdpr	%tl, %g4				! Grab a set of trap registers
+	rdpr	%tl, %g4			! Grab a set of trap registers
 	inc	%g4
 	wrpr	%g4, %g0, %tl
 	wrpr	%g3, 0, %tnpc
 	wrpr	%g2, 0, %tpc
 	wrpr	%g1, 0, %tstate
+
+	rdpr	%canrestore, %g2
+	brnz	%g2, 1f
+	 nop
+
+	wr	%g0, ASI_NUCLEUS, %asi
+	rdpr	%cwp, %g1
+	dec	%g1
+	wrpr	%g1, %cwp
+#ifdef _LP64
+	FILL	ldxa, %sp+BIAS, 8, %asi
+#else
+	FILL	lda, %sp, 4, %asi
+#endif
+	restored
+	inc	%g1
+	wrpr	%g1, %cwp
+1:
 	restore
 	rdpr	%tstate, %g1			! Since we may have trapped our regs may be toast
 	rdpr	%cwp, %g2
@@ -5957,15 +6054,9 @@ ENTRY(lwp_trampoline)
 	 mov	%l1, %o0
 
 	/*
-	 * Going to userland - set proper tstate in trap frame
-	 */
-	set	(ASI_PRIMARY_NO_FAULT<<TSTATE_ASI_SHIFT)|((PSTATE_USER)<<TSTATE_PSTATE_SHIFT), %g1
-	stx	%g1, [%sp + CC64FSZ + STKB + TF_TSTATE]
-
-	/*
 	 * Here we finish up as in syscall, but simplified.
 	 */
-	ba,a,pt	%icc, return_from_trap
+	b	return_from_trap
 	 nop
 
 /*

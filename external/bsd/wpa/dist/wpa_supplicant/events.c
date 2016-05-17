@@ -2451,6 +2451,14 @@ wpa_supplicant_event_interface_status(struct wpa_supplicant *wpa_s,
 		wpa_supplicant_set_state(wpa_s, WPA_INTERFACE_DISABLED);
 		l2_packet_deinit(wpa_s->l2);
 		wpa_s->l2 = NULL;
+
+#ifdef CONFIG_MATCH_IFACE
+		if (wpa_s->matched) {
+			wpa_supplicant_remove_iface(wpa_s->global, wpa_s, 0);
+			break;
+		}
+#endif /* CONFIG_MATCH_IFACE */
+
 #ifdef CONFIG_TERMINATE_ONLASTIF
 		/* check if last interface */
 		if (!any_interfaces(wpa_s->global->ifaces))
@@ -3661,4 +3669,44 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 		wpa_msg(wpa_s, MSG_INFO, "Unknown event %d", event);
 		break;
 	}
+}
+
+
+void wpa_supplicant_event_global(void *ctx, enum wpa_event_type event,
+				 union wpa_event_data *data)
+{
+	struct wpa_supplicant *wpa_s;
+
+	if (event != EVENT_INTERFACE_STATUS)
+		return;
+
+	wpa_s = wpa_supplicant_get_iface(ctx, data->interface_status.ifname);
+	if (wpa_s && wpa_s->driver->get_ifindex) {
+		unsigned int ifindex;
+
+		ifindex = wpa_s->driver->get_ifindex(wpa_s->drv_priv);
+		if (ifindex != data->interface_status.ifindex) {
+			wpa_dbg(wpa_s, MSG_DEBUG,
+				"interface status ifindex %d mismatch (%d)",
+				ifindex, data->interface_status.ifindex);
+			return;
+		}
+	}
+#ifdef CONFIG_MATCH_IFACE
+	else if (data->interface_status.ievent == EVENT_INTERFACE_ADDED) {
+		struct wpa_interface *wpa_i;
+
+		wpa_i = wpa_supplicant_match_iface(
+			ctx, data->interface_status.ifname);
+		if (!wpa_i)
+			return;
+		wpa_s = wpa_supplicant_add_iface(ctx, wpa_i, NULL);
+		os_free(wpa_i);
+		if (wpa_s)
+			wpa_s->matched = 1;
+	}
+#endif /* CONFIG_MATCH_IFACE */
+
+	if (wpa_s)
+		wpa_supplicant_event(wpa_s, event, data);
 }

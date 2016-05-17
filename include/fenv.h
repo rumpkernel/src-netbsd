@@ -1,4 +1,4 @@
-/*	$NetBSD: fenv.h,v 1.13 2014/12/27 16:54:02 martin Exp $	*/
+/*	$NetBSD: fenv.h,v 1.21 2015/12/29 01:58:26 christos Exp $	*/
 /*
  * Copyright (c) 2010 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -24,19 +24,25 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
-#if !defined(__aarch64__) && !defined(__arm__) && !defined(__i386__) \
-    && !defined(__hppa__) \
-    && !defined(__or1k__) && !defined(__riscv__) && !defined(__sparc__) \
-    && !defined(__x86_64__)
-#error	"fenv.h is currently not supported for this architecture"
-#endif
-
 #ifndef _FENV_H_
 #define _FENV_H_
 
 #include <sys/featuretest.h>
-#include <machine/fenv.h>
+
+#if !defined(__aarch64__) && !defined(__arm__) && !defined(__i386__) \
+    && !defined(__hppa__) && !defined(__powerpc__) && !defined(__mips__) \
+    && !defined(__or1k__) && !defined(__riscv__) && !defined(__sparc__) \
+    && !defined(__x86_64__) \
+    && !(defined(__m68k__) && !(defined(__mc68010__) || defined(__mcoldfire__)))
+# ifndef __TEST_FENV
+#  error	"fenv.h is currently not supported for this architecture"
+# endif
+typedef int fexcept_t;
+typedef int fenv_t;
+#else
+# define __HAVE_FENV
+# include <machine/fenv.h>
+#endif
 
 __BEGIN_DECLS
 
@@ -55,8 +61,8 @@ int	feupdateenv(const fenv_t *);
 
 #if defined(_NETBSD_SOURCE) || defined(_GNU_SOURCE)
 
-int	feenableexcept(int mask);
-int	fedisableexcept(int mask);
+int	feenableexcept(int);
+int	fedisableexcept(int);
 int	fegetexcept(void);
 
 #endif /* _NETBSD_SOURCE || _GNU_SOURCE */

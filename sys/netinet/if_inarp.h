@@ -1,4 +1,4 @@
-/*	$NetBSD: if_inarp.h,v 1.47 2015/05/21 09:26:18 ozaki-r Exp $	*/
+/*	$NetBSD: if_inarp.h,v 1.49 2016/04/19 04:13:56 ozaki-r Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -75,8 +75,8 @@ MALLOC_DECLARE(M_IPARP);
 extern struct ifqueue arpintrq;
 void arp_ifinit(struct ifnet *, struct ifaddr *);
 void arp_rtrequest(int, struct rtentry *, const struct rt_addrinfo *);
-int arpresolve(struct ifnet *, struct rtentry *, struct mbuf *,
-		    const struct sockaddr *, u_char *);
+int arpresolve(struct ifnet *, const struct rtentry *, struct mbuf *,
+    const struct sockaddr *, void *, size_t);
 void arpintr(void);
 void arprequest(struct ifnet *, const struct in_addr *, const struct in_addr *,
     const u_int8_t *);

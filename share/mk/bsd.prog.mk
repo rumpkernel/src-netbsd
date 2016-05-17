@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.prog.mk,v 1.292 2015/06/07 15:04:28 matt Exp $
+#	$NetBSD: bsd.prog.mk,v 1.299 2016/04/04 15:06:16 joerg Exp $
 #	@(#)bsd.prog.mk	8.2 (Berkeley) 4/2/94
 
 .ifndef HOSTPROG
@@ -48,14 +48,14 @@ CLEANFILES+=strings
 	@rm -f x.cc
 .endif
 
-.if defined(MKPIE) && (${MKPIE} != "no")
+.if defined(MKPIE) && (${MKPIE} != "no") && !defined(NOPIE)
 CFLAGS+=	${PIE_CFLAGS}
 AFLAGS+=	${PIE_AFLAGS}
-LDFLAGS+=	${PIE_LDFLAGS}
+LDFLAGS+=	${"${LDSTATIC.${.TARGET}}" == "-static" :? : ${PIE_LDFLAGS}}
 .endif
 
 CFLAGS+=	${COPTS}
-.if defined(MKDEBUG) && (${MKDEBUG} != "no")
+.if ${MKDEBUG:Uno} != "no" && !defined(NODEBUG)
 CFLAGS+=	-g
 .endif
 OBJCFLAGS+=	${OBJCOPTS}
@@ -65,7 +65,7 @@ MKDEP_SUFFIXES?=	.o .ln .d
 .if (${MKCTF:Uno} != "no") && (${CFLAGS:M-g} != "")
 CTFFLAGS+= -g
 CTFMFLAGS+= -g
-.if defined(HAVE_GCC) && ${HAVE_GCC} >= 48
+.if defined(HAVE_GCC)
 #CFLAGS+=-gdwarf-2
 .endif
 .endif
@@ -124,6 +124,7 @@ LIBCRTI=	${DESTDIR}/usr/lib/${MLIBDIR:D${MLIBDIR}/}crti.o
 	edit \
 	event \
 	expat \
+	execinfo \
 	fetch \
 	fl \
 	form \
@@ -329,6 +330,7 @@ _CCLINK=	${CXX} ${_CCLINKFLAGS}
 .endif
 
 .if defined(RUMPPRG)
+CPPFLAGS+=	-D_KERNTYPES
 PROG=			${RUMPPRG}
 . ifndef CRUNCHEDPROG
 .  if (${MKRUMP} != "no")
@@ -432,7 +434,7 @@ _CCLINK.${_P}=	${CXX} ${_CCLINKFLAGS}
 BINDIR.${_P}?=		${BINDIR}
 PROGNAME.${_P}?=	${_P}
 
-.if ${MKDEBUG} != "no" && !commands(${_P})
+.if ${MKDEBUG:Uno} != "no" && !defined(NODEBUG) && !commands(${_P})
 _PROGDEBUG.${_P}:=	${PROGNAME.${_P}}.debug
 .endif
 
@@ -538,7 +540,7 @@ ${_P}: .gdbinit ${LIBCRT0} ${LIBCRTI} ${OBJS.${_P}} ${LIBC} ${LIBCRTBEGIN} \
 
 ${_P}.ro: ${OBJS.${_P}} ${_DPADD.${_P}}
 	${_MKTARGET_LINK}
-	${CC} ${LDFLAGS:N-Wl,-pie} -nostdlib -r -Wl,-dc -o ${.TARGET} ${OBJS.${_P}}
+	${CC} ${LDFLAGS:N-pie} -nostdlib -r -Wl,-dc -o ${.TARGET} ${OBJS.${_P}}
 
 .if defined(_PROGDEBUG.${_P})
 ${_PROGDEBUG.${_P}}: ${_P}

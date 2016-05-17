@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.lib.mk,v 1.362 2015/09/08 16:06:42 uebayasi Exp $
+#	$NetBSD: bsd.lib.mk,v 1.367 2016/03/12 23:08:58 mrg Exp $
 #	@(#)bsd.lib.mk	8.3 (Berkeley) 4/22/94
 
 .include <bsd.init.mk>
@@ -42,7 +42,8 @@ realinstall:	checkver libinstall
 # XXX: This is needed for programs that link with .a libraries
 # Perhaps a more correct solution is to always generate _pic.a
 # files or always have a shared library.
-.if defined(MKPIE) && (${MKPIE} != "no")
+# XXX: This breaks profiling (__mcount relocation is wrong)
+.if defined(MKPIE) && (${MKPIE} != "no") && !defined(NOPIE)
 CFLAGS+=        ${PIE_CFLAGS}
 AFLAGS+=        ${PIE_AFLAGS}
 .endif
@@ -156,7 +157,7 @@ MKSHLIBOBJS= yes
 MKSHLIBOBJS= no
 .endif
 
-.if (defined(MKDEBUG) && (${MKDEBUG} != "no")) || \
+.if (${MKDEBUG:Uno} != "no" && !defined(NODEBUG)) || \
     (defined(CFLAGS) && !empty(CFLAGS:M*-g*))
 # We only add -g to the shared library objects
 # because we don't currently split .a archives.
@@ -187,7 +188,7 @@ FFLAGS+=	${FOPTS}
 .if defined(CTFCONVERT)
 .if defined(CFLAGS) && !empty(CFLAGS:M*-g*)
 CTFFLAGS+=	-g
-.if defined(HAVE_GCC) && ${HAVE_GCC} >= 48
+.if defined(HAVE_GCC)
 #CFLAGS+=	-gdwarf-2
 .endif
 .endif
@@ -407,7 +408,7 @@ _LIB.so:=${_LIB}.so
 _LIB.so.major:=${_LIB}.so.${SHLIB_MAJOR}
 _LIB.so.full:=${_LIB}.so.${SHLIB_FULLVERSION}
 _LIB.so.link:=${_LIB}.so.${SHLIB_FULLVERSION}.link
-.if ${MKDEBUG} != "no"
+.if ${MKDEBUG:Uno} != "no" && !defined(NODEBUG)
 _LIB.so.debug:=${_LIB.so.full}.debug
 .endif
 .endif

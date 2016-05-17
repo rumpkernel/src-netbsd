@@ -1,4 +1,4 @@
-/* $NetBSD: dksubr.c,v 1.81 2015/10/23 01:34:22 christos Exp $ */
+/* $NetBSD: dksubr.c,v 1.86 2016/01/04 10:02:15 mlelstv Exp $ */
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 1999, 2002, 2008 The NetBSD Foundation, Inc.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dksubr.c,v 1.81 2015/10/23 01:34:22 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dksubr.c,v 1.86 2016/01/04 10:02:15 mlelstv Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -94,6 +94,8 @@ dk_init(struct dk_softc *dksc, device_t dev, int dtype)
 void
 dk_attach(struct dk_softc *dksc)
 {
+	KASSERT(dksc->sc_dev != NULL);
+
 	mutex_init(&dksc->sc_iolock, MUTEX_DEFAULT, IPL_VM);
 	dksc->sc_flags |= DKF_READYFORDUMP;
 #ifdef DIAGNOSTIC
@@ -246,7 +248,8 @@ dk_translate(struct dk_softc *dksc, struct buf *bp)
 
 	wlabel = dksc->sc_flags & (DKF_WLABEL|DKF_LABELLING);
 	if (part == RAW_PART) {
-		if (bounds_check_with_mediasize(bp, DEV_BSIZE, numsecs) <= 0)
+		uint64_t numblocks = btodb(numsecs * secsize);
+		if (bounds_check_with_mediasize(bp, DEV_BSIZE, numblocks) <= 0)
 			goto done;
 	} else {
 		if (bounds_check_with_label(&dksc->sc_dkdev, bp, wlabel) <= 0)
@@ -273,8 +276,8 @@ done:
 	return bp->b_error;
 }
 
-void
-dk_strategy(struct dk_softc *dksc, struct buf *bp)
+static int
+dk_strategy1(struct dk_softc *dksc, struct buf *bp)
 {
 	int error;
 
@@ -285,14 +288,26 @@ dk_strategy(struct dk_softc *dksc, struct buf *bp)
 		DPRINTF_FOLLOW(("%s: not inited\n", __func__));
 		bp->b_error  = ENXIO;
 		biodone(bp);
-		return;
+		return 1;
 	}
 
 	error = dk_translate(dksc, bp);
 	if (error >= 0) {
 		biodone(bp);
-		return;
+		return 1;
 	}
+
+	return 0;
+}
+
+void
+dk_strategy(struct dk_softc *dksc, struct buf *bp)
+{
+	int error;
+
+	error = dk_strategy1(dksc, bp);
+	if (error)
+		return;
 
 	/*
 	 * Queue buffer and start unit
@@ -300,11 +315,52 @@ dk_strategy(struct dk_softc *dksc, struct buf *bp)
 	dk_start(dksc, bp);
 }
 
+int
+dk_strategy_defer(struct dk_softc *dksc, struct buf *bp)
+{
+	int error;
+
+	error = dk_strategy1(dksc, bp);
+	if (error)
+		return error;
+
+	/*
+	 * Queue buffer only
+	 */
+	mutex_enter(&dksc->sc_iolock);
+	bufq_put(dksc->sc_bufq, bp);
+	mutex_exit(&dksc->sc_iolock);
+
+	return 0;
+}
+
+int
+dk_strategy_pending(struct dk_softc *dksc)
+{
+	struct buf *bp;
+
+	if (!(dksc->sc_flags & DKF_INITED)) {
+		DPRINTF_FOLLOW(("%s: not inited\n", __func__));
+		return 0;
+	}
+
+	mutex_enter(&dksc->sc_iolock);
+	bp = bufq_peek(dksc->sc_bufq);
+	mutex_exit(&dksc->sc_iolock);
+
+	return bp != NULL;
+}
+
 void
 dk_start(struct dk_softc *dksc, struct buf *bp)
 {
 	const struct dkdriver *dkd = dksc->sc_dkdev.dk_driver;
 	int error;
+
+	if (!(dksc->sc_flags & DKF_INITED)) {
+		DPRINTF_FOLLOW(("%s: not inited\n", __func__));
+		return;
+	}
 
 	mutex_enter(&dksc->sc_iolock);
 
@@ -395,6 +451,7 @@ dk_drain(struct dk_softc *dksc)
 
 	mutex_enter(&dksc->sc_iolock);
 	bp = dksc->sc_deferred;
+	dksc->sc_deferred = NULL;
 	if (bp != NULL) {
 		bp->b_error = EIO;
 		bp->b_resid = bp->b_bcount;
@@ -508,7 +565,7 @@ dk_ioctl(struct dk_softc *dksc, dev_t dev,
 	case DIOCGDINFO:
 	case DIOCSDINFO:
 	case DIOCWDINFO:
-	case DIOCGPART:
+	case DIOCGPARTINFO:
 	case DIOCKLABEL:
 	case DIOCWLABEL:
 	case DIOCGDEFLABEL:

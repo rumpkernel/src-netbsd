@@ -1,4 +1,4 @@
-/*	$NetBSD: in.c,v 1.161 2015/08/31 16:46:14 ozaki-r Exp $	*/
+/*	$NetBSD: in.c,v 1.165 2016/04/04 07:37:07 ozaki-r Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -91,10 +91,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: in.c,v 1.161 2015/08/31 16:46:14 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: in.c,v 1.165 2016/04/04 07:37:07 ozaki-r Exp $");
 
 #include "arp.h"
-#include "ether.h"
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
@@ -1536,7 +1535,7 @@ in_selectsrc(struct sockaddr_in *sin, struct route *ro,
 	return satosin(&ia->ia_addr);
 }
 
-#if NETHER > 0
+#if NARP > 0
 
 struct in_llentry {
 	struct llentry		base;
@@ -1621,7 +1620,7 @@ in_lltable_free_entry(struct lltable *llt, struct llentry *lle)
 	}
 
 	/* cancel timer */
-	if (callout_stop(&lle->lle_timer))
+	if (callout_halt(&lle->lle_timer, &lle->lle_lock))
 		LLE_REMREF(lle);
 
 	/* Drop hold queue */
@@ -1699,6 +1698,7 @@ in_lltable_rtcheck(struct ifnet *ifp, u_int flags, const struct sockaddr *l3addr
 
 	error = 0;
 error:
+	rtfree(rt);
 	return error;
 }
 
@@ -1767,17 +1767,15 @@ in_lltable_delete(struct lltable *llt, u_int flags,
 		return (ENOENT);
 	}
 
-	if (!(lle->la_flags & LLE_IFADDR) || (flags & LLE_IFADDR)) {
-		LLE_WLOCK(lle);
-		lle->la_flags |= LLE_DELETED;
+	LLE_WLOCK(lle);
+	lle->la_flags |= LLE_DELETED;
 #ifdef DIAGNOSTIC
-		log(LOG_INFO, "ifaddr cache = %p is deleted\n", lle);
+	log(LOG_INFO, "ifaddr cache = %p is deleted\n", lle);
 #endif
-		if ((lle->la_flags & (LLE_STATIC | LLE_IFADDR)) == LLE_STATIC)
-			llentry_free(lle);
-		else
-			LLE_WUNLOCK(lle);
-	}
+	if ((lle->la_flags & (LLE_STATIC | LLE_IFADDR)) == LLE_STATIC)
+		llentry_free(lle);
+	else
+		LLE_WUNLOCK(lle);
 
 	return (0);
 }
@@ -1855,7 +1853,24 @@ in_lltable_lookup(struct lltable *llt, u_int flags, const struct sockaddr *l3add
 	return lle;
 }
 
-#endif /* NETHER > 0 */
+static int
+in_lltable_dump_entry(struct lltable *llt, struct llentry *lle,
+    struct rt_walkarg *w)
+{
+	struct sockaddr_in sin;
+
+	LLTABLE_LOCK_ASSERT();
+
+	/* skip deleted entries */
+	if (lle->la_flags & LLE_DELETED)
+		return 0;
+
+	sockaddr_in_init(&sin, &lle->r_l3addr.addr4, 0);
+
+	return lltable_dump_entry(llt, lle, w, sintosa(&sin));
+}
+
+#endif /* NARP > 0 */
 
 static void
 in_sysctl_init(struct sysctllog **clog)
@@ -1890,7 +1905,8 @@ in_sysctl_init(struct sysctllog **clog)
 		       IPCTL_HOSTZEROBROADCAST, CTL_EOL);
 }
 
-#if NETHER > 0
+#if NARP > 0
+
 static struct lltable *
 in_lltattach(struct ifnet *ifp)
 {
@@ -1903,9 +1919,7 @@ in_lltattach(struct ifnet *ifp)
 	llt->llt_lookup = in_lltable_lookup;
 	llt->llt_create = in_lltable_create;
 	llt->llt_delete = in_lltable_delete;
-#if 0
 	llt->llt_dump_entry = in_lltable_dump_entry;
-#endif
 	llt->llt_hash = in_lltable_hash;
 	llt->llt_fill_sa_entry = in_lltable_fill_sa_entry;
 	llt->llt_free_entry = in_lltable_free_entry;
@@ -1914,7 +1928,8 @@ in_lltattach(struct ifnet *ifp)
 
 	return (llt);
 }
-#endif /* NETHER > 0 */
+
+#endif /* NARP > 0 */
 
 void *
 in_domifattach(struct ifnet *ifp)
@@ -1924,7 +1939,7 @@ in_domifattach(struct ifnet *ifp)
 	ii = kmem_zalloc(sizeof(struct in_ifinfo), KM_SLEEP);
 	KASSERT(ii != NULL);
 
-#if NETHER > 0
+#if NARP > 0
 	ii->ii_llt = in_lltattach(ifp);
 #endif
 
@@ -1944,7 +1959,7 @@ in_domifdetach(struct ifnet *ifp, void *aux)
 #ifdef IPSELSRC
 	in_selsrc_domifdetach(ifp, ii->ii_selsrc);
 #endif
-#if NETHER > 0
+#if NARP > 0
 	lltable_free(ii->ii_llt);
 #endif
 	kmem_free(ii, sizeof(struct in_ifinfo));

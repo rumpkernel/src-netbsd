@@ -361,7 +361,7 @@ equiv_node(tdesc_t *ctdp, tdesc_t *mtdp, equiv_data_t *ed)
 	int (*equiv)(tdesc_t *, tdesc_t *, equiv_data_t *);
 	int mapping;
 
-	if (ctdp->t_emark > ed->ed_clear_mark ||
+	if (ctdp->t_emark > ed->ed_clear_mark &&
 	    mtdp->t_emark > ed->ed_clear_mark)
 		return (ctdp->t_emark == mtdp->t_emark);
 
@@ -543,10 +543,12 @@ static tdtrav_cb_f map_pre[] = {
 	NULL,
 	map_td_tree_pre,	/* intrinsic */
 	map_td_tree_pre,	/* pointer */
+	map_td_tree_pre,	/* reference */
 	map_td_tree_pre,	/* array */
 	map_td_tree_pre,	/* function */
 	map_td_tree_pre,	/* struct */
 	map_td_tree_pre,	/* union */
+	map_td_tree_pre,	/* class */
 	map_td_tree_pre,	/* enum */
 	map_td_tree_pre,	/* forward */
 	map_td_tree_pre,	/* typedef */
@@ -560,10 +562,12 @@ static tdtrav_cb_f map_post[] = {
 	NULL,
 	map_td_tree_post,	/* intrinsic */
 	map_td_tree_post,	/* pointer */
+	map_td_tree_post,	/* reference */
 	map_td_tree_post,	/* array */
 	map_td_tree_post,	/* function */
 	map_td_tree_post,	/* struct */
 	map_td_tree_post,	/* union */
+	map_td_tree_post,	/* class */
 	map_td_tree_post,	/* enum */
 	map_td_tree_post,	/* forward */
 	map_td_tree_post,	/* typedef */
@@ -577,10 +581,12 @@ static tdtrav_cb_f map_self_post[] = {
 	NULL,
 	map_td_tree_self_post,	/* intrinsic */
 	map_td_tree_self_post,	/* pointer */
+	map_td_tree_self_post,	/* reference */
 	map_td_tree_self_post,	/* array */
 	map_td_tree_self_post,	/* function */
 	map_td_tree_self_post,	/* struct */
 	map_td_tree_self_post,	/* union */
+	map_td_tree_self_post,	/* class */
 	map_td_tree_self_post,	/* enum */
 	map_td_tree_self_post,	/* forward */
 	map_td_tree_self_post,	/* typedef */
@@ -893,10 +899,12 @@ static tdtrav_cb_f fwd_redir_cbs[] = {
 	NULL,
 	NULL,			/* intrinsic */
 	NULL,			/* pointer */
+	NULL,			/* reference */
 	NULL,			/* array */
 	NULL,			/* function */
 	NULL,			/* struct */
 	NULL,			/* union */
+	NULL,			/* class */
 	NULL,			/* enum */
 	fwd_redir,		/* forward */
 	NULL,			/* typedef */
@@ -1134,10 +1142,12 @@ tdesc_ops_t tdesc_ops[] = {
 	{ "ERROR! BAD tdesc TYPE", NULL, NULL },
 	{ "intrinsic",		equiv_intrinsic,	conjure_intrinsic },
 	{ "pointer", 		equiv_plain,		conjure_plain },
+	{ "reference", 		equiv_plain,		conjure_plain },
 	{ "array", 		equiv_array,		conjure_array },
 	{ "function", 		equiv_function,		conjure_function },
 	{ "struct",		equiv_su,		conjure_su },
 	{ "union",		equiv_su,		conjure_su },
+	{ "class",		equiv_su,		conjure_su },
 	{ "enum",		equiv_enum,		conjure_enum },
 	{ "forward",		NULL,			conjure_forward },
 	{ "typedef",		equiv_plain,		conjure_plain },

@@ -1,4 +1,4 @@
-/*	$NetBSD: ip_encap.c,v 1.46 2015/08/24 22:21:26 pooka Exp $	*/
+/*	$NetBSD: ip_encap.c,v 1.53 2016/04/26 08:44:44 ozaki-r Exp $	*/
 /*	$KAME: ip_encap.c,v 1.73 2001/10/02 08:30:58 itojun Exp $	*/
 
 /*
@@ -64,13 +64,10 @@
  *
  * The code assumes that radix table code can handle non-continuous netmask,
  * as it will pass radix table memory region with (src + dst) sockaddr pair.
- *
- * FreeBSD is excluded here as they make max_keylen a static variable, and
- * thus forbid definition of radix table other than proper domains.
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ip_encap.c,v 1.46 2015/08/24 22:21:26 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ip_encap.c,v 1.53 2016/04/26 08:44:44 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_mrouting.h"
@@ -83,11 +80,10 @@ __KERNEL_RCSID(0, "$NetBSD: ip_encap.c,v 1.46 2015/08/24 22:21:26 pooka Exp $");
 #include <sys/sockio.h>
 #include <sys/mbuf.h>
 #include <sys/errno.h>
-#include <sys/protosw.h>
 #include <sys/queue.h>
+#include <sys/kmem.h>
 
 #include <net/if.h>
-#include <net/route.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -101,7 +97,7 @@ __KERNEL_RCSID(0, "$NetBSD: ip_encap.c,v 1.46 2015/08/24 22:21:26 pooka Exp $");
 #ifdef INET6
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
-#include <netinet6/ip6protosw.h>
+#include <netinet6/ip6protosw.h> /* for struct ip6ctlparam */
 #include <netinet6/in6_var.h>
 #include <netinet6/in6_pcb.h>
 #include <netinet/icmp6.h>
@@ -126,7 +122,6 @@ static void encap_fillarg(struct mbuf *, const struct encaptab *);
 
 LIST_HEAD(, encaptab) encaptab = LIST_HEAD_INITIALIZER(&encaptab);
 
-extern int max_keylen;	/* radix.c */
 struct radix_node_head *encap_head[2];	/* 0 for AF_INET, 1 for AF_INET6 */
 
 void
@@ -243,7 +238,7 @@ encap4_input(struct mbuf *m, ...)
 {
 	int off, proto;
 	va_list ap;
-	const struct protosw *psw;
+	const struct encapsw *esw;
 	struct encaptab *match;
 
 	va_start(ap, m);
@@ -255,10 +250,10 @@ encap4_input(struct mbuf *m, ...)
 
 	if (match) {
 		/* found a match, "match" has the best one */
-		psw = match->psw;
-		if (psw && psw->pr_input) {
+		esw = match->esw;
+		if (esw && esw->encapsw4.pr_input) {
 			encap_fillarg(m, match);
-			(*psw->pr_input)(m, off, proto);
+			(*esw->encapsw4.pr_input)(m, off, proto);
 		} else
 			m_freem(m);
 		return;
@@ -332,17 +327,17 @@ int
 encap6_input(struct mbuf **mp, int *offp, int proto)
 {
 	struct mbuf *m = *mp;
-	const struct ip6protosw *psw;
+	const struct encapsw *esw;
 	struct encaptab *match;
 
 	match = encap6_lookup(m, *offp, proto, INBOUND);
 
 	if (match) {
 		/* found a match */
-		psw = (const struct ip6protosw *)match->psw;
-		if (psw && psw->pr_input) {
+		esw = match->esw;
+		if (esw && esw->encapsw6.pr_input) {
 			encap_fillarg(m, match);
-			return (*psw->pr_input)(mp, offp, proto);
+			return (*esw->encapsw6.pr_input)(mp, offp, proto);
 		} else {
 			m_freem(m);
 			return IPPROTO_DONE;
@@ -434,7 +429,7 @@ const struct encaptab *
 encap_attach(int af, int proto,
     const struct sockaddr *sp, const struct sockaddr *sm,
     const struct sockaddr *dp, const struct sockaddr *dm,
-    const struct protosw *psw, void *arg)
+    const struct encapsw *esw, void *arg)
 {
 	struct encaptab *ep;
 	int error;
@@ -492,17 +487,17 @@ encap_attach(int af, int proto,
 	}
 
 	/* M_NETADDR ok? */
-	ep = malloc(sizeof(*ep), M_NETADDR, M_NOWAIT|M_ZERO);
+	ep = kmem_zalloc(sizeof(*ep), KM_NOSLEEP);
 	if (ep == NULL) {
 		error = ENOBUFS;
 		goto fail;
 	}
-	ep->addrpack = malloc(l, M_NETADDR, M_NOWAIT|M_ZERO);
+	ep->addrpack = kmem_zalloc(l, KM_NOSLEEP);
 	if (ep->addrpack == NULL) {
 		error = ENOBUFS;
 		goto gc;
 	}
-	ep->maskpack = malloc(l, M_NETADDR, M_NOWAIT|M_ZERO);
+	ep->maskpack = kmem_zalloc(l, KM_NOSLEEP);
 	if (ep->maskpack == NULL) {
 		error = ENOBUFS;
 		goto gc;
@@ -537,7 +532,7 @@ encap_attach(int af, int proto,
 	memcpy(ep->srcmask, sm, sp->sa_len);
 	memcpy(ep->dst, dp, dp->sa_len);
 	memcpy(ep->dstmask, dm, dp->sa_len);
-	ep->psw = psw;
+	ep->esw = esw;
 	ep->arg = arg;
 
 	error = encap_add(ep);
@@ -550,11 +545,11 @@ encap_attach(int af, int proto,
 
 gc:
 	if (ep->addrpack)
-		free(ep->addrpack, M_NETADDR);
+		kmem_free(ep->addrpack, l);
 	if (ep->maskpack)
-		free(ep->maskpack, M_NETADDR);
+		kmem_free(ep->maskpack, l);
 	if (ep)
-		free(ep, M_NETADDR);
+		kmem_free(ep, sizeof(*ep));
 fail:
 	splx(s);
 	return NULL;
@@ -563,7 +558,7 @@ fail:
 const struct encaptab *
 encap_attach_func(int af, int proto,
     int (*func)(struct mbuf *, int, int, void *),
-    const struct protosw *psw, void *arg)
+    const struct encapsw *esw, void *arg)
 {
 	struct encaptab *ep;
 	int error;
@@ -580,7 +575,7 @@ encap_attach_func(int af, int proto,
 	if (error)
 		goto fail;
 
-	ep = malloc(sizeof(*ep), M_NETADDR, M_NOWAIT);	/*XXX*/
+	ep = kmem_alloc(sizeof(*ep), KM_NOSLEEP);	/*XXX*/
 	if (ep == NULL) {
 		error = ENOBUFS;
 		goto fail;
@@ -590,7 +585,7 @@ encap_attach_func(int af, int proto,
 	ep->af = af;
 	ep->proto = proto;
 	ep->func = func;
-	ep->psw = psw;
+	ep->esw = esw;
 	ep->arg = arg;
 
 	error = encap_add(ep);
@@ -619,7 +614,7 @@ encap6_ctlinput(int cmd, const struct sockaddr *sa, void *d0)
 	struct ip6ctlparam *ip6cp = NULL;
 	int nxt;
 	struct encaptab *ep;
-	const struct ip6protosw *psw;
+	const struct encapsw *esw;
 
 	if (sa->sa_family != AF_INET6 ||
 	    sa->sa_len != sizeof(struct sockaddr_in6))
@@ -678,9 +673,10 @@ encap6_ctlinput(int cmd, const struct sockaddr *sa, void *d0)
 		/* should optimize by looking at address pairs */
 
 		/* XXX need to pass ep->arg or ep itself to listeners */
-		psw = (const struct ip6protosw *)ep->psw;
-		if (psw && psw->pr_ctlinput)
-			(*psw->pr_ctlinput)(cmd, sa, d);
+		esw = ep->esw;
+		if (esw && esw->encapsw6.pr_ctlinput) {
+			(*esw->encapsw6.pr_ctlinput)(cmd, sa, d, ep->arg);
+		}
 	}
 
 	rip6_ctlinput(cmd, sa, d0);
@@ -701,10 +697,10 @@ encap_detach(const struct encaptab *cookie)
 			if (error)
 				return error;
 			if (!ep->func) {
-				free(p->addrpack, M_NETADDR);
-				free(p->maskpack, M_NETADDR);
+				kmem_free(p->addrpack, ep->addrpack->sa_len);
+				kmem_free(p->maskpack, ep->maskpack->sa_len);
 			}
-			free(p, M_NETADDR);	/*XXX*/
+			kmem_free(p, sizeof(*p));	/*XXX*/
 			return 0;
 		}
 	}

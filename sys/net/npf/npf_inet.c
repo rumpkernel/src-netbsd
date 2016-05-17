@@ -1,4 +1,4 @@
-/*	$NetBSD: npf_inet.c,v 1.32 2014/07/20 00:37:41 rmind Exp $	*/
+/*	$NetBSD: npf_inet.c,v 1.34 2016/03/18 10:09:46 mrg Exp $	*/
 
 /*-
  * Copyright (c) 2009-2014 The NetBSD Foundation, Inc.
@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: npf_inet.c,v 1.32 2014/07/20 00:37:41 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: npf_inet.c,v 1.34 2016/03/18 10:09:46 mrg Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -51,6 +51,7 @@ __KERNEL_RCSID(0, "$NetBSD: npf_inet.c,v 1.32 2014/07/20 00:37:41 rmind Exp $");
 
 #include <netinet/in_systm.h>
 #include <netinet/in.h>
+#include <netinet6/in6_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <netinet/tcp.h>
@@ -654,10 +655,12 @@ npf_napt_rwr(const npf_cache_t *npc, u_int which,
 		}
 		break;
 	case IPPROTO_ICMP:
+#ifdef INET6
 	case IPPROTO_ICMPV6:
 		KASSERT(npf_iscached(npc, NPC_ICMP));
 		/* Nothing. */
 		break;
+#endif
 	default:
 		return ENOTSUP;
 	}
@@ -668,6 +671,7 @@ npf_napt_rwr(const npf_cache_t *npc, u_int which,
  * IPv6-to-IPv6 Network Prefix Translation (NPTv6), as per RFC 6296.
  */
 
+#ifdef INET6
 int
 npf_npt66_rwr(const npf_cache_t *npc, u_int which, const npf_addr_t *pref,
     npf_netmask_t len, uint16_t adj)
@@ -736,18 +740,25 @@ npf_npt66_rwr(const npf_cache_t *npc, u_int which, const npf_addr_t *pref,
 	addr->s6_addr16[word] = sum;
 	return 0;
 }
+#endif
 
 #if defined(DDB) || defined(_NPF_TESTING)
 
 const char *
 npf_addr_dump(const npf_addr_t *addr, int alen)
 {
+#ifdef INET6
 	if (alen == sizeof(struct in_addr)) {
+#else
+		KASSERT(alen == sizeof(struct in_addr));
+#endif
 		struct in_addr ip;
 		memcpy(&ip, addr, alen);
 		return inet_ntoa(ip);
+#ifdef INET6
 	}
-	return "[IPv6]"; // XXX
+	return ip6_sprintf(addr);
+#endif
 }
 
 #endif

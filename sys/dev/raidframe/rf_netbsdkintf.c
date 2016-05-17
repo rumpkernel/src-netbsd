@@ -1,4 +1,4 @@
-/*	$NetBSD: rf_netbsdkintf.c,v 1.325 2015/08/20 14:40:18 christos Exp $	*/
+/*	$NetBSD: rf_netbsdkintf.c,v 1.345 2016/04/27 02:47:39 christos Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 2008-2011 The NetBSD Foundation, Inc.
@@ -101,7 +101,7 @@
  ***********************************************************/
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rf_netbsdkintf.c,v 1.325 2015/08/20 14:40:18 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rf_netbsdkintf.c,v 1.345 2016/04/27 02:47:39 christos Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_compat_netbsd.h"
@@ -126,6 +126,7 @@ __KERNEL_RCSID(0, "$NetBSD: rf_netbsdkintf.c,v 1.325 2015/08/20 14:40:18 christo
 #include <sys/bufq.h>
 #include <sys/reboot.h>
 #include <sys/kauth.h>
+#include <sys/module.h>
 
 #include <prop/proplib.h>
 
@@ -160,6 +161,12 @@ int     rf_kdebug_level = 0;
 #define db1_printf(a) { }
 #endif				/* DEBUG */
 
+#ifdef DEBUG_ROOT
+#define DPRINTF(a, ...) printf(a, __VA_ARGS__)
+#else
+#define DPRINTF(a, ...)
+#endif
+
 #if (RF_INCLUDE_PARITY_DECLUSTERING_DS > 0)
 static rf_declare_mutex2(rf_sparet_wait_mutex);
 static rf_declare_cond2(rf_sparet_wait_cv);
@@ -180,6 +187,7 @@ static void InitBP(struct buf *, struct vnode *, unsigned,
     void *, int, struct proc *);
 struct raid_softc;
 static void raidinit(struct raid_softc *);
+static int raiddoaccess(RF_Raid_t *raidPtr, struct buf *bp);
 
 static int raid_match(device_t, cfdata_t, void *);
 static void raid_attach(device_t, device_t, void *);
@@ -195,6 +203,9 @@ static int raidwrite_component_label(unsigned,
 static int raidread_component_label(unsigned,
     dev_t, struct vnode *, RF_ComponentLabel_t *);
 
+static int raid_diskstart(device_t, struct buf *bp);
+static int raid_dumpblocks(device_t, void *, daddr_t, int);
+static int raid_lastclose(device_t);
 
 static dev_type_open(raidopen);
 static dev_type_close(raidclose);
@@ -232,31 +243,37 @@ const struct cdevsw raid_cdevsw = {
 };
 
 static struct dkdriver rf_dkdriver = {
+	.d_open = raidopen,
+	.d_close = raidclose,
 	.d_strategy = raidstrategy,
+	.d_diskstart = raid_diskstart,
+	.d_dumpblocks = raid_dumpblocks,
+	.d_lastclose = raid_lastclose,
 	.d_minphys = minphys
 };
 
 struct raid_softc {
-	device_t sc_dev;
+	struct dk_softc sc_dksc;
 	int	sc_unit;
 	int     sc_flags;	/* flags */
 	int     sc_cflags;	/* configuration flags */
+	kmutex_t sc_mutex;	/* interlock mutex */
+	kcondvar_t sc_cv;	/* and the condvar */
 	uint64_t sc_size;	/* size of the raid device */
 	char    sc_xname[20];	/* XXX external name */
-	struct disk sc_dkdev;	/* generic disk device info */
-	struct bufq_state *buf_queue;	/* used for the device queue */
 	RF_Raid_t sc_r;
 	LIST_ENTRY(raid_softc) sc_link;
 };
 /* sc_flags */
-#define RAIDF_INITED	0x01	/* unit has been initialized */
-#define RAIDF_WLABEL	0x02	/* label area is writable */
-#define RAIDF_LABELLING	0x04	/* unit is currently being labelled */
-#define RAIDF_SHUTDOWN	0x08	/* unit is being shutdown */
-#define RAIDF_WANTED	0x40	/* someone is waiting to obtain a lock */
-#define RAIDF_LOCKED	0x80	/* unit is locked */
+#define RAIDF_INITED		0x01	/* unit has been initialized */
+#define RAIDF_SHUTDOWN		0x02	/* unit is being shutdown */
+#define RAIDF_DETACH  		0x04	/* detach after final close */
+#define RAIDF_WANTED		0x08	/* someone waiting to obtain a lock */
+#define RAIDF_LOCKED		0x10	/* unit is locked */
+#define RAIDF_UNIT_CHANGED	0x20	/* unit is being changed */
 
 #define	raidunit(x)	DISKUNIT(x)
+#define	raidsoftc(dev)	(((struct raid_softc *)device_private(dev))->sc_r.softc)
 
 extern struct cfdriver raid_cd;
 CFATTACH_DECL3_NEW(raid, sizeof(struct raid_softc),
@@ -288,11 +305,6 @@ CFATTACH_DECL3_NEW(raid, sizeof(struct raid_softc),
 	(MAKEDISKDEV(major((dev)), raidunit((dev)), RAW_PART))
 
 /* declared here, and made public, for the benefit of KVM stuff.. */
-
-static void raidgetdefaultlabel(RF_Raid_t *, struct raid_softc *,
-				     struct disklabel *);
-static void raidgetdisklabel(dev_t);
-static void raidmakedisklabel(struct raid_softc *);
 
 static int raidlock(struct raid_softc *);
 static void raidunlock(struct raid_softc *);
@@ -349,18 +361,20 @@ raidcreate(int unit) {
 		return NULL;
 	}
 	sc->sc_unit = unit;
-	bufq_alloc(&sc->buf_queue, "fcfs", BUFQ_SORT_RAWBLOCK);
+	cv_init(&sc->sc_cv, "raidunit");
+	mutex_init(&sc->sc_mutex, MUTEX_DEFAULT, IPL_NONE);
 	return sc;
 }
 
 static void
 raiddestroy(struct raid_softc *sc) {
-	bufq_free(sc->buf_queue);
+	cv_destroy(&sc->sc_cv);
+	mutex_destroy(&sc->sc_mutex);
 	kmem_free(sc, sizeof(*sc));
 }
 
 static struct raid_softc *
-raidget(int unit) {
+raidget(int unit, bool create) {
 	struct raid_softc *sc;
 	if (unit < 0) {
 #ifdef DIAGNOSTIC
@@ -376,6 +390,8 @@ raidget(int unit) {
 		}
 	}
 	mutex_exit(&raid_lock);
+	if (!create)
+		return NULL;
 	if ((sc = raidcreate(unit)) == NULL)
 		return NULL;
 	mutex_enter(&raid_lock);
@@ -395,34 +411,11 @@ raidput(struct raid_softc *sc) {
 void
 raidattach(int num)
 {
-	mutex_init(&raid_lock, MUTEX_DEFAULT, IPL_NONE);
-	/* This is where all the initialization stuff gets done. */
-
-#if (RF_INCLUDE_PARITY_DECLUSTERING_DS > 0)
-	rf_init_mutex2(rf_sparet_wait_mutex, IPL_VM);
-	rf_init_cond2(rf_sparet_wait_cv, "sparetw");
-	rf_init_cond2(rf_sparet_resp_cv, "rfgst");
-
-	rf_sparet_wait_queue = rf_sparet_resp_queue = NULL;
-#endif
-
-	if (rf_BootRaidframe() == 0)
-		aprint_verbose("Kernelized RAIDframe activated\n");
-	else
-		panic("Serious error booting RAID!!");
-
-	if (config_cfattach_attach(raid_cd.cd_name, &raid_ca)) {
-		aprint_error("raidattach: config_cfattach_attach failed?\n");
-	}
-
-	raidautoconfigdone = false;
 
 	/*
-	 * Register a finalizer which will be used to auto-config RAID
-	 * sets once all real hardware devices have been found.
+	 * Device attachment and associated initialization now occurs
+	 * as part of the module initialization.
 	 */
-	if (config_finalize_register(NULL, rf_autoconfig) != 0)
-		aprint_error("WARNING: unable to register RAIDframe finalizer\n");
 }
 
 int
@@ -494,6 +487,7 @@ rf_buildroothack(RF_ConfigSet_t *config_sets)
 	RF_ConfigSet_t *next_cset;
 	int num_root;
 	struct raid_softc *sc, *rsc;
+	struct dk_softc *dksc;
 
 	sc = rsc = NULL;
 	num_root = 0;
@@ -524,6 +518,7 @@ rf_buildroothack(RF_ConfigSet_t *config_sets)
 		rf_cleanup_config_set(cset);
 		cset = next_cset;
 	}
+	dksc = &rsc->sc_dksc;
 
 	/* if the user has specified what the root device should be
 	   then we don't touch booted_device or boothowto... */
@@ -546,14 +541,34 @@ rf_buildroothack(RF_ConfigSet_t *config_sets)
 	 */
 	if (num_root == 1) {
 		device_t candidate_root;
-		if (rsc->sc_dkdev.dk_nwedges != 0) {
+		if (dksc->sc_dkdev.dk_nwedges != 0) {
 			char cname[sizeof(cset->ac->devname)];
-			/* XXX: assume 'a' */
+			/* XXX: assume partition 'a' first */
 			snprintf(cname, sizeof(cname), "%s%c",
-			    device_xname(rsc->sc_dev), 'a');
+			    device_xname(dksc->sc_dev), 'a');
 			candidate_root = dkwedge_find_by_wname(cname);
+			DPRINTF("%s: candidate wedge root=%s\n", __func__,
+			    cname);
+			if (candidate_root == NULL) {
+				/*
+				 * If that is not found, because we don't use
+				 * disklabel, return the first dk child
+				 * XXX: we can skip the 'a' check above
+				 * and always do this...
+				 */
+				size_t i = 0;
+				candidate_root = dkwedge_find_by_parent(
+				    device_xname(dksc->sc_dev), &i);
+			}
+			DPRINTF("%s: candidate wedge root=%p\n", __func__,
+			    candidate_root);
 		} else
-			candidate_root = rsc->sc_dev;
+			candidate_root = dksc->sc_dev;
+		DPRINTF("%s: candidate root=%p\n", __func__, candidate_root);
+		DPRINTF("%s: booted_device=%p root_partition=%d "
+		   "contains_boot=%d\n", __func__, booted_device,
+		   rsc->sc_r.root_partition,
+		   rf_containsboot(&rsc->sc_r, booted_device));
 		if (booted_device == NULL ||
 		    rsc->sc_r.root_partition == 1 ||
 		    rf_containsboot(&rsc->sc_r, booted_device)) {
@@ -561,6 +576,8 @@ rf_buildroothack(RF_ConfigSet_t *config_sets)
 			booted_partition = 0;	/* XXX assume 'a' */
 		}
 	} else if (num_root > 1) {
+		DPRINTF("%s: many roots=%d, %p\n", __func__, num_root,
+		    booted_device);
 
 		/* 
 		 * Maybe the MD code can help. If it cannot, then
@@ -584,12 +601,13 @@ rf_buildroothack(RF_ConfigSet_t *config_sets)
 			if (rf_containsboot(r, booted_device)) {
 				num_root++;
 				rsc = sc;
+				dksc = &rsc->sc_dksc;
 			}
 		}
 		mutex_exit(&raid_lock);
 
 		if (num_root == 1) {
-			booted_device = rsc->sc_dev;
+			booted_device = dksc->sc_dev;
 			booted_partition = 0;	/* XXX assume 'a' */
 		} else {
 			/* we can't guess.. require the user to answer... */
@@ -602,80 +620,63 @@ static int
 raidsize(dev_t dev)
 {
 	struct raid_softc *rs;
-	struct disklabel *lp;
-	int     part, unit, omask, size;
+	struct dk_softc *dksc;
+	unsigned int unit;
 
 	unit = raidunit(dev);
-	if ((rs = raidget(unit)) == NULL)
+	if ((rs = raidget(unit, false)) == NULL)
 		return -1;
+	dksc = &rs->sc_dksc;
+
 	if ((rs->sc_flags & RAIDF_INITED) == 0)
-		return (-1);
+		return -1;
 
-	part = DISKPART(dev);
-	omask = rs->sc_dkdev.dk_openmask & (1 << part);
-	lp = rs->sc_dkdev.dk_label;
-
-	if (omask == 0 && raidopen(dev, 0, S_IFBLK, curlwp))
-		return (-1);
-
-	if (lp->d_partitions[part].p_fstype != FS_SWAP)
-		size = -1;
-	else
-		size = lp->d_partitions[part].p_size *
-		    (lp->d_secsize / DEV_BSIZE);
-
-	if (omask == 0 && raidclose(dev, 0, S_IFBLK, curlwp))
-		return (-1);
-
-	return (size);
-
+	return dk_size(dksc, dev);
 }
 
 static int
 raiddump(dev_t dev, daddr_t blkno, void *va, size_t size)
 {
-	int     unit = raidunit(dev);
+	unsigned int unit;
 	struct raid_softc *rs;
-	const struct bdevsw *bdev;
-	struct disklabel *lp;
-	RF_Raid_t *raidPtr;
-	daddr_t offset;
-	int     part, c, sparecol, j, scol, dumpto;
-	int     error = 0;
+	struct dk_softc *dksc;
 
-	if ((rs = raidget(unit)) == NULL)
+	unit = raidunit(dev);
+	if ((rs = raidget(unit, false)) == NULL)
 		return ENXIO;
-
-	raidPtr = &rs->sc_r;
+	dksc = &rs->sc_dksc;
 
 	if ((rs->sc_flags & RAIDF_INITED) == 0)
-		return ENXIO;
+		return ENODEV;
+
+        /*
+           Note that blkno is relative to this particular partition.
+           By adding adding RF_PROTECTED_SECTORS, we get a value that
+	   is relative to the partition used for the underlying component.
+        */
+	blkno += RF_PROTECTED_SECTORS;
+
+	return dk_dump(dksc, dev, blkno, va, size);
+}
+
+static int
+raid_dumpblocks(device_t dev, void *va, daddr_t blkno, int nblk)
+{
+	struct raid_softc *rs = raidsoftc(dev);
+	const struct bdevsw *bdev;
+	RF_Raid_t *raidPtr;
+	int     c, sparecol, j, scol, dumpto;
+	int     error = 0;
+
+	raidPtr = &rs->sc_r;
 
 	/* we only support dumping to RAID 1 sets */
 	if (raidPtr->Layout.numDataCol != 1 || 
 	    raidPtr->Layout.numParityCol != 1)
 		return EINVAL;
 
-
 	if ((error = raidlock(rs)) != 0)
 		return error;
-
-	if (size % DEV_BSIZE != 0) {
-		error = EINVAL;
-		goto out;
-	}
-
-	if (blkno + size / DEV_BSIZE > rs->sc_size) {
-		printf("%s: blkno (%" PRIu64 ") + size / DEV_BSIZE (%zu) > "
-		    "sc->sc_size (%" PRIu64 ")\n", __func__, blkno,
-		    size / DEV_BSIZE, rs->sc_size);
-		error = EINVAL;
-		goto out;
-	}
-
-	part = DISKPART(dev);
-	lp = rs->sc_dkdev.dk_label;
-	offset = lp->d_partitions[part].p_offset + RF_PROTECTED_SECTORS;
 
 	/* figure out what device is alive.. */
 
@@ -750,17 +751,13 @@ raiddump(dev_t dev, daddr_t blkno, void *va, size_t size)
 	}
 
 	bdev = bdevsw_lookup(raidPtr->Disks[dumpto].dev);
+	if (bdev == NULL) {
+		error = ENXIO;
+		goto out;
+	}
 
-	/* 
-	   Note that blkno is relative to this particular partition.
-	   By adding the offset of this partition in the RAID
-	   set, and also adding RF_PROTECTED_SECTORS, we get a
-	   value that is relative to the partition used for the
-	   underlying component.
-	*/
-	   
 	error = (*bdev->d_dump)(raidPtr->Disks[dumpto].dev, 
-				blkno + offset, va, size);
+				blkno, va, nblk * raidPtr->bytesPerSector);
 	
 out:
 	raidunlock(rs);
@@ -775,11 +772,11 @@ raidopen(dev_t dev, int flags, int fmt,
 {
 	int     unit = raidunit(dev);
 	struct raid_softc *rs;
-	struct disklabel *lp;
-	int     part, pmask;
+	struct dk_softc *dksc;
 	int     error = 0;
+	int     part, pmask;
 
-	if ((rs = raidget(unit)) == NULL)
+	if ((rs = raidget(unit, true)) == NULL)
 		return ENXIO;
 	if ((error = raidlock(rs)) != 0)
 		return (error);
@@ -789,47 +786,12 @@ raidopen(dev_t dev, int flags, int fmt,
 		goto bad;
 	}
 
-	lp = rs->sc_dkdev.dk_label;
+	dksc = &rs->sc_dksc;
 
 	part = DISKPART(dev);
-
-	/*
-	 * If there are wedges, and this is not RAW_PART, then we
-	 * need to fail.
-	 */
-	if (rs->sc_dkdev.dk_nwedges != 0 && part != RAW_PART) {
-		error = EBUSY;
-		goto bad;
-	}
 	pmask = (1 << part);
 
-	if ((rs->sc_flags & RAIDF_INITED) &&
-	    (rs->sc_dkdev.dk_nwedges == 0) &&
-	    (rs->sc_dkdev.dk_openmask == 0))
-		raidgetdisklabel(dev);
-
-	/* make sure that this partition exists */
-
-	if (part != RAW_PART) {
-		if (((rs->sc_flags & RAIDF_INITED) == 0) ||
-		    ((part >= lp->d_npartitions) ||
-			(lp->d_partitions[part].p_fstype == FS_UNUSED))) {
-			error = ENXIO;
-			goto bad;
-		}
-	}
-	/* Prevent this unit from being unconfigured while open. */
-	switch (fmt) {
-	case S_IFCHR:
-		rs->sc_dkdev.dk_copenmask |= pmask;
-		break;
-
-	case S_IFBLK:
-		rs->sc_dkdev.dk_bopenmask |= pmask;
-		break;
-	}
-
-	if ((rs->sc_dkdev.dk_openmask == 0) &&
+	if (!DK_BUSY(dksc, pmask) &&
 	    ((rs->sc_flags & RAIDF_INITED) != 0)) {
 		/* First one... mark things as dirty... Note that we *MUST*
 		 have done a configure before this.  I DO NOT WANT TO BE
@@ -842,9 +804,8 @@ raidopen(dev_t dev, int flags, int fmt,
 		rf_markalldirty(&rs->sc_r);
 	}
 
-
-	rs->sc_dkdev.dk_openmask =
-	    rs->sc_dkdev.dk_copenmask | rs->sc_dkdev.dk_bopenmask;
+	if ((rs->sc_flags & RAIDF_INITED) != 0)
+		error = dk_open(dksc, dev, flags, fmt, l);
 
 bad:
 	raidunlock(rs);
@@ -854,125 +815,144 @@ bad:
 
 }
 
+static int
+raid_lastclose(device_t self)
+{
+	struct raid_softc *rs = raidsoftc(self);
+
+	/* Last one... device is not unconfigured yet.
+	   Device shutdown has taken care of setting the
+	   clean bits if RAIDF_INITED is not set
+	   mark things as clean... */
+
+	rf_update_component_labels(&rs->sc_r,
+	    RF_FINAL_COMPONENT_UPDATE);
+
+	/* pass to unlocked code */
+	if ((rs->sc_flags & RAIDF_SHUTDOWN) != 0)
+		rs->sc_flags |= RAIDF_DETACH;
+
+	return 0;
+}
+
 /* ARGSUSED */
 static int
 raidclose(dev_t dev, int flags, int fmt, struct lwp *l)
 {
 	int     unit = raidunit(dev);
 	struct raid_softc *rs;
-	int     error = 0;
-	int     part;
+	struct dk_softc *dksc;
+	cfdata_t cf;
+	int     error = 0, do_detach = 0, do_put = 0;
 
-	if ((rs = raidget(unit)) == NULL)
+	if ((rs = raidget(unit, false)) == NULL)
 		return ENXIO;
+	dksc = &rs->sc_dksc;
 
 	if ((error = raidlock(rs)) != 0)
 		return (error);
 
-	part = DISKPART(dev);
-
-	/* ...that much closer to allowing unconfiguration... */
-	switch (fmt) {
-	case S_IFCHR:
-		rs->sc_dkdev.dk_copenmask &= ~(1 << part);
-		break;
-
-	case S_IFBLK:
-		rs->sc_dkdev.dk_bopenmask &= ~(1 << part);
-		break;
-	}
-	rs->sc_dkdev.dk_openmask =
-	    rs->sc_dkdev.dk_copenmask | rs->sc_dkdev.dk_bopenmask;
-
-	if ((rs->sc_dkdev.dk_openmask == 0) &&
-	    ((rs->sc_flags & RAIDF_INITED) != 0)) {
-		/* Last one... device is not unconfigured yet.
-		   Device shutdown has taken care of setting the
-		   clean bits if RAIDF_INITED is not set
-		   mark things as clean... */
-
-		rf_update_component_labels(&rs->sc_r,
-						 RF_FINAL_COMPONENT_UPDATE);
-
-		/* If the kernel is shutting down, it will detach
-		 * this RAID set soon enough.
-		 */
-	}
+	if ((rs->sc_flags & RAIDF_INITED) != 0) {
+		error = dk_close(dksc, dev, flags, fmt, l);
+		if ((rs->sc_flags & RAIDF_DETACH) != 0)
+			do_detach = 1;
+	} else if ((rs->sc_flags & RAIDF_SHUTDOWN) != 0)
+		do_put = 1;
 
 	raidunlock(rs);
-	return (0);
 
+	if (do_detach) {
+		/* free the pseudo device attach bits */
+		cf = device_cfdata(dksc->sc_dev);
+		error = config_detach(dksc->sc_dev, 0);
+		if (error == 0) 
+			free(cf, M_RAIDFRAME);
+	} else if (do_put) {
+		raidput(rs);
+	}
+
+	return (error);
+
+}
+
+static void
+raid_wakeup(RF_Raid_t *raidPtr)
+{
+	rf_lock_mutex2(raidPtr->iodone_lock);
+	rf_signal_cond2(raidPtr->iodone_cv);
+	rf_unlock_mutex2(raidPtr->iodone_lock);
 }
 
 static void
 raidstrategy(struct buf *bp)
 {
-	unsigned int unit = raidunit(bp->b_dev);
-	RF_Raid_t *raidPtr;
-	int     wlabel;
+	unsigned int unit;
 	struct raid_softc *rs;
+	struct dk_softc *dksc;
+	RF_Raid_t *raidPtr;
 
-	if ((rs = raidget(unit)) == NULL) {
+	unit = raidunit(bp->b_dev);
+	if ((rs = raidget(unit, false)) == NULL) {
 		bp->b_error = ENXIO;
-		goto done;
+		goto fail;
 	}
 	if ((rs->sc_flags & RAIDF_INITED) == 0) {
 		bp->b_error = ENXIO;
-		goto done;
+		goto fail;
 	}
+	dksc = &rs->sc_dksc;
 	raidPtr = &rs->sc_r;
-	if (!raidPtr->valid) {
-		bp->b_error = ENODEV;
+
+	/* Queue IO only */
+	if (dk_strategy_defer(dksc, bp))
 		goto done;
-	}
-	if (bp->b_bcount == 0) {
-		db1_printf(("b_bcount is zero..\n"));
-		goto done;
-	}
 
-	/*
-	 * Do bounds checking and adjust transfer.  If there's an
-	 * error, the bounds check will flag that for us.
-	 */
-
-	wlabel = rs->sc_flags & (RAIDF_WLABEL | RAIDF_LABELLING);
-	if (DISKPART(bp->b_dev) == RAW_PART) {
-		uint64_t size; /* device size in DEV_BSIZE unit */
-
-		if (raidPtr->logBytesPerSector > DEV_BSHIFT) {
-			size = raidPtr->totalSectors <<
-			    (raidPtr->logBytesPerSector - DEV_BSHIFT);
-		} else {
-			size = raidPtr->totalSectors >>
-			    (DEV_BSHIFT - raidPtr->logBytesPerSector);
-		}
-		if (bounds_check_with_mediasize(bp, DEV_BSIZE, size) <= 0) {
-			goto done;
-		}
-	} else {
-		if (bounds_check_with_label(&rs->sc_dkdev, bp, wlabel) <= 0) {
-			db1_printf(("Bounds check failed!!:%d %d\n",
-				(int) bp->b_blkno, (int) wlabel));
-			goto done;
-		}
-	}
-
-	rf_lock_mutex2(raidPtr->iodone_lock);
-
-	bp->b_resid = 0;
-
-	/* stuff it onto our queue */
-	bufq_put(rs->buf_queue, bp);
-
-	/* scheduled the IO to happen at the next convenient time */
-	rf_signal_cond2(raidPtr->iodone_cv);
-	rf_unlock_mutex2(raidPtr->iodone_lock);
-
-	return;
+	/* schedule the IO to happen at the next convenient time */
+	raid_wakeup(raidPtr);
 
 done:
+	return;
+
+fail:
 	bp->b_resid = bp->b_bcount;
 	biodone(bp);
+}
+
+static int
+raid_diskstart(device_t dev, struct buf *bp)
+{
+	struct raid_softc *rs = raidsoftc(dev);
+	RF_Raid_t *raidPtr;
+
+	raidPtr = &rs->sc_r;
+	if (!raidPtr->valid) {
+		db1_printf(("raid is not valid..\n"));
+		return ENODEV;
+	}
+
+	/* XXX */
+	bp->b_resid = 0;
+
+	return raiddoaccess(raidPtr, bp);
+}
+
+void
+raiddone(RF_Raid_t *raidPtr, struct buf *bp)
+{
+	struct raid_softc *rs;
+	struct dk_softc *dksc;
+
+	rs = raidPtr->softc;
+	dksc = &rs->sc_dksc;
+
+	dk_done(dksc, bp);
+
+	rf_lock_mutex2(raidPtr->mutex);
+	raidPtr->openings++;
+	rf_unlock_mutex2(raidPtr->mutex);
+
+	/* schedule more IO */
+	raid_wakeup(raidPtr);
 }
 
 /* ARGSUSED */
@@ -982,7 +962,7 @@ raidread(dev_t dev, struct uio *uio, int flags)
 	int     unit = raidunit(dev);
 	struct raid_softc *rs;
 
-	if ((rs = raidget(unit)) == NULL)
+	if ((rs = raidget(unit, false)) == NULL)
 		return ENXIO;
 
 	if ((rs->sc_flags & RAIDF_INITED) == 0)
@@ -999,7 +979,7 @@ raidwrite(dev_t dev, struct uio *uio, int flags)
 	int     unit = raidunit(dev);
 	struct raid_softc *rs;
 
-	if ((rs = raidget(unit)) == NULL)
+	if ((rs = raidget(unit, false)) == NULL)
 		return ENXIO;
 
 	if ((rs->sc_flags & RAIDF_INITED) == 0)
@@ -1012,31 +992,37 @@ raidwrite(dev_t dev, struct uio *uio, int flags)
 static int
 raid_detach_unlocked(struct raid_softc *rs)
 {
-	int error;
+	struct dk_softc *dksc = &rs->sc_dksc;
 	RF_Raid_t *raidPtr;
+	int error;
 
 	raidPtr = &rs->sc_r;
 
-	/*
-	 * If somebody has a partition mounted, we shouldn't
-	 * shutdown.
-	 */
-	if (rs->sc_dkdev.dk_openmask != 0)
+	if (DK_BUSY(dksc, 0) ||
+	    raidPtr->recon_in_progress != 0 ||
+	    raidPtr->parity_rewrite_in_progress != 0 ||
+	    raidPtr->copyback_in_progress != 0)
 		return EBUSY;
 
 	if ((rs->sc_flags & RAIDF_INITED) == 0)
-		;	/* not initialized: nothing to do */
-	else if ((error = rf_Shutdown(raidPtr)) != 0)
+		return 0;
+
+	rs->sc_flags &= ~RAIDF_SHUTDOWN;
+
+	if ((error = rf_Shutdown(raidPtr)) != 0)
 		return error;
-	else
-		rs->sc_flags &= ~(RAIDF_INITED|RAIDF_SHUTDOWN);
+
+	rs->sc_flags &= ~RAIDF_INITED;
+
+	/* Kill off any queued buffers */
+	dk_drain(dksc);
+	bufq_free(dksc->sc_bufq);
 
 	/* Detach the disk. */
-	dkwedge_delall(&rs->sc_dkdev);
-	disk_detach(&rs->sc_dkdev);
-	disk_destroy(&rs->sc_dkdev);
-
-	aprint_normal_dev(rs->sc_dev, "detached\n");
+	dkwedge_delall(&dksc->sc_dkdev);
+	disk_detach(&dksc->sc_dkdev);
+	disk_destroy(&dksc->sc_dkdev);
+	dk_detach(dksc);
 
 	return 0;
 }
@@ -1046,9 +1032,9 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	int     unit = raidunit(dev);
 	int     error = 0;
-	int     part, pmask, s;
-	cfdata_t cf;
+	int     part, pmask;
 	struct raid_softc *rs;
+	struct dk_softc *dksc;
 	RF_Config_t *k_cfg, *u_cfg;
 	RF_Raid_t *raidPtr;
 	RF_RaidDisk_t *diskPtr;
@@ -1066,63 +1052,17 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	RF_SingleComponent_t component;
 	RF_ProgressInfo_t progressInfo, **progressInfoPtr;
 	int i, j, d;
-#ifdef __HAVE_OLD_DISKLABEL
-	struct disklabel newlabel;
-#endif
 
-	if ((rs = raidget(unit)) == NULL)
+	if ((rs = raidget(unit, false)) == NULL)
 		return ENXIO;
+	dksc = &rs->sc_dksc;
 	raidPtr = &rs->sc_r;
 
 	db1_printf(("raidioctl: %d %d %d %lu\n", (int) dev,
 		(int) DISKPART(dev), (int) unit, cmd));
 
-	/* Must be open for writes for these commands... */
-	switch (cmd) {
-#ifdef DIOCGSECTORSIZE
-	case DIOCGSECTORSIZE:
-		*(u_int *)data = raidPtr->bytesPerSector;
-		return 0;
-	case DIOCGMEDIASIZE:
-		*(off_t *)data =
-		    (off_t)raidPtr->totalSectors * raidPtr->bytesPerSector;
-		return 0;
-#endif
-	case DIOCSDINFO:
-	case DIOCWDINFO:
-#ifdef __HAVE_OLD_DISKLABEL
-	case ODIOCWDINFO:
-	case ODIOCSDINFO:
-#endif
-	case DIOCWLABEL:
-	case DIOCAWEDGE:
-	case DIOCDWEDGE:
-	case DIOCMWEDGES:
-	case DIOCSSTRATEGY:
-		if ((flag & FWRITE) == 0)
-			return (EBADF);
-	}
-
 	/* Must be initialized for these... */
 	switch (cmd) {
-	case DIOCGDINFO:
-	case DIOCSDINFO:
-	case DIOCWDINFO:
-#ifdef __HAVE_OLD_DISKLABEL
-	case ODIOCGDINFO:
-	case ODIOCWDINFO:
-	case ODIOCSDINFO:
-	case ODIOCGDEFLABEL:
-#endif
-	case DIOCGPART:
-	case DIOCWLABEL:
-	case DIOCGDEFLABEL:
-	case DIOCAWEDGE:
-	case DIOCDWEDGE:
-	case DIOCLWEDGES:
-	case DIOCMWEDGES:
-	case DIOCCACHESYNC:
-	case RAIDFRAME_SHUTDOWN:
 	case RAIDFRAME_REWRITEPARITY:
 	case RAIDFRAME_GET_INFO:
 	case RAIDFRAME_RESET_ACCTOTALS:
@@ -1152,8 +1092,6 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	case RAIDFRAME_PARITYMAP_GET_DISABLE:
 	case RAIDFRAME_PARITYMAP_SET_DISABLE:
 	case RAIDFRAME_PARITYMAP_SET_PARAMS:
-	case DIOCGSTRATEGY:
-	case DIOCSSTRATEGY:
 		if ((rs->sc_flags & RAIDF_INITED) == 0)
 			return (ENXIO);
 	}
@@ -1190,23 +1128,27 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 			RF_Free(k_cfg, sizeof(RF_Config_t));
 			db1_printf(("rf_ioctl: retcode=%d copyin.1\n",
 				retcode));
-			return (retcode);
+			goto no_config;
 		}
 		goto config;
 	config:
+		rs->sc_flags &= ~RAIDF_SHUTDOWN;
+
 		/* allocate a buffer for the layout-specific data, and copy it
 		 * in */
 		if (k_cfg->layoutSpecificSize) {
 			if (k_cfg->layoutSpecificSize > 10000) {
 				/* sanity check */
 				RF_Free(k_cfg, sizeof(RF_Config_t));
-				return (EINVAL);
+				retcode = EINVAL;
+				goto no_config;
 			}
 			RF_Malloc(specific_buf, k_cfg->layoutSpecificSize,
 			    (u_char *));
 			if (specific_buf == NULL) {
 				RF_Free(k_cfg, sizeof(RF_Config_t));
-				return (ENOMEM);
+				retcode = ENOMEM;
+				goto no_config;
 			}
 			retcode = copyin(k_cfg->layoutSpecific, specific_buf,
 			    k_cfg->layoutSpecificSize);
@@ -1216,7 +1158,7 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 					k_cfg->layoutSpecificSize);
 				db1_printf(("rf_ioctl: retcode=%d copyin.2\n",
 					retcode));
-				return (retcode);
+				goto no_config;
 			}
 		} else
 			specific_buf = NULL;
@@ -1245,6 +1187,7 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 			raidPtr->openings = RAIDOUTSTANDING;
 
 			raidinit(rs);
+			raid_wakeup(raidPtr);
 			rf_markalldirty(raidPtr);
 		}
 		/* free the buffers.  No return code here. */
@@ -1253,6 +1196,13 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		}
 		RF_Free(k_cfg, sizeof(RF_Config_t));
 
+	no_config:
+		/*
+		 * If configuration failed, set sc_flags so that we
+		 * will detach the device when we close it.
+		 */
+		if (retcode != 0)
+			rs->sc_flags |= RAIDF_SHUTDOWN;
 		return (retcode);
 
 		/* shutdown the system */
@@ -1264,28 +1214,18 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		if ((error = raidlock(rs)) != 0)
 			return (error);
 
-		if ((rs->sc_dkdev.dk_openmask & ~pmask) ||
-		    ((rs->sc_dkdev.dk_bopenmask & pmask) &&
-			(rs->sc_dkdev.dk_copenmask & pmask)))
+		if (DK_BUSY(dksc, pmask) ||
+		    raidPtr->recon_in_progress != 0 ||
+		    raidPtr->parity_rewrite_in_progress != 0 ||
+		    raidPtr->copyback_in_progress != 0)
 			retcode = EBUSY;
 		else {
+			/* detach and free on close */
 			rs->sc_flags |= RAIDF_SHUTDOWN;
-			rs->sc_dkdev.dk_copenmask &= ~pmask;
-			rs->sc_dkdev.dk_bopenmask &= ~pmask;
-			rs->sc_dkdev.dk_openmask &= ~pmask;
 			retcode = 0;
 		}
 
 		raidunlock(rs);
-
-		if (retcode != 0)
-			return retcode;
-
-		/* free the pseudo device attach bits */
-
-		cf = device_cfdata(rs->sc_dev);
-		if ((retcode = config_detach(rs->sc_dev, DETACH_QUIET)) == 0)
-			free(cf, M_RAIDFRAME);
 
 		return (retcode);
 	case RAIDFRAME_GET_COMPONENT_LABEL:
@@ -1767,6 +1707,19 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 				  sizeof(RF_ProgressInfo_t));
 		return (retcode);
 
+	case RAIDFRAME_SET_LAST_UNIT:
+		for (column = 0; column < raidPtr->numCol; column++)
+			if (raidPtr->Disks[column].status != rf_ds_optimal)
+				return EBUSY;
+
+		for (column = 0; column < raidPtr->numCol; column++) {
+			clabel = raidget_component_label(raidPtr, column);
+			clabel->last_unit = *(int *)data;
+			raidflush_component_label(raidPtr, column);
+		}
+		rs->sc_cflags |= RAIDF_UNIT_CHANGED;
+		return 0;
+
 		/* the sparetable daemon calls this to wait for the kernel to
 		 * need a spare table. this ioctl does not return until a
 		 * spare table is needed. XXX -- calling mpsleep here in the
@@ -1833,114 +1786,13 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	 * Add support for "regular" device ioctls here.
 	 */
 	
-	error = disk_ioctl(&rs->sc_dkdev, dev, cmd, data, flag, l); 
+	error = dk_ioctl(dksc, dev, cmd, data, flag, l);
 	if (error != EPASSTHROUGH)
 		return (error);
 
 	switch (cmd) {
-	case DIOCWDINFO:
-	case DIOCSDINFO:
-#ifdef __HAVE_OLD_DISKLABEL
-	case ODIOCWDINFO:
-	case ODIOCSDINFO:
-#endif
-	{
-		struct disklabel *lp;
-#ifdef __HAVE_OLD_DISKLABEL
-		if (cmd == ODIOCSDINFO || cmd == ODIOCWDINFO) {
-			memset(&newlabel, 0, sizeof newlabel);
-			memcpy(&newlabel, data, sizeof (struct olddisklabel));
-			lp = &newlabel;
-		} else
-#endif
-		lp = (struct disklabel *)data;
-
-		if ((error = raidlock(rs)) != 0)
-			return (error);
-
-		rs->sc_flags |= RAIDF_LABELLING;
-
-		error = setdisklabel(rs->sc_dkdev.dk_label,
-		    lp, 0, rs->sc_dkdev.dk_cpulabel);
-		if (error == 0) {
-			if (cmd == DIOCWDINFO
-#ifdef __HAVE_OLD_DISKLABEL
-			    || cmd == ODIOCWDINFO
-#endif
-			   )
-				error = writedisklabel(RAIDLABELDEV(dev),
-				    raidstrategy, rs->sc_dkdev.dk_label,
-				    rs->sc_dkdev.dk_cpulabel);
-		}
-		rs->sc_flags &= ~RAIDF_LABELLING;
-
-		raidunlock(rs);
-
-		if (error)
-			return (error);
-		break;
-	}
-
-	case DIOCWLABEL:
-		if (*(int *) data != 0)
-			rs->sc_flags |= RAIDF_WLABEL;
-		else
-			rs->sc_flags &= ~RAIDF_WLABEL;
-		break;
-
-	case DIOCGDEFLABEL:
-		raidgetdefaultlabel(raidPtr, rs, (struct disklabel *) data);
-		break;
-
-#ifdef __HAVE_OLD_DISKLABEL
-	case ODIOCGDEFLABEL:
-		raidgetdefaultlabel(raidPtr, rs, &newlabel);
-		if (newlabel.d_npartitions > OLDMAXPARTITIONS)
-			return ENOTTY;
-		memcpy(data, &newlabel, sizeof (struct olddisklabel));
-		break;
-#endif
-
 	case DIOCCACHESYNC:
 		return rf_sync_component_caches(raidPtr);
-
-	case DIOCGSTRATEGY:
-	    {
-		struct disk_strategy *dks = (void *)data;
-
-		s = splbio();
-		strlcpy(dks->dks_name, bufq_getstrategyname(rs->buf_queue),
-		    sizeof(dks->dks_name));
-		splx(s);
-		dks->dks_paramlen = 0;
-
-		return 0;
-	    }
-	
-	case DIOCSSTRATEGY:
-	    {
-		struct disk_strategy *dks = (void *)data;
-		struct bufq_state *new;
-		struct bufq_state *old;
-
-		if (dks->dks_param != NULL) {
-			return EINVAL;
-		}
-		dks->dks_name[sizeof(dks->dks_name) - 1] = 0; /* ensure term */
-		error = bufq_alloc(&new, dks->dks_name,
-		    BUFQ_EXACT|BUFQ_SORT_RAWBLOCK);
-		if (error) {
-			return error;
-		}
-		s = splbio();
-		old = rs->buf_queue;
-		bufq_move(new, old);
-		rs->buf_queue = new;
-		splx(s);
-		bufq_free(old);
-
-		return 0;
-	    }
 
 	default:
 		retcode = ENOTTY;
@@ -1958,17 +1810,15 @@ static void
 raidinit(struct raid_softc *rs)
 {
 	cfdata_t cf;
-	int     unit;
+	unsigned int unit;
+	struct dk_softc *dksc = &rs->sc_dksc;
 	RF_Raid_t *raidPtr = &rs->sc_r;
+	device_t dev;
 
 	unit = raidPtr->raidid;
 
-
-	/* XXX should check return code first... */
-	rs->sc_flags |= RAIDF_INITED;
-
 	/* XXX doesn't check bounds. */
-	snprintf(rs->sc_xname, sizeof(rs->sc_xname), "raid%d", unit);
+	snprintf(rs->sc_xname, sizeof(rs->sc_xname), "raid%u", unit);
 
 	/* attach the pseudo device */
 	cf = malloc(sizeof(*cf), M_RAIDFRAME, M_WAITOK);
@@ -1977,33 +1827,41 @@ raidinit(struct raid_softc *rs)
 	cf->cf_unit = unit;
 	cf->cf_fstate = FSTATE_STAR;
 
-	rs->sc_dev = config_attach_pseudo(cf);
-
-	if (rs->sc_dev == NULL) {
+	dev = config_attach_pseudo(cf);
+	if (dev == NULL) {
 		printf("raid%d: config_attach_pseudo failed\n",
 		    raidPtr->raidid);
-		rs->sc_flags &= ~RAIDF_INITED;
 		free(cf, M_RAIDFRAME);
 		return;
 	}
 
+	/* provide a backpointer to the real softc */
+	raidsoftc(dev) = rs;
+
 	/* disk_attach actually creates space for the CPU disklabel, among
 	 * other things, so it's critical to call this *BEFORE* we try putzing
 	 * with disklabels. */
-
-	disk_init(&rs->sc_dkdev, rs->sc_xname, &rf_dkdriver);
-	disk_attach(&rs->sc_dkdev);
+	dk_init(dksc, dev, DKTYPE_RAID);
+	disk_init(&dksc->sc_dkdev, rs->sc_xname, &rf_dkdriver);
 
 	/* XXX There may be a weird interaction here between this, and
 	 * protectedSectors, as used in RAIDframe.  */
 
 	rs->sc_size = raidPtr->totalSectors;
 
+	/* Attach dk and disk subsystems */
+	dk_attach(dksc);
+	disk_attach(&dksc->sc_dkdev);
 	rf_set_geometry(rs, raidPtr);
 
-	dkwedge_discover(&rs->sc_dkdev);
+	bufq_alloc(&dksc->sc_bufq, "fcfs", BUFQ_SORT_RAWBLOCK);
 
+	/* mark unit as usuable */
+	rs->sc_flags |= RAIDF_INITED;
+
+	dkwedge_discover(&dksc->sc_dkdev);
 }
+
 #if (RF_INCLUDE_PARITY_DECLUSTERING_DS > 0)
 /* wake up the daemon & tell it to get us a spare table
  * XXX
@@ -2050,16 +1908,11 @@ rf_GetSpareTableFromDaemon(RF_SparetWait_t *req)
 void
 raidstart(RF_Raid_t *raidPtr)
 {
-	RF_SectorCount_t num_blocks, pb, sum;
-	RF_RaidAddr_t raid_addr;
-	struct partition *pp;
-	daddr_t blocknum;
 	struct raid_softc *rs;
-	int     do_async;
-	struct buf *bp;
-	int rc;
+	struct dk_softc *dksc;
 
 	rs = raidPtr->softc;
+	dksc = &rs->sc_dksc;
 	/* quick check to see if anything has died recently */
 	rf_lock_mutex2(raidPtr->mutex);
 	if (raidPtr->numNewFailures > 0) {
@@ -2069,104 +1922,88 @@ raidstart(RF_Raid_t *raidPtr)
 		rf_lock_mutex2(raidPtr->mutex);
 		raidPtr->numNewFailures--;
 	}
-
-	/* Check to see if we're at the limit... */
-	while (raidPtr->openings > 0) {
-		rf_unlock_mutex2(raidPtr->mutex);
-
-		/* get the next item, if any, from the queue */
-		if ((bp = bufq_get(rs->buf_queue)) == NULL) {
-			/* nothing more to do */
-			return;
-		}
-
-		/* Ok, for the bp we have here, bp->b_blkno is relative to the
-		 * partition.. Need to make it absolute to the underlying
-		 * device.. */
-
-		blocknum = bp->b_blkno << DEV_BSHIFT >> raidPtr->logBytesPerSector;
-		if (DISKPART(bp->b_dev) != RAW_PART) {
-			pp = &rs->sc_dkdev.dk_label->d_partitions[DISKPART(bp->b_dev)];
-			blocknum += pp->p_offset;
-		}
-
-		db1_printf(("Blocks: %d, %d\n", (int) bp->b_blkno,
-			    (int) blocknum));
-
-		db1_printf(("bp->b_bcount = %d\n", (int) bp->b_bcount));
-		db1_printf(("bp->b_resid = %d\n", (int) bp->b_resid));
-
-		/* *THIS* is where we adjust what block we're going to...
-		 * but DO NOT TOUCH bp->b_blkno!!! */
-		raid_addr = blocknum;
-
-		num_blocks = bp->b_bcount >> raidPtr->logBytesPerSector;
-		pb = (bp->b_bcount & raidPtr->sectorMask) ? 1 : 0;
-		sum = raid_addr + num_blocks + pb;
-		if (1 || rf_debugKernelAccess) {
-			db1_printf(("raid_addr=%d sum=%d num_blocks=%d(+%d) (%d)\n",
-				    (int) raid_addr, (int) sum, (int) num_blocks,
-				    (int) pb, (int) bp->b_resid));
-		}
-		if ((sum > raidPtr->totalSectors) || (sum < raid_addr)
-		    || (sum < num_blocks) || (sum < pb)) {
-			bp->b_error = ENOSPC;
-			bp->b_resid = bp->b_bcount;
-			biodone(bp);
-			rf_lock_mutex2(raidPtr->mutex);
-			continue;
-		}
-		/*
-		 * XXX rf_DoAccess() should do this, not just DoAccessKernel()
-		 */
-
-		if (bp->b_bcount & raidPtr->sectorMask) {
-			bp->b_error = EINVAL;
-			bp->b_resid = bp->b_bcount;
-			biodone(bp);
-			rf_lock_mutex2(raidPtr->mutex);
-			continue;
-
-		}
-		db1_printf(("Calling DoAccess..\n"));
-
-
-		rf_lock_mutex2(raidPtr->mutex);
-		raidPtr->openings--;
-		rf_unlock_mutex2(raidPtr->mutex);
-
-		/*
-		 * Everything is async.
-		 */
-		do_async = 1;
-
-		disk_busy(&rs->sc_dkdev);
-
-		/* XXX we're still at splbio() here... do we *really*
-		   need to be? */
-
-		/* don't ever condition on bp->b_flags & B_WRITE.
-		 * always condition on B_READ instead */
-
-		rc = rf_DoAccess(raidPtr, (bp->b_flags & B_READ) ?
-				 RF_IO_TYPE_READ : RF_IO_TYPE_WRITE,
-				 do_async, raid_addr, num_blocks,
-				 bp->b_data, bp, RF_DAG_NONBLOCKING_IO);
-
-		if (rc) {
-			bp->b_error = rc;
-			bp->b_resid = bp->b_bcount;
-			biodone(bp);
-			/* continue loop */
-		}
-
-		rf_lock_mutex2(raidPtr->mutex);
-	}
 	rf_unlock_mutex2(raidPtr->mutex);
+
+	if ((rs->sc_flags & RAIDF_INITED) == 0) {
+		printf("raid%d: raidstart not ready\n", raidPtr->raidid);
+		return;
+	}
+
+	dk_start(dksc, NULL);
 }
 
+static int
+raiddoaccess(RF_Raid_t *raidPtr, struct buf *bp)
+{
+	RF_SectorCount_t num_blocks, pb, sum;
+	RF_RaidAddr_t raid_addr;
+	daddr_t blocknum;
+	int     do_async;
+	int rc;
+
+	rf_lock_mutex2(raidPtr->mutex);
+	if (raidPtr->openings == 0) {
+		rf_unlock_mutex2(raidPtr->mutex);
+		return EAGAIN;
+	}
+	rf_unlock_mutex2(raidPtr->mutex);
+
+	blocknum = bp->b_rawblkno;
+
+	db1_printf(("Blocks: %d, %d\n", (int) bp->b_blkno,
+		    (int) blocknum));
+
+	db1_printf(("bp->b_bcount = %d\n", (int) bp->b_bcount));
+	db1_printf(("bp->b_resid = %d\n", (int) bp->b_resid));
+
+	/* *THIS* is where we adjust what block we're going to...
+	 * but DO NOT TOUCH bp->b_blkno!!! */
+	raid_addr = blocknum;
+
+	num_blocks = bp->b_bcount >> raidPtr->logBytesPerSector;
+	pb = (bp->b_bcount & raidPtr->sectorMask) ? 1 : 0;
+	sum = raid_addr + num_blocks + pb;
+	if (1 || rf_debugKernelAccess) {
+		db1_printf(("raid_addr=%d sum=%d num_blocks=%d(+%d) (%d)\n",
+			    (int) raid_addr, (int) sum, (int) num_blocks,
+			    (int) pb, (int) bp->b_resid));
+	}
+	if ((sum > raidPtr->totalSectors) || (sum < raid_addr)
+	    || (sum < num_blocks) || (sum < pb)) {
+		rc = ENOSPC;
+		goto done;
+	}
+	/*
+	 * XXX rf_DoAccess() should do this, not just DoAccessKernel()
+	 */
+
+	if (bp->b_bcount & raidPtr->sectorMask) {
+		rc = ENOSPC;
+		goto done;
+	}
+	db1_printf(("Calling DoAccess..\n"));
 
 
+	rf_lock_mutex2(raidPtr->mutex);
+	raidPtr->openings--;
+	rf_unlock_mutex2(raidPtr->mutex);
+
+	/*
+	 * Everything is async.
+	 */
+	do_async = 1;
+
+	/* don't ever condition on bp->b_flags & B_WRITE.
+	 * always condition on B_READ instead */
+
+	rc = rf_DoAccess(raidPtr, (bp->b_flags & B_READ) ?
+			 RF_IO_TYPE_READ : RF_IO_TYPE_WRITE,
+			 do_async, raid_addr, num_blocks,
+			 bp->b_data, bp, RF_DAG_NONBLOCKING_IO);
+
+done:
+	return rc;
+}
 
 /* invoke an I/O from kernel mode.  Disk queue should be locked upon entry */
 
@@ -2342,128 +2179,6 @@ InitBP(struct buf *bp, struct vnode *b_vp, unsigned rw_flag, dev_t dev,
 	bp->b_private = cbArg;
 }
 
-static void
-raidgetdefaultlabel(RF_Raid_t *raidPtr, struct raid_softc *rs,
-		    struct disklabel *lp)
-{
-	memset(lp, 0, sizeof(*lp));
-
-	/* fabricate a label... */
-	if (raidPtr->totalSectors > UINT32_MAX)
-		lp->d_secperunit = UINT32_MAX;
-	else
-		lp->d_secperunit = raidPtr->totalSectors;
-	lp->d_secsize = raidPtr->bytesPerSector;
-	lp->d_nsectors = raidPtr->Layout.dataSectorsPerStripe;
-	lp->d_ntracks = 4 * raidPtr->numCol;
-	lp->d_ncylinders = raidPtr->totalSectors /
-		(lp->d_nsectors * lp->d_ntracks);
-	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
-
-	strncpy(lp->d_typename, "raid", sizeof(lp->d_typename));
-	lp->d_type = DKTYPE_RAID;
-	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_rpm = 3600;
-	lp->d_interleave = 1;
-	lp->d_flags = 0;
-
-	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
-	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-	lp->d_npartitions = RAW_PART + 1;
-
-	lp->d_magic = DISKMAGIC;
-	lp->d_magic2 = DISKMAGIC;
-	lp->d_checksum = dkcksum(rs->sc_dkdev.dk_label);
-
-}
-/*
- * Read the disklabel from the raid device.  If one is not present, fake one
- * up.
- */
-static void
-raidgetdisklabel(dev_t dev)
-{
-	int     unit = raidunit(dev);
-	struct raid_softc *rs;
-	const char   *errstring;
-	struct disklabel *lp;
-	struct cpu_disklabel *clp;
-	RF_Raid_t *raidPtr;
-
-	if ((rs = raidget(unit)) == NULL)
-		return;
-
-	lp = rs->sc_dkdev.dk_label;
-	clp = rs->sc_dkdev.dk_cpulabel;
-
-	db1_printf(("Getting the disklabel...\n"));
-
-	memset(clp, 0, sizeof(*clp));
-
-	raidPtr = &rs->sc_r;
-
-	raidgetdefaultlabel(raidPtr, rs, lp);
-
-	/*
-	 * Call the generic disklabel extraction routine.
-	 */
-	errstring = readdisklabel(RAIDLABELDEV(dev), raidstrategy,
-	    rs->sc_dkdev.dk_label, rs->sc_dkdev.dk_cpulabel);
-	if (errstring)
-		raidmakedisklabel(rs);
-	else {
-		int     i;
-		struct partition *pp;
-
-		/*
-		 * Sanity check whether the found disklabel is valid.
-		 *
-		 * This is necessary since total size of the raid device
-		 * may vary when an interleave is changed even though exactly
-		 * same components are used, and old disklabel may used
-		 * if that is found.
-		 */
-		if (lp->d_secperunit < UINT32_MAX ?
-		    lp->d_secperunit != rs->sc_size :
-		    lp->d_secperunit > rs->sc_size)
-			printf("raid%d: WARNING: %s: "
-			    "total sector size in disklabel (%ju) != "
-			    "the size of raid (%ju)\n", unit, rs->sc_xname,
-			    (uintmax_t)lp->d_secperunit,
-			    (uintmax_t)rs->sc_size);
-		for (i = 0; i < lp->d_npartitions; i++) {
-			pp = &lp->d_partitions[i];
-			if (pp->p_offset + pp->p_size > rs->sc_size)
-				printf("raid%d: WARNING: %s: end of partition `%c' "
-				       "exceeds the size of raid (%ju)\n",
-				       unit, rs->sc_xname, 'a' + i,
-				       (uintmax_t)rs->sc_size);
-		}
-	}
-
-}
-/*
- * Take care of things one might want to take care of in the event
- * that a disklabel isn't present.
- */
-static void
-raidmakedisklabel(struct raid_softc *rs)
-{
-	struct disklabel *lp = rs->sc_dkdev.dk_label;
-	db1_printf(("Making a label..\n"));
-
-	/*
-	 * For historical reasons, if there's no disklabel present
-	 * the raw partition must be marked FS_BSDFFS.
-	 */
-
-	lp->d_partitions[RAW_PART].p_fstype = FS_BSDFFS;
-
-	strncpy(lp->d_packname, "default label", sizeof(lp->d_packname));
-
-	lp->d_checksum = dkcksum(lp);
-}
 /*
  * Wait interruptibly for an exclusive lock.
  *
@@ -2476,14 +2191,18 @@ raidlock(struct raid_softc *rs)
 {
 	int     error;
 
+	error = 0;
+	mutex_enter(&rs->sc_mutex);
 	while ((rs->sc_flags & RAIDF_LOCKED) != 0) {
 		rs->sc_flags |= RAIDF_WANTED;
-		if ((error =
-			tsleep(rs, PRIBIO | PCATCH, "raidlck", 0)) != 0)
-			return (error);
+		error = cv_wait_sig(&rs->sc_cv, &rs->sc_mutex);
+		if (error != 0)
+			goto done;
 	}
 	rs->sc_flags |= RAIDF_LOCKED;
-	return (0);
+done:
+	mutex_exit(&rs->sc_mutex);
+	return (error);
 }
 /*
  * Unlock and wake up any waiters.
@@ -2492,11 +2211,13 @@ static void
 raidunlock(struct raid_softc *rs)
 {
 
+	mutex_enter(&rs->sc_mutex);
 	rs->sc_flags &= ~RAIDF_LOCKED;
 	if ((rs->sc_flags & RAIDF_WANTED) != 0) {
 		rs->sc_flags &= ~RAIDF_WANTED;
-		wakeup(rs);
+		cv_broadcast(&rs->sc_cv);
 	}
+	mutex_exit(&rs->sc_mutex);
 }
 
 
@@ -2624,7 +2345,6 @@ raidread_component_area(dev_t dev, struct vnode *b_vp, void *data,
     size_t msize, daddr_t offset, daddr_t dsize)
 {
 	struct buf *bp;
-	const struct bdevsw *bdev;
 	int error;
 
 	/* XXX should probably ensure that we don't try to do this if
@@ -2646,11 +2366,7 @@ raidread_component_area(dev_t dev, struct vnode *b_vp, void *data,
 	bp->b_flags |= B_READ;
  	bp->b_resid = dsize;
 
-	bdev = bdevsw_lookup(bp->b_dev);
-	if (bdev == NULL)
-		return (ENXIO);
-	(*bdev->d_strategy)(bp);
-
+	bdev_strategy(bp);
 	error = biowait(bp);
 
 	if (!error) {
@@ -2678,7 +2394,6 @@ raidwrite_component_area(dev_t dev, struct vnode *b_vp, void *data,
     size_t msize, daddr_t offset, daddr_t dsize, int asyncp)
 {
 	struct buf *bp;
-	const struct bdevsw *bdev;
 	int error;
 
 	/* get a block of the appropriate size... */
@@ -2694,10 +2409,7 @@ raidwrite_component_area(dev_t dev, struct vnode *b_vp, void *data,
 	memset(bp->b_data, 0, dsize);
 	memcpy(bp->b_data, data, msize);
 
-	bdev = bdevsw_lookup(bp->b_dev);
-	if (bdev == NULL)
-		return (ENXIO);
-	(*bdev->d_strategy)(bp);
+	bdev_strategy(bp);
 	if (asyncp)
 		return 0;
 	error = biowait(bp);
@@ -2823,6 +2535,7 @@ rf_update_component_labels(RF_Raid_t *raidPtr, int final)
 	int c;
 	int j;
 	int scol;
+	struct raid_softc *rs = raidPtr->softc;
 
 	scol = -1;
 
@@ -2838,7 +2551,8 @@ rf_update_component_labels(RF_Raid_t *raidPtr, int final)
 			clabel->status = rf_ds_optimal;
 			
 			/* note what unit we are configured as */
-			clabel->last_unit = raidPtr->raidid;
+			if ((rs->sc_cflags & RAIDF_UNIT_CHANGED) == 0)
+				clabel->last_unit = raidPtr->raidid;
 
 			raidflush_component_label(raidPtr, c);
 			if (final == RF_FINAL_COMPONENT_UPDATE) {
@@ -2878,7 +2592,8 @@ rf_update_component_labels(RF_Raid_t *raidPtr, int final)
 
 			clabel->column = scol;
 			clabel->status = rf_ds_optimal;
-			clabel->last_unit = raidPtr->raidid;
+			if ((rs->sc_cflags & RAIDF_UNIT_CHANGED) == 0)
+				clabel->last_unit = raidPtr->raidid;
 
 			raidflush_component_label(raidPtr, sparecol);
 			if (final == RF_FINAL_COMPONENT_UPDATE) {
@@ -3095,171 +2810,193 @@ rf_find_raid_components(void)
 	RF_AutoConfig_t *ac_list;
 	uint64_t numsecs;
 	unsigned secsize;
+	int dowedges;
 
 	/* initialize the AutoConfig list */
 	ac_list = NULL;
 
-	/* we begin by trolling through *all* the devices on the system */
+	/*
+	 * we begin by trolling through *all* the devices on the system *twice*
+	 * first we scan for wedges, second for other devices. This avoids
+	 * using a raw partition instead of a wedge that covers the whole disk
+	 */
 
-	for (dv = deviter_first(&di, DEVITER_F_ROOT_FIRST); dv != NULL;
-	     dv = deviter_next(&di)) {
+	for (dowedges=1; dowedges>=0; --dowedges) {
+		for (dv = deviter_first(&di, DEVITER_F_ROOT_FIRST); dv != NULL;
+		     dv = deviter_next(&di)) {
 
-		/* we are only interested in disks... */
-		if (device_class(dv) != DV_DISK)
-			continue;
+			/* we are only interested in disks... */
+			if (device_class(dv) != DV_DISK)
+				continue;
 
-		/* we don't care about floppies... */
-		if (device_is_a(dv, "fd")) {
-			continue;
-		}
-
-		/* we don't care about CD's... */
-		if (device_is_a(dv, "cd")) {
-			continue;
-		}
-
-		/* we don't care about md's... */
-		if (device_is_a(dv, "md")) {
-			continue;
-		}
-
-		/* hdfd is the Atari/Hades floppy driver */
-		if (device_is_a(dv, "hdfd")) {
-			continue;
-		}
-
-		/* fdisa is the Atari/Milan floppy driver */
-		if (device_is_a(dv, "fdisa")) {
-			continue;
-		}
-
-		/* need to find the device_name_to_block_device_major stuff */
-		bmajor = devsw_name2blk(device_xname(dv), NULL, 0);
-
-		rf_part_found = 0; /*No raid partition as yet*/
-
-		/* get a vnode for the raw partition of this disk */
-
-		wedge = device_is_a(dv, "dk");
-		bminor = minor(device_unit(dv));
-		dev = wedge ? makedev(bmajor, bminor) :
-		    MAKEDISKDEV(bmajor, bminor, RAW_PART);
-		if (bdevvp(dev, &vp))
-			panic("RAID can't alloc vnode");
-
-		error = VOP_OPEN(vp, FREAD | FSILENT, NOCRED);
-
-		if (error) {
-			/* "Who cares."  Continue looking
-			   for something that exists*/
-			vput(vp);
-			continue;
-		}
-
-		error = getdisksize(vp, &numsecs, &secsize);
-		if (error) {
-			vput(vp);
-			continue;
-		}
-		if (wedge) {
-			struct dkwedge_info dkw;
-			error = VOP_IOCTL(vp, DIOCGWEDGEINFO, &dkw, FREAD,
-			    NOCRED);
-			if (error) {
-				printf("RAIDframe: can't get wedge info for "
-				    "dev %s (%d)\n", device_xname(dv), error);
-				vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
-				VOP_CLOSE(vp, FREAD | FWRITE, NOCRED);
-				vput(vp);
+			/* we don't care about floppies... */
+			if (device_is_a(dv, "fd")) {
 				continue;
 			}
 
-			if (strcmp(dkw.dkw_ptype, DKW_PTYPE_RAIDFRAME) != 0) {
-				vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
-				VOP_CLOSE(vp, FREAD | FWRITE, NOCRED);
-				vput(vp);
+			/* we don't care about CD's... */
+			if (device_is_a(dv, "cd")) {
 				continue;
 			}
-				
-			ac_list = rf_get_component(ac_list, dev, vp,
-			    device_xname(dv), dkw.dkw_size, numsecs, secsize);
-			rf_part_found = 1; /*There is a raid component on this disk*/
-			continue;
-		}
 
-		/* Ok, the disk exists.  Go get the disklabel. */
-		error = VOP_IOCTL(vp, DIOCGDINFO, &label, FREAD, NOCRED);
-		if (error) {
-			/*
-			 * XXX can't happen - open() would
-			 * have errored out (or faked up one)
-			 */
-			if (error != ENOTTY)
-				printf("RAIDframe: can't get label for dev "
-				    "%s (%d)\n", device_xname(dv), error);
-		}
-
-		/* don't need this any more.  We'll allocate it again
-		   a little later if we really do... */
-		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
-		VOP_CLOSE(vp, FREAD | FWRITE, NOCRED);
-		vput(vp);
-
-		if (error)
-			continue;
-
-		rf_part_found = 0; /*No raid partitions yet*/
-		for (i = 0; i < label.d_npartitions; i++) {
-			char cname[sizeof(ac_list->devname)];
-
-			/* We only support partitions marked as RAID */
-			if (label.d_partitions[i].p_fstype != FS_RAID)
+			/* we don't care about md's... */
+			if (device_is_a(dv, "md")) {
 				continue;
+			}
 
-			dev = MAKEDISKDEV(bmajor, device_unit(dv), i);
+			/* hdfd is the Atari/Hades floppy driver */
+			if (device_is_a(dv, "hdfd")) {
+				continue;
+			}
+
+			/* fdisa is the Atari/Milan floppy driver */
+			if (device_is_a(dv, "fdisa")) {
+				continue;
+			}
+
+			/* are we in the wedges pass ? */
+			wedge = device_is_a(dv, "dk");
+			if (wedge != dowedges) {
+				continue;
+			}
+
+			/* need to find the device_name_to_block_device_major stuff */
+			bmajor = devsw_name2blk(device_xname(dv), NULL, 0);
+
+			rf_part_found = 0; /*No raid partition as yet*/
+
+			/* get a vnode for the raw partition of this disk */
+			bminor = minor(device_unit(dv));
+			dev = wedge ? makedev(bmajor, bminor) :
+			    MAKEDISKDEV(bmajor, bminor, RAW_PART);
 			if (bdevvp(dev, &vp))
 				panic("RAID can't alloc vnode");
 
-			error = VOP_OPEN(vp, FREAD, NOCRED);
+			error = VOP_OPEN(vp, FREAD | FSILENT, NOCRED);
+
 			if (error) {
-				/* Whatever... */
+				/* "Who cares."  Continue looking
+				   for something that exists*/
 				vput(vp);
 				continue;
 			}
-			snprintf(cname, sizeof(cname), "%s%c",
-			    device_xname(dv), 'a' + i);
-			ac_list = rf_get_component(ac_list, dev, vp, cname,
-				label.d_partitions[i].p_size, numsecs, secsize);
+
+			error = getdisksize(vp, &numsecs, &secsize);
+			if (error) {
+				/*
+				 * Pseudo devices like vnd and cgd can be
+				 * opened but may still need some configuration.
+				 * Ignore these quietly.
+				 */
+				if (error != ENXIO)
+					printf("RAIDframe: can't get disk size"
+					    " for dev %s (%d)\n",
+					    device_xname(dv), error);
+				vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+				VOP_CLOSE(vp, FREAD | FWRITE, NOCRED);
+				vput(vp);
+				continue;
+			}
+			if (wedge) {
+				struct dkwedge_info dkw;
+				error = VOP_IOCTL(vp, DIOCGWEDGEINFO, &dkw, FREAD,
+				    NOCRED);
+				if (error) {
+					printf("RAIDframe: can't get wedge info for "
+					    "dev %s (%d)\n", device_xname(dv), error);
+					vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+					VOP_CLOSE(vp, FREAD | FWRITE, NOCRED);
+					vput(vp);
+					continue;
+				}
+
+				if (strcmp(dkw.dkw_ptype, DKW_PTYPE_RAIDFRAME) != 0) {
+					vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+					VOP_CLOSE(vp, FREAD | FWRITE, NOCRED);
+					vput(vp);
+					continue;
+				}
+					
+				ac_list = rf_get_component(ac_list, dev, vp,
+				    device_xname(dv), dkw.dkw_size, numsecs, secsize);
+				rf_part_found = 1; /*There is a raid component on this disk*/
+				continue;
+			}
+
+			/* Ok, the disk exists.  Go get the disklabel. */
+			error = VOP_IOCTL(vp, DIOCGDINFO, &label, FREAD, NOCRED);
+			if (error) {
+				/*
+				 * XXX can't happen - open() would
+				 * have errored out (or faked up one)
+				 */
+				if (error != ENOTTY)
+					printf("RAIDframe: can't get label for dev "
+					    "%s (%d)\n", device_xname(dv), error);
+			}
+
+			/* don't need this any more.  We'll allocate it again
+			   a little later if we really do... */
+			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+			VOP_CLOSE(vp, FREAD | FWRITE, NOCRED);
+			vput(vp);
+
+			if (error)
+				continue;
+
+			rf_part_found = 0; /*No raid partitions yet*/
+			for (i = 0; i < label.d_npartitions; i++) {
+				char cname[sizeof(ac_list->devname)];
+
+				/* We only support partitions marked as RAID */
+				if (label.d_partitions[i].p_fstype != FS_RAID)
+					continue;
+
+				dev = MAKEDISKDEV(bmajor, device_unit(dv), i);
+				if (bdevvp(dev, &vp))
+					panic("RAID can't alloc vnode");
+
+				error = VOP_OPEN(vp, FREAD, NOCRED);
+				if (error) {
+					/* Whatever... */
+					vput(vp);
+					continue;
+				}
+				snprintf(cname, sizeof(cname), "%s%c",
+				    device_xname(dv), 'a' + i);
+				ac_list = rf_get_component(ac_list, dev, vp, cname,
+					label.d_partitions[i].p_size, numsecs, secsize);
 				rf_part_found = 1; /*There is at least one raid partition on this disk*/
-		}
-
-		/*
-		 *If there is no raid component on this disk, either in a
-		 *disklabel or inside a wedge, check the raw partition as well,
-		 *as it is possible to configure raid components on raw disk
-		 *devices.
-		 */
-
-		if (!rf_part_found) {
-			char cname[sizeof(ac_list->devname)];
-
-			dev = MAKEDISKDEV(bmajor, device_unit(dv), RAW_PART);
-			if (bdevvp(dev, &vp))
-				panic("RAID can't alloc vnode");
-
-			error = VOP_OPEN(vp, FREAD, NOCRED);
-			if (error) {
-				/* Whatever... */
-				vput(vp);
-				continue;
 			}
-			snprintf(cname, sizeof(cname), "%s%c",
-			    device_xname(dv), 'a' + RAW_PART);
-			ac_list = rf_get_component(ac_list, dev, vp, cname,
-				label.d_partitions[RAW_PART].p_size, numsecs, secsize);
+
+			/*
+			 *If there is no raid component on this disk, either in a
+			 *disklabel or inside a wedge, check the raw partition as well,
+			 *as it is possible to configure raid components on raw disk
+			 *devices.
+			 */
+
+			if (!rf_part_found) {
+				char cname[sizeof(ac_list->devname)];
+
+				dev = MAKEDISKDEV(bmajor, device_unit(dv), RAW_PART);
+				if (bdevvp(dev, &vp))
+					panic("RAID can't alloc vnode");
+
+				error = VOP_OPEN(vp, FREAD, NOCRED);
+				if (error) {
+					/* Whatever... */
+					vput(vp);
+					continue;
+				}
+				snprintf(cname, sizeof(cname), "%s%c",
+				    device_xname(dv), 'a' + RAW_PART);
+				ac_list = rf_get_component(ac_list, dev, vp, cname,
+					label.d_partitions[RAW_PART].p_size, numsecs, secsize);
+			}
 		}
+		deviter_release(&di);
 	}
-	deviter_release(&di);
 	return ac_list;
 }
 
@@ -3687,7 +3424,7 @@ rf_release_all_vps(RF_ConfigSet_t *cset)
 		/* Close the vp, and give it back */
 		if (ac->vp) {
 			vn_lock(ac->vp, LK_EXCLUSIVE | LK_RETRY);
-			VOP_CLOSE(ac->vp, FREAD, NOCRED);
+			VOP_CLOSE(ac->vp, FREAD | FWRITE, NOCRED);
 			vput(ac->vp);
 			ac->vp = NULL;
 		}
@@ -3765,7 +3502,7 @@ rf_auto_config_set(RF_ConfigSet_t *cset)
 	/* 1. Create a config structure */
 	config = malloc(sizeof(*config), M_RAIDFRAME, M_NOWAIT|M_ZERO);
 	if (config == NULL) {
-		printf("Out of mem!?!?\n");
+		printf("%s: Out of mem - config!?!?\n", __func__);
 				/* XXX do something more intelligent here. */
 		return NULL;
 	}
@@ -3777,11 +3514,21 @@ rf_auto_config_set(RF_ConfigSet_t *cset)
 	*/
 
 	raidID = cset->ac->clabel->last_unit;
-	for (sc = raidget(raidID); sc->sc_r.valid != 0; sc = raidget(++raidID))
+	for (sc = raidget(raidID, false); sc && sc->sc_r.valid != 0;
+	     sc = raidget(++raidID, false))
 		continue;
 #ifdef DEBUG
 	printf("Configuring raid%d:\n",raidID);
 #endif
+
+	if (sc == NULL)
+		sc = raidget(raidID, true);
+	if (sc == NULL) {
+		printf("%s: Out of mem - softc!?!?\n", __func__);
+				/* XXX do something more intelligent here. */
+		free(config, M_RAIDFRAME);
+		return NULL;
+	}
 
 	raidPtr = &sc->sc_r;
 
@@ -3825,18 +3572,6 @@ rf_auto_config_set(RF_ConfigSet_t *cset)
 }
 
 void
-rf_disk_unbusy(RF_RaidAccessDesc_t *desc)
-{
-	struct buf *bp;
-	struct raid_softc *rs;
-
-	bp = (struct buf *)desc->bp;
-	rs = desc->raidPtr->softc;
-	disk_unbusy(&rs->sc_dkdev, (bp->b_bcount - bp->b_resid),
-	    (bp->b_flags & B_READ));
-}
-
-void
 rf_pool_init(struct pool *p, size_t size, const char *w_chan,
 	     size_t xmin, size_t xmax)
 {
@@ -3847,21 +3582,28 @@ rf_pool_init(struct pool *p, size_t size, const char *w_chan,
 }
 
 /*
- * rf_buf_queue_check(RF_Raid_t raidPtr) -- looks into the buf_queue to see
- * if there is IO pending and if that IO could possibly be done for a
- * given RAID set.  Returns 0 if IO is waiting and can be done, 1
+ * rf_buf_queue_check(RF_Raid_t raidPtr) -- looks into the buffer queue
+ * to see if there is IO pending and if that IO could possibly be done
+ * for a given RAID set.  Returns 0 if IO is waiting and can be done, 1
  * otherwise.
  *
  */
-
 int
 rf_buf_queue_check(RF_Raid_t *raidPtr)
 {
-	struct raid_softc *rs = raidPtr->softc;
-	if ((bufq_peek(rs->buf_queue) != NULL) && raidPtr->openings > 0) {
+	struct raid_softc *rs;
+	struct dk_softc *dksc;
+
+	rs = raidPtr->softc;
+	dksc = &rs->sc_dksc;
+
+	if ((rs->sc_flags & RAIDF_INITED) == 0)
+		return 1;
+
+	if (dk_strategy_pending(dksc) && raidPtr->openings > 0) {
 		/* there is work to do */
 		return 0;
-	} 
+	}
 	/* default is nothing to do */
 	return 1;
 }
@@ -3892,7 +3634,6 @@ raid_match(device_t self, cfdata_t cfdata, void *aux)
 static void
 raid_attach(device_t parent, device_t self, void *aux)
 {
-
 }
 
 
@@ -3900,7 +3641,7 @@ static int
 raid_detach(device_t self, int flags)
 {
 	int error;
-	struct raid_softc *rs = raidget(device_unit(self));
+	struct raid_softc *rs = raidsoftc(self);
 
 	if (rs == NULL)
 		return ENXIO;
@@ -3912,15 +3653,22 @@ raid_detach(device_t self, int flags)
 
 	raidunlock(rs);
 
-	/* XXXkd: raidput(rs) ??? */
+	/* XXX raid can be referenced here */
 
-	return error;
+	if (error)
+		return error;
+
+	/* Free the softc */
+	raidput(rs);
+
+	return 0;
 }
 
 static void
 rf_set_geometry(struct raid_softc *rs, RF_Raid_t *raidPtr)
 {
-	struct disk_geom *dg = &rs->sc_dkdev.dk_geom;
+	struct dk_softc *dksc = &rs->sc_dksc;
+	struct disk_geom *dg = &dksc->sc_dkdev.dk_geom;
 
 	memset(dg, 0, sizeof(*dg));
 
@@ -3929,7 +3677,7 @@ rf_set_geometry(struct raid_softc *rs, RF_Raid_t *raidPtr)
 	dg->dg_nsectors = raidPtr->Layout.dataSectorsPerStripe;
 	dg->dg_ntracks = 4 * raidPtr->numCol;
 
-	disk_set_info(rs->sc_dev, &rs->sc_dkdev, NULL);
+	disk_set_info(dksc->sc_dev, &dksc->sc_dkdev, NULL);
 }
 
 /* 
@@ -3977,5 +3725,160 @@ rf_sync_component_caches(RF_Raid_t *raidPtr)
 			}
 		}
 	}
+	return error;
+}
+
+/*
+ * Module interface
+ */
+
+MODULE(MODULE_CLASS_DRIVER, raid, "dk_subr");
+
+#ifdef _MODULE
+CFDRIVER_DECL(raid, DV_DISK, NULL);
+#endif
+
+static int raid_modcmd(modcmd_t, void *);
+static int raid_modcmd_init(void);
+static int raid_modcmd_fini(void);
+
+static int
+raid_modcmd(modcmd_t cmd, void *data)
+{
+	int error;
+
+	error = 0;
+	switch (cmd) {
+	case MODULE_CMD_INIT:
+		error = raid_modcmd_init();
+		break;
+	case MODULE_CMD_FINI:
+		error = raid_modcmd_fini();
+		break;
+	default:
+		error = ENOTTY;
+		break;
+	}
+	return error;
+}
+
+static int
+raid_modcmd_init(void)
+{
+	int error;
+	int bmajor, cmajor;
+
+	mutex_init(&raid_lock, MUTEX_DEFAULT, IPL_NONE);
+	mutex_enter(&raid_lock);
+#if (RF_INCLUDE_PARITY_DECLUSTERING_DS > 0)
+	rf_init_mutex2(rf_sparet_wait_mutex, IPL_VM);
+	rf_init_cond2(rf_sparet_wait_cv, "sparetw");
+	rf_init_cond2(rf_sparet_resp_cv, "rfgst");
+
+	rf_sparet_wait_queue = rf_sparet_resp_queue = NULL;
+#endif
+
+	bmajor = cmajor = -1;
+	error = devsw_attach("raid", &raid_bdevsw, &bmajor,
+	    &raid_cdevsw, &cmajor);
+	if (error != 0 && error != EEXIST) {
+		aprint_error("%s: devsw_attach failed %d\n", __func__, error);
+		mutex_exit(&raid_lock);
+		return error;
+	}
+#ifdef _MODULE
+	error = config_cfdriver_attach(&raid_cd);
+	if (error != 0) {
+		aprint_error("%s: config_cfdriver_attach failed %d\n",
+		    __func__, error);
+		devsw_detach(&raid_bdevsw, &raid_cdevsw);
+		mutex_exit(&raid_lock);
+		return error;
+	}
+#endif
+	error = config_cfattach_attach(raid_cd.cd_name, &raid_ca);
+	if (error != 0) {
+		aprint_error("%s: config_cfattach_attach failed %d\n",
+		    __func__, error);
+#ifdef _MODULE
+		config_cfdriver_detach(&raid_cd);
+#endif
+		devsw_detach(&raid_bdevsw, &raid_cdevsw);
+		mutex_exit(&raid_lock);
+		return error;
+	}
+
+	raidautoconfigdone = false;
+
+	mutex_exit(&raid_lock);
+
+	if (error == 0) {
+		if (rf_BootRaidframe(true) == 0)
+			aprint_verbose("Kernelized RAIDframe activated\n");
+		else
+			panic("Serious error activating RAID!!");
+	}
+
+	/*
+	 * Register a finalizer which will be used to auto-config RAID
+	 * sets once all real hardware devices have been found.
+	 */
+	error = config_finalize_register(NULL, rf_autoconfig);
+	if (error != 0) {
+		aprint_error("WARNING: unable to register RAIDframe "
+		    "finalizer\n");
+		error = 0;
+	}
+
+	return error;
+}
+
+static int
+raid_modcmd_fini(void)
+{
+	int error;
+
+	mutex_enter(&raid_lock);
+
+	/* Don't allow unload if raid device(s) exist.  */
+	if (!LIST_EMPTY(&raids)) {
+		mutex_exit(&raid_lock);
+		return EBUSY;
+	}
+
+	error = config_cfattach_detach(raid_cd.cd_name, &raid_ca);
+	if (error != 0) {
+		aprint_error("%s: cannot detach cfattach\n",__func__);
+		mutex_exit(&raid_lock);
+		return error;
+	}
+#ifdef _MODULE
+	error = config_cfdriver_detach(&raid_cd);
+	if (error != 0) {
+		aprint_error("%s: cannot detach cfdriver\n",__func__);
+		config_cfattach_attach(raid_cd.cd_name, &raid_ca);
+		mutex_exit(&raid_lock);
+		return error;
+	}
+#endif
+	error = devsw_detach(&raid_bdevsw, &raid_cdevsw);
+	if (error != 0) {
+		aprint_error("%s: cannot detach devsw\n",__func__);
+#ifdef _MODULE
+		config_cfdriver_attach(&raid_cd);
+#endif
+		config_cfattach_attach(raid_cd.cd_name, &raid_ca);
+		mutex_exit(&raid_lock);
+		return error;
+	}
+	rf_BootRaidframe(false);
+#if (RF_INCLUDE_PARITY_DECLUSTERING_DS > 0)
+	rf_destroy_mutex2(rf_sparet_wait_mutex);
+	rf_destroy_cond2(rf_sparet_wait_cv);
+	rf_destroy_cond2(rf_sparet_resp_cv);
+#endif
+	mutex_exit(&raid_lock);
+	mutex_destroy(&raid_lock);
+
 	return error;
 }

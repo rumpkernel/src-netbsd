@@ -1,4 +1,4 @@
-# $NetBSD: Makefile.inc,v 1.27 2014/09/03 19:29:14 matt Exp $
+# $NetBSD: Makefile.inc,v 1.31 2016/03/30 07:25:33 martin Exp $
 
 COMPILER_RT_SRCDIR=	${NETBSDSRCDIR}/sys/external/bsd/compiler_rt/dist
 
@@ -84,7 +84,6 @@ GENERIC_SRCS+= \
 	fixunssfsi.c \
 	fixunsxfdi.c \
 	fixunsxfsi.c \
-	fixxfdi.c \
 	floatdidf.c \
 	floatdisf.c \
 	floatdixf.c \
@@ -119,6 +118,12 @@ GENERIC_SRCS+= \
 	udivmodti4.c \
 	udivti3.c \
 	umodti3.c
+
+.if ${MACHINE_ARCH} != "m68k"
+GENERIC_SRCS+= \
+	fixxfdi.c
+.endif
+
 
 .if ${MACHINE_ARCH} != "aarch64"
 GENERIC_SRCS+= \
@@ -211,7 +216,14 @@ GENERIC_SRCS+= \
 	InstrProfiling.c \
 	InstrProfilingBuffer.c \
 	InstrProfilingFile.c \
-	InstrProfilingPlatformOther.c
+	InstrProfilingPlatformLinux.c \
+	InstrProfilingUtil.c \
+	InstrProfilingValue.c \
+	InstrProfilingWriter.c
+
+.if ${MKPROFILE} != "no"
+POBJS+= InstrProfilingRuntime.po
+.endif
 
 .if ${LIBC_MACHINE_ARCH} == "powerpc" || ${LIBC_MACHINE_ARCH} == "powerpc64"
 GENERIC_SRCS+= \
@@ -263,4 +275,7 @@ COPTS.${src}+=	-Wno-missing-prototypes \
 		-Wno-cast-qual
 .    endif
 .  endif
+.if ${MKSOFTFLOAT:Uno} != "no"
+COPTS.${src}+=	-D__SOFT_FP__
+.endif
 .endfor

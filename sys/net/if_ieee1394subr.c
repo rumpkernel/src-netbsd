@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ieee1394subr.c,v 1.51 2015/10/13 12:33:07 roy Exp $	*/
+/*	$NetBSD: if_ieee1394subr.c,v 1.55 2016/04/28 01:37:17 knakahara Exp $	*/
 
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ieee1394subr.c,v 1.51 2015/10/13 12:33:07 roy Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ieee1394subr.c,v 1.55 2016/04/28 01:37:17 knakahara Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
@@ -79,20 +79,19 @@ __KERNEL_RCSID(0, "$NetBSD: if_ieee1394subr.c,v 1.51 2015/10/13 12:33:07 roy Exp
 #define	senderr(e)	do { error = (e); goto bad; } while(0/*CONSTCOND*/)
 
 static int  ieee1394_output(struct ifnet *, struct mbuf *,
-		const struct sockaddr *, struct rtentry *);
+		const struct sockaddr *, const struct rtentry *);
 static struct mbuf *ieee1394_reass(struct ifnet *, struct mbuf *, uint16_t);
 
 static int
 ieee1394_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
-    struct rtentry *rt)
+    const struct rtentry *rt)
 {
 	uint16_t etype = 0;
 	struct mbuf *m;
-	int s, hdrlen, error = 0;
+	int hdrlen, error = 0;
 	struct mbuf *mcopy = NULL;
 	struct ieee1394_hwaddr *hwdst, baddr;
 	const struct ieee1394_hwaddr *myaddr;
-	ALTQ_DECL(struct altq_pktattr pktattr;)
 #ifdef INET
 	struct arphdr *ah;
 #endif /* INET */
@@ -106,7 +105,7 @@ ieee1394_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 	 * If the queueing discipline needs packet classification,
 	 * do it before prepending link headers.
 	 */
-	IFQ_CLASSIFY(&ifp->if_snd, m0, dst->sa_family, &pktattr);
+	IFQ_CLASSIFY(&ifp->if_snd, m0, dst->sa_family);
 
 	/*
 	 * For unicast, we make a tag to store the lladdr of the
@@ -139,7 +138,8 @@ ieee1394_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 #ifdef INET
 	case AF_INET:
 		if (unicast &&
-		    (error = arpresolve(ifp, rt, m0, dst, (u_char *)hwdst)) !=0)
+		    (error = arpresolve(ifp, rt, m0, dst, hwdst,
+			sizeof(*hwdst))) != 0)
 			return error == EWOULDBLOCK ? 0 : error;
 		/* if broadcasting on a simplex interface, loopback a copy */
 		if ((m0->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX))
@@ -218,26 +218,15 @@ ieee1394_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 	if (m0 == NULL)
 		senderr(ENOBUFS);
 
-	s = splnet();
-	ifp->if_obytes += m0->m_pkthdr.len;
-	if (m0->m_flags & M_MCAST)
-		ifp->if_omcasts++;
 	while ((m = m0) != NULL) {
 		m0 = m->m_nextpkt;
-		if (m == NULL) {
-			splx(s);
-			senderr(ENOBUFS);
-		}
-		IFQ_ENQUEUE(&ifp->if_snd, m, &pktattr, error);
+
+		error = (*ifp->if_transmit)(ifp, m);
 		if (error) {
 			/* mbuf is already freed */
-			splx(s);
 			goto bad;
 		}
 	}
-	if ((ifp->if_flags & IFF_OACTIVE) == 0)
-		(*ifp->if_start)(ifp);
-	splx(s);
 	return 0;
 
   bad:

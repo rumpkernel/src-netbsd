@@ -1,4 +1,4 @@
-/*	$NetBSD: if_age.c,v 1.45 2015/04/13 16:33:25 riastradh Exp $ */
+/*	$NetBSD: if_age.c,v 1.47 2016/02/17 20:04:39 christos Exp $ */
 /*	$OpenBSD: if_age.c,v 1.1 2009/01/16 05:00:34 kevlo Exp $	*/
 
 /*-
@@ -31,7 +31,7 @@
 /* Driver for Attansic Technology Corp. L1 Gigabit Ethernet. */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_age.c,v 1.45 2015/04/13 16:33:25 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_age.c,v 1.47 2016/02/17 20:04:39 christos Exp $");
 
 #include "vlan.h"
 
@@ -1505,7 +1505,7 @@ age_rxeof(struct age_softc *sc, struct rx_rdesc *rxrd)
 
 			bpf_mtap(ifp, m);
 			/* Pass it on. */
-			(*ifp->if_input)(ifp, m);
+			if_percpuq_enqueue(ifp->if_percpuq, m);
 
 			/* Reset mbuf chains. */
 			AGE_RXCHAIN_RESET(sc);
@@ -2222,13 +2222,6 @@ age_newbuf(struct age_softc *sc, struct age_rxdesc *rxd, int init)
 	    sc->age_cdata.age_rx_sparemap, m, BUS_DMA_NOWAIT);
 
 	if (error != 0) {
-		if (!error) {
-			bus_dmamap_unload(sc->sc_dmat,
-			    sc->age_cdata.age_rx_sparemap);
-			error = EFBIG;
-			printf("%s: too many segments?!\n",
-			    device_xname(sc->sc_dev));
-		}
 		m_freem(m);
 
 		if (init)

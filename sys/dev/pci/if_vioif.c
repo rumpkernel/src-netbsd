@@ -1,4 +1,4 @@
-/*	$NetBSD: if_vioif.c,v 1.20 2015/10/29 02:29:41 christos Exp $	*/
+/*	$NetBSD: if_vioif.c,v 1.23 2016/05/17 10:05:31 pooka Exp $	*/
 
 /*
  * Copyright (c) 2010 Minoura Makoto.
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_vioif.c,v 1.20 2015/10/29 02:29:41 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_vioif.c,v 1.23 2016/05/17 10:05:31 pooka Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_net_mpsafe.h"
@@ -430,7 +430,7 @@ vioif_alloc_mems(struct vioif_softc *sc)
 		C_L1(txhdr_dmamaps[i], rx_hdrs[i],
 		    sizeof(struct virtio_net_hdr), 1,
 		    WRITE, "tx header");
-		C(tx_dmamaps[i], NULL, ETHER_MAX_LEN, 256 /* XXX */, 0,
+		C(tx_dmamaps[i], NULL, ETHER_MAX_LEN, 16 /* XXX */, 0,
 		  "tx payload");
 	}
 
@@ -1038,7 +1038,7 @@ vioif_rx_deq_locked(struct vioif_softc *sc)
 		bpf_mtap(ifp, m);
 
 		VIOIF_RX_UNLOCK(sc);
-		(*ifp->if_input)(ifp, m);
+		if_percpuq_enqueue(ifp->if_percpuq, m);
 		VIOIF_RX_LOCK(sc);
 
 		if (sc->sc_stopping)
@@ -1116,6 +1116,7 @@ vioif_tx_vq_done(struct virtqueue *vq)
 {
 	struct virtio_softc *vsc = vq->vq_owner;
 	struct vioif_softc *sc = device_private(vsc->sc_child);
+	struct ifnet *ifp = &sc->sc_ethercom.ec_if;
 	int r = 0;
 
 	VIOIF_TX_LOCK(sc);
@@ -1127,6 +1128,8 @@ vioif_tx_vq_done(struct virtqueue *vq)
 
 out:
 	VIOIF_TX_UNLOCK(sc);
+	if (r)
+		vioif_start(ifp);
 	return r;
 }
 

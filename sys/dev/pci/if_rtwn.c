@@ -1,4 +1,4 @@
-/*	$NetBSD: if_rtwn.c,v 1.1 2015/08/27 14:04:08 nonaka Exp $	*/
+/*	$NetBSD: if_rtwn.c,v 1.5 2016/02/09 08:32:11 ozaki-r Exp $	*/
 /*	$OpenBSD: if_rtwn.c,v 1.5 2015/06/14 08:02:47 stsp Exp $	*/
 #define	IEEE80211_NO_HT
 /*-
@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_rtwn.c,v 1.1 2015/08/27 14:04:08 nonaka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_rtwn.c,v 1.5 2016/02/09 08:32:11 ozaki-r Exp $");
 
 #include <sys/param.h>
 #include <sys/sockio.h>
@@ -213,9 +213,6 @@ rtwn_attach(device_t parent, device_t self, void *aux)
 	struct ifnet *ifp = GET_IFP(sc);
 	int i, error;
 	pcireg_t memtype;
-#ifndef __HAVE_PCI_MSI_MSIX
-	pci_intr_handle_t ih;
-#endif
 	const char *intrstr;
 	char intrbuf[PCI_INTRSTR_LEN];
 
@@ -246,7 +243,6 @@ rtwn_attach(device_t parent, device_t self, void *aux)
 	}
 
 	/* Install interrupt handler. */
-#ifdef __HAVE_PCI_MSI_MSIX
 	if (pci_intr_alloc(pa, &sc->sc_pihp, NULL, 0)) {
 		aprint_error_dev(self, "can't map interrupt\n");
 		return;
@@ -255,14 +251,6 @@ rtwn_attach(device_t parent, device_t self, void *aux)
 	    sizeof(intrbuf));
 	sc->sc_ih = pci_intr_establish(sc->sc_pc, sc->sc_pihp[0], IPL_NET,
 	    rtwn_intr, sc);
-#else	/* !__HAVE_PCI_MSI_MSIX */
-	if (pci_intr_map(pa, &ih)) {
-		aprint_error_dev(self, "can't map interrupt\n");
-		return;
-	}
-	intrstr = pci_intr_string(sc->sc_pc, ih, intrbuf, sizeof(intrbuf));
-	sc->sc_ih = pci_intr_establish(sc->sc_pc, ih, IPL_NET, rtwn_intr, sc);
-#endif	/* __HAVE_PCI_MSI_MSIX */
 	if (sc->sc_ih == NULL) {
 		aprint_error_dev(self, "can't establish interrupt");
 		if (intrstr != NULL)
@@ -370,6 +358,8 @@ rtwn_attach(device_t parent, device_t self, void *aux)
 	if_initialize(ifp);
 	ieee80211_ifattach(ic);
 	if_register(ifp);
+	/* Use common softint-based if_input */
+	ifp->if_percpuq = if_percpuq_create(ifp);
 
 	/* override default methods */
 	ic->ic_newassoc = rtwn_newassoc;
@@ -436,9 +426,7 @@ rtwn_detach(device_t self, int flags)
 
 	if (sc->sc_ih != NULL) {
 		pci_intr_disestablish(sc->sc_pc, sc->sc_ih);
-#ifdef __HAVE_PCI_MSI_MSIX
 		pci_intr_release(sc->sc_pc, sc->sc_pihp, 1);
-#endif
 	}
 
 	pmf_device_deregister(self);
@@ -2968,7 +2956,7 @@ rtwn_get_txpower(struct rtwn_softc *sc, int chain,
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct r92c_rom *rom = &sc->rom;
-	uint16_t cckpow, ofdmpow, htpow, diff, max;
+	uint16_t cckpow, ofdmpow, htpow, diff, maxpwr;
 	const struct rtwn_txpwr *base;
 	int ridx, chan, group;
 
@@ -3002,12 +2990,12 @@ rtwn_get_txpower(struct rtwn_softc *sc, int chain,
 			power[ridx] = base->pwr[0][ridx];
 			/* Apply vendor limits. */
 			if (extc != NULL)
-				max = rom->ht40_max_pwr[group];
+				maxpwr = rom->ht40_max_pwr[group];
 			else
-				max = rom->ht20_max_pwr[group];
-			max = (max >> (chain * 4)) & 0xf;
-			if (power[ridx] > max)
-				power[ridx] = max;
+				maxpwr = rom->ht20_max_pwr[group];
+			maxpwr = (maxpwr >> (chain * 4)) & 0xf;
+			if (power[ridx] > maxpwr)
+				power[ridx] = maxpwr;
 		} else if (sc->regulatory == 1) {
 			if (extc == NULL)
 				power[ridx] = base->pwr[group][ridx];

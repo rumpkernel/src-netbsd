@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.kern.inc,v 1.247 2015/09/15 02:22:43 uebayasi Exp $
+#	$NetBSD: Makefile.kern.inc,v 1.250 2016/04/09 18:51:44 riastradh Exp $
 #
 # This file contains common `MI' targets and definitions and it is included
 # at the bottom of each `MD' ${MACHINE}/conf/Makefile.${MACHINE}.
@@ -52,7 +52,7 @@ _MKTARGET_CREATE?=	:
 ##
 # source tree is located via $S relative to the compilation directory
 .ifndef S
-S!=	cd ../../../..; pwd
+S!=	cd ../../../.. && pwd
 .endif
 
 ##
@@ -229,12 +229,12 @@ LINKFLAGS?=	${LINKFORMAT} ${LINKSCRIPT} ${LINKTEXT} ${LINKDATA} ${LINKENTRY} \
 
 LINKFLAGS_DEBUG?=	-X
 
-SYSTEM_LD_TAIL?=@${TOOL_SED} '/const char sccs/!d;s/.*@(.)//;s/" "//;s/\\.*//' vers.c; \
-		${SIZE} $@; chmod 755 $@; \
+SYSTEM_LD_TAIL?=@${TOOL_SED} '/const char sccs/!d;s/.*@(.)//;s/" "//;s/\\.*//' vers.c && \
+		${SIZE} $@ && chmod 755 $@ && \
 		${SYSTEM_CTFMERGE}
-SYSTEM_LD_TAIL_DEBUG?=; \
-		echo mv -f $@ $@.gdb; mv -f $@ $@.gdb; \
-		echo ${STRIP} ${STRIPFLAGS} -o $@ $@.gdb; \
+SYSTEM_LD_TAIL_DEBUG?=&& \
+		echo mv -f $@ $@.gdb && mv -f $@ $@.gdb && \
+		echo ${STRIP} ${STRIPFLAGS} -o $@ $@.gdb && \
 		${STRIP} ${STRIPFLAGS} -o $@ $@.gdb
 LINKFLAGS_NORMAL?=	-S
 STRIPFLAGS?=	-g
@@ -254,9 +254,9 @@ SYSTEM_LD_HEAD+=	${SYSTEM_LD_HEAD_EXTRA}
 SYSTEM_LD_TAIL_STAGE1=	${SYSTEM_LD_TAIL}
 SYSTEM_LD_TAIL_STAGE2=	${SYSTEM_LD_TAIL}
 .if defined(COPY_SYMTAB)
-SYSTEM_LD_TAIL_STAGE2+=	; echo ${DBSYM} $@; ${DBSYM} $@
+SYSTEM_LD_TAIL_STAGE2+=	&& echo ${DBSYM} $@ && ${DBSYM} $@
 .if !empty(DEBUG:M-g)
-SYSTEM_LD_TAIL_STAGE2+=	; echo ${DBSYM} $@.gdb; ${DBSYM} $@.gdb
+SYSTEM_LD_TAIL_STAGE2+=	&& echo ${DBSYM} $@.gdb && ${DBSYM} $@.gdb
 .endif
 .endif
 SYSTEM_LD_TAIL_STAGE2+=	${SYSTEM_LD_TAIL_EXTRA}
@@ -305,6 +305,16 @@ ${_s:T:R}.o: ${_s}
 .endfor
 .endif # !___USE_SUFFIX_RULES___
 
+.include "${S}/conf/ldscript.mk"
+.include "${S}/conf/assym.mk"
+.include "${S}/conf/newvers.mk"
+.include "${S}/dev/splash/splash.mk"
+.include "${S}/conf/mdroot.mk"
+.include "${S}/conf/lint.mk"
+.include "${S}/conf/cscope.mk"
+.include "${S}/conf/gdbinit.mk"
+.include "${S}/conf/ssp.mk"
+
 ##
 ## (7) misc targets: install, clean(dir), depend(all), lint, links, tags,
 ##                   cscope, mkid
@@ -350,14 +360,14 @@ dependall: depend .WAIT all
 MKDEP_AFLAGS?=	${AFLAGS}
 MKDEP_CFLAGS?=	${CFLAGS}
 .if !defined(___USE_SUFFIX_RULES___)
-DEPS=	${SRCS:T:R:S/$/.d/g}
+DEPS+=	${SRCS:T:R:S/$/.d/g}
 .else
-DEPS=	${SRCS:R:S/$/.d/g}
+DEPS+=	${SRCS:R:S/$/.d/g}
 .endif
 
 .if !defined(___USE_SUFFIX_RULES___)
 .for _s in ${SSRCS}
-.if !target(${_s:T:R}.d)
+.if !commands(${_s:T:R}.d)
 ${_s:T:R}.d: ${_s}
 	${_MKTARGET_CREATE}
 	${MKDEP} -f ${.TARGET}.tmp -- ${MKDEP_AFLAGS} \
@@ -367,7 +377,7 @@ ${_s:T:R}.d: ${_s}
 .endfor
 
 .for _s in ${CSRCS}
-.if !target(${_s:T:R}.d)
+.if !commands(${_s:T:R}.d)
 ${_s:T:R}.d: ${_s}
 	${_MKTARGET_CREATE}
 	${MKDEP} -f ${.TARGET}.tmp -- ${MKDEP_CFLAGS} \
@@ -406,16 +416,6 @@ install-kernel-${MACHINE_NAME}:
 .endfor
 .endif
 .endif
-
-.include "${S}/conf/ldscript.mk"
-.include "${S}/conf/assym.mk"
-.include "${S}/conf/newvers.mk"
-.include "${S}/dev/splash/splash.mk"
-.include "${S}/conf/mdroot.mk"
-.include "${S}/conf/lint.mk"
-.include "${S}/conf/cscope.mk"
-.include "${S}/conf/gdbinit.mk"
-.include "${S}/conf/ssp.mk"
 
 ##
 ## the kernel

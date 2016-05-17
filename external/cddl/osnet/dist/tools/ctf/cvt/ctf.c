@@ -81,7 +81,7 @@ struct ctf_buf {
 static int target_requires_swap;
 
 /*PRINTFLIKE1*/
-static void __printflike(1, 2)
+static void __printflike(1, 2) __dead
 parseterminate(const char *fmt, ...)
 {
 	static char msgbuf[1024]; /* sigh */
@@ -173,11 +173,11 @@ write_objects(iidesc_t *idp, ctf_buf_t *b)
 {
 	ushort_t id = (idp ? idp->ii_dtype->t_id : 0);
 
-	ctf_buf_write(b, &id, sizeof (id));
-
 	if (target_requires_swap) {
 		SWAP_16(id);
 	}
+
+	ctf_buf_write(b, &id, sizeof (id));
 
 	debug(3, "Wrote object %s (%d)\n", (idp ? idp->ii_name : "(null)"), id);
 }
@@ -361,6 +361,7 @@ write_type(void *arg1, void *arg2)
 		break;
 
 	case POINTER:
+	case REFERENCE:	/* XXX: */
 		ctt.ctt_info = CTF_TYPE_INFO(CTF_K_POINTER, isroot, 0);
 		ctt.ctt_type = tp->t_tdesc->t_id;
 		write_unsized_type_rec(b, &ctt);
@@ -383,6 +384,7 @@ write_type(void *arg1, void *arg2)
 
 	case STRUCT:
 	case UNION:
+	case CLASS:
 		for (i = 0, mp = tp->t_members; mp != NULL; mp = mp->ml_next)
 			i++; /* count up struct or union members */
 

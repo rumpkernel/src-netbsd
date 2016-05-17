@@ -1,4 +1,4 @@
-/*	$NetBSD: if_arcsubr.c,v 1.69 2015/10/13 12:33:07 roy Exp $	*/
+/*	$NetBSD: if_arcsubr.c,v 1.73 2016/04/28 14:40:09 ozaki-r Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Ignatios Souvatzis
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_arcsubr.c,v 1.69 2015/10/13 12:33:07 roy Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_arcsubr.c,v 1.73 2016/04/28 14:40:09 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
@@ -102,7 +102,7 @@ uint8_t  arcbroadcastaddr = 0;
 #define senderr(e) { error = (e); goto bad;}
 
 static	int arc_output(struct ifnet *, struct mbuf *,
-	    const struct sockaddr *, struct rtentry *);
+	    const struct sockaddr *, const struct rtentry *);
 static	void arc_input(struct ifnet *, struct mbuf *);
 
 /*
@@ -112,7 +112,7 @@ static	void arc_input(struct ifnet *, struct mbuf *);
  */
 static int
 arc_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
-    struct rtentry *rt)
+    const struct rtentry *rt)
 {
 	struct mbuf		*m, *m1, *mcopy;
 	struct arccom		*ac;
@@ -122,7 +122,6 @@ arc_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 	int			error, newencoding;
 	uint8_t			atype, adst, myself;
 	int			tfrags, sflag, fsflag, rsflag;
-	ALTQ_DECL(struct altq_pktattr pktattr;)
 
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING))
 		return (ENETDOWN); /* m, m1 aren't initialized yet */
@@ -138,7 +137,7 @@ arc_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 	 * if the queueing discipline needs packet classification,
 	 * do it before prepending link headers.
 	 */
-	IFQ_CLASSIFY(&ifp->if_snd, m, dst->sa_family, &pktattr);
+	IFQ_CLASSIFY(&ifp->if_snd, m, dst->sa_family);
 
 	switch (dst->sa_family) {
 #ifdef INET
@@ -151,7 +150,8 @@ arc_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 			adst = arcbroadcastaddr; /* ARCnet broadcast address */
 		else if (ifp->if_flags & IFF_NOARP)
 			adst = ntohl(satocsin(dst)->sin_addr.s_addr) & 0xFF;
-		else if ((error = arpresolve(ifp, rt, m, dst, &adst)) != 0)
+		else if ((error = arpresolve(ifp, rt, m, dst, &adst,
+		    sizeof(adst))) != 0)
 			return error == EWOULDBLOCK ? 0 : error;
 
 		/* If broadcasting on a simplex interface, loopback a copy */
@@ -273,8 +273,7 @@ arc_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 			ah->arc_flag = rsflag;
 			ah->arc_seqid = ac->ac_seqid;
 
-			if ((error = ifq_enqueue(ifp, m ALTQ_COMMA
-			    ALTQ_DECL(&pktattr))) != 0)
+			if ((error = ifq_enqueue(ifp, m)) != 0)
 				return (error);
 
 			m = m1;
@@ -322,7 +321,7 @@ arc_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 		ah->arc_shost = myself;
 	}
 
-	return ifq_enqueue(ifp, m ALTQ_COMMA ALTQ_DECL(&pktattr));
+	return ifq_enqueue(ifp, m);
 
 bad:
 	if (m1)
@@ -622,7 +621,7 @@ arc_ifattach(struct ifnet *ifp, uint8_t lla)
 		    ifp->if_xname, arc_ipmtu, ARC_PHDS_MAXMTU);
 
 	ifp->if_output = arc_output;
-	ifp->if_input = arc_input;
+	ifp->_if_input = arc_input;
 	ac = (struct arccom *)ifp;
 	ac->ac_seqid = (time_second) & 0xFFFF; /* try to make seqid unique */
 	if (lla == 0) {

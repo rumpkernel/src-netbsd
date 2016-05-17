@@ -1,4 +1,4 @@
-/*	$NetBSD: ieee80211_node.c,v 1.69 2015/08/24 22:21:26 pooka Exp $	*/
+/*	$NetBSD: ieee80211_node.c,v 1.71 2016/04/08 14:30:47 roy Exp $	*/
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002-2005 Sam Leffler, Errno Consulting
@@ -36,7 +36,7 @@
 __FBSDID("$FreeBSD: src/sys/net80211/ieee80211_node.c,v 1.65 2005/08/13 17:50:21 sam Exp $");
 #endif
 #ifdef __NetBSD__
-__KERNEL_RCSID(0, "$NetBSD: ieee80211_node.c,v 1.69 2015/08/24 22:21:26 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ieee80211_node.c,v 1.71 2016/04/08 14:30:47 roy Exp $");
 #endif
 
 #ifdef _KERNEL_OPT

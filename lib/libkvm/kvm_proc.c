@@ -1,4 +1,4 @@
-/*	$NetBSD: kvm_proc.c,v 1.90 2014/02/19 20:21:22 dsl Exp $	*/
+/*	$NetBSD: kvm_proc.c,v 1.92 2016/04/04 22:14:38 christos Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -67,7 +67,7 @@
 #if 0
 static char sccsid[] = "@(#)kvm_proc.c	8.3 (Berkeley) 9/23/93";
 #else
-__RCSID("$NetBSD: kvm_proc.c,v 1.90 2014/02/19 20:21:22 dsl Exp $");
+__RCSID("$NetBSD: kvm_proc.c,v 1.92 2016/04/04 22:14:38 christos Exp $");
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -80,6 +80,7 @@ __RCSID("$NetBSD: kvm_proc.c,v 1.90 2014/02/19 20:21:22 dsl Exp $");
 
 #include <sys/param.h>
 #include <sys/lwp.h>
+#include <sys/wait.h>
 #include <sys/proc.h>
 #include <sys/exec.h>
 #include <sys/stat.h>
@@ -638,7 +639,7 @@ again:
 			kp2p->p_usrpri = kl[0].l_priority;
 			kp2p->p_nice = kp->kp_proc.p_nice;
 
-			kp2p->p_xstat = kp->kp_proc.p_xstat;
+			kp2p->p_xstat = P_WAITSTATUS(&kp->kp_proc);
 			kp2p->p_acflag = kp->kp_proc.p_acflag;
 
 			/*CONSTCOND*/

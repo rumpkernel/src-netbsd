@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.README,v 1.346 2015/07/23 08:03:26 mrg Exp $
+#	$NetBSD: bsd.README,v 1.353 2016/03/13 17:56:56 christos Exp $
 #	@(#)bsd.README	8.2 (Berkeley) 4/2/94
 
 This is the README file for the make "include" files for the NetBSD
@@ -159,12 +159,18 @@ MKCTF		If "no", do not build and install CTF tools, and also
 		during build.
 		Default: no
 
+NOCTF		Don't generate and manipulate CTF data of ELF binaries
+		during build. It is set internally for standalone programs.
+
 MKCVS		If "no", don't build or install cvs(1).
 		Default: yes
 
 MKDEBUG		If "no", don't build and install separate debugging symbols
 		into /usr/libdata/debug.
 		Default: no
+
+NODEBUG		Don't compile with debugging symbols during build.
+		It is set internally for standalone programs.
 
 MKDEBUGLIB	Build *_g.a debugging libraries, which are compiled
 		with -DDEBUG.
@@ -351,6 +357,9 @@ MKPIE		If "no", create regular executables. Otherwise create
 		PIE (Position Independent Executables).
 		Default: no
 
+NOPIE		Don't create PIE (Position Independent Executables)
+		It is set internally for standalone programs.
+
 MKPIGZGZIP	If "no", only install pigz as pigz, not gzip.
 		Default: no
 
@@ -387,6 +396,9 @@ MKSOFTFLOAT	If not "no", build with options to enable the compiler to
 MKSTATICLIB	If "no", don't build or install the normal static (*.a)
 		libraries.
 		Default: yes
+
+MKTOOLSDEBUG	If "yes" build the tools with debugging symbols.
+		Default: no
 
 MKTPM		If "no" then don't build the Trusted Platform Module
 		infrastructure.
@@ -475,6 +487,9 @@ USE_SSP		If "no", disables GCC stack protection code, which
 		of about 5%.
 		Default: "no", unless "USE_FORT" is set to "yes"
 
+NOSSP		Don't compile with stack protector during build.
+		It is set internally for standalone programs.
+
 USE_FORT 	If "yes" turns on substitute wrappers for commonly used
 		functions that do not do bounds checking regularly, but
 		they could in some cases by using the gcc
@@ -482,6 +497,9 @@ USE_FORT 	If "yes" turns on substitute wrappers for commonly used
 		size where it is known and detect buffer overflows.
 		These substitute functions are in /usr/include/ssp.
 		Default: depends on the part of the source tree
+
+NOFORT		Don't compile with substitute wrappers during build.
+		It is set internally for standalone programs.
 
 USE_YP		If "no", disables building YP (NIS) support into
 		various system utilities/libraries that support it.
@@ -1540,6 +1558,7 @@ DPADD		Additional dependencies for the program.  Usually used for
 		LIBEVENT?=	${DESTDIR}/usr/lib/libevent.a
 		LIBEVENT_OPENSSL?=	${DESTDIR}/usr/lib/libevent_openssl.a
 		LIBEVENT_PTHREADS?=	${DESTDIR}/usr/lib/libevent_pthreads.a
+		LIBEXECINFO?=	${DESTDIR}/usr/lib/libexecinfo.a
 		LIBEXPAT?=	${DESTDIR}/usr/lib/libexpat.a
 		LIBFETCH?=	${DESTDIR}/usr/lib/libfetch.a
 		LIBFORM?=	${DESTDIR}/usr/lib/libform.a
@@ -1575,6 +1594,7 @@ DPADD		Additional dependencies for the program.  Usually used for
 		LIBOBJC?=	${DESTDIR}/usr/lib/libobjc.a
 		LIBOSSAUDIO?=	${DESTDIR}/usr/lib/libossaudio.a
 		LIBPAM?=	${DESTDIR}/usr/lib/libpam.a
+		LIBPANEL?=	${DESTDIR}/usr/lib/libpanel.a
 		LIBPCAP?=	${DESTDIR}/usr/lib/libpcap.a
 		LIBPCI?=	${DESTDIR}/usr/lib/libpci.a
 		LIBPMC?=	${DESTDIR}/usr/lib/libpmc.a
