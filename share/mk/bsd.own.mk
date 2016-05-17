@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.own.mk,v 1.880 2015/11/15 13:50:10 pooka Exp $
+#	$NetBSD: bsd.own.mk,v 1.922 2016/04/28 18:29:20 martin Exp $
 
 # This needs to be before bsd.init.mk
 .if defined(BSD_MK_COMPAT_FILE)
@@ -44,9 +44,9 @@ NEED_OWN_INSTALL_TARGET?=	yes
 # If some future port is not supported by the in-tree toolchain, this should
 # be set to "yes" for that port only.
 #
-.if ${MACHINE} == "playstation2"
-TOOLCHAIN_MISSING?=	yes
-.endif
+# .if ${MACHINE} == "playstation2"
+# TOOLCHAIN_MISSING?=	yes
+# .endif
 
 TOOLCHAIN_MISSING?=	no
 
@@ -61,11 +61,24 @@ MKGCC?=		no
 #
 .if ${MKGCC:Uyes} != "no"
 
-.if ${MACHINE} == "playstation2" || ${MACHINE_CPU} == "aarch64"
-HAVE_GCC?=    0
+#
+# What GCC is used?
+#
+.if ${MACHINE_CPU} == "aarch64"
+HAVE_GCC?=	0
+.elif \
+    ${MACHINE} == "amd64" || \
+    ${MACHINE} == "alpha" || \
+    ${MACHINE} == "hppa" || \
+    ${MACHINE} == "i386" || \
+    ${MACHINE} == "playstation2" || \
+    ${MACHINE_ARCH} == "powerpc" || \
+    ${MACHINE_ARCH} == "sparc64" || \
+    ${MACHINE_ARCH} == "vax"
+HAVE_GCC?=	53
 .else
 # Otherwise, default to GCC4.8
-HAVE_GCC?=    48
+HAVE_GCC?=	48
 .endif
 
 #
@@ -78,7 +91,7 @@ MKGCCCMDS?=	no
 # We import the old gcc as "gcc.old" when upgrading.  EXTERNAL_GCC_SUBDIR is
 # set to the relevant subdirectory in src/external/gpl3 for his HAVE_GCC.
 #
-.if ${HAVE_GCC} == 5
+.if ${HAVE_GCC} == 53
 EXTERNAL_GCC_SUBDIR=	gcc
 .elif ${HAVE_GCC} == 48
 EXTERNAL_GCC_SUBDIR=	gcc.old
@@ -97,6 +110,8 @@ _LIBC_COMPILER_RT.aarch64=	yes
 _LIBC_COMPILER_RT.i386=		yes
 _LIBC_COMPILER_RT.powerpc=	yes
 _LIBC_COMPILER_RT.powerpc64=	yes
+_LIBC_COMPILER_RT.sparc=	yes
+_LIBC_COMPILER_RT.sparc64=	yes
 _LIBC_COMPILER_RT.x86_64=	yes
 
 .if ${HAVE_LLVM:Uno} == "yes" && ${_LIBC_COMPILER_RT.${MACHINE_ARCH}:Uno} == "yes"
@@ -113,18 +128,64 @@ HAVE_LIBGCC_EH?=	no
 HAVE_LIBGCC_EH?=	yes
 .endif
 
-HAVE_GDB?=	79
-
-.if (${MACHINE_ARCH} == "alpha") || \
-    (${MACHINE_ARCH} == "hppa") || \
-    (${MACHINE_ARCH} == "ia64") || \
-    (${MACHINE_CPU} == "mips")
+.if ${MACHINE} == "alpha" || \
+    ${MACHINE} == "hppa" || \
+    ${MACHINE} == "ia64" || \
+    ${MACHINE_CPU} == "mips"
 HAVE_SSP?=	no
 .else
 HAVE_SSP?=	yes
-.if ${USE_FORT:Uno} != "no"
+.if !defined(NOFORT) && ${USE_FORT:Uno} != "no"
 USE_SSP?=	yes
 .endif
+.endif
+
+#
+# What GDB is used?
+#
+.if ${MACHINE} == "amd64" || \
+    ${MACHINE} == "i386" || \
+    ${MACHINE} == "playstation2" || \
+    ${MACHINE} == "sparc" || \
+    ${MACHINE} == "vax" || \
+    ${MACHINE_CPU} == "sh3" || \
+    ${MACHINE_ARCH} == "mips64eb" || ${MACHINE_ARCH} == "mips64el"
+HAVE_GDB?=	710
+.else
+HAVE_GDB?=	79
+.endif
+
+.if ${HAVE_GDB} == 79
+EXTERNAL_GDB_SUBDIR=		gdb.old
+.else
+EXTERNAL_GDB_SUBDIR=		gdb
+.endif
+
+#
+# What binutils is used?
+#
+.if ${MACHINE} == "alpha" || \
+    ${MACHINE} == "amd64" || \
+    ${MACHINE} == "evbarm" || \
+    ${MACHINE} == "hppa" || \
+    ${MACHINE} == "i386" || \
+    ${MACHINE} == "playstation2" || \
+    ${MACHINE} == "sparc" || \
+    ${MACHINE} == "sparc64" || \
+    ${MACHINE} == "vax" || \
+    ${MACHINE_CPU} == "sh3" || \
+    ${MACHINE_ARCH} == "powerpc"
+HAVE_BINUTILS?=	226
+.else
+HAVE_BINUTILS?=	223
+.endif
+
+.if ${HAVE_BINUTILS} == 223
+EXTERNAL_BINUTILS_SUBDIR=	binutils.old
+.elif ${HAVE_BINUTILS} == 226
+EXTERNAL_BINUTILS_SUBDIR=	binutils
+.else
+EXTERNAL_BINUTILS_SUBDIR=	/does/not/exist
 .endif
 
 .if empty(.MAKEFLAGS:tW:M*-V .OBJDIR*)
@@ -275,7 +336,7 @@ TOOL_OBJC.clang=	${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-clang
 
 # PCC supports C and Fortran
 TOOL_CC.pcc=		${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-pcc
-TOOL_CPP.pcc=		${TOOLDIR}/libexec/${MACHINE_GNU_PLATFORM}-cpp
+TOOL_CPP.pcc=		${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-pcpp
 TOOL_CXX.pcc=		${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-p++
 
 #
@@ -324,6 +385,7 @@ TOOL_CRUNCHGEN=		MAKE=${.MAKE:Q} ${TOOLDIR}/bin/${_TOOL_PREFIX}crunchgen
 TOOL_CTAGS=		${TOOLDIR}/bin/${_TOOL_PREFIX}ctags
 TOOL_CTFCONVERT=	${TOOLDIR}/bin/${_TOOL_PREFIX}ctfconvert
 TOOL_CTFMERGE=		${TOOLDIR}/bin/${_TOOL_PREFIX}ctfmerge
+TOOL_CVSLATEST=		${TOOLDIR}/bin/${_TOOL_PREFIX}cvslatest
 TOOL_DB=		${TOOLDIR}/bin/${_TOOL_PREFIX}db
 TOOL_DISKLABEL=		${TOOLDIR}/bin/nbdisklabel
 TOOL_EQN=		${TOOLDIR}/bin/${_TOOL_PREFIX}eqn
@@ -332,7 +394,9 @@ TOOL_FGEN=		${TOOLDIR}/bin/${_TOOL_PREFIX}fgen
 TOOL_GENASSYM=		${TOOLDIR}/bin/${_TOOL_PREFIX}genassym
 TOOL_GENCAT=		${TOOLDIR}/bin/${_TOOL_PREFIX}gencat
 TOOL_GMAKE=		${TOOLDIR}/bin/${_TOOL_PREFIX}gmake
-TOOL_GREP=		${TOOLDIR}/bin/${_TOOL_PREFIX}grep
+# grep exists in src/tools, but is not hooked up into the build.
+#TOOL_GREP=		${TOOLDIR}/bin/${_TOOL_PREFIX}grep
+TOOL_GREP=		grep
 TOOL_GROFF=		PATH=${TOOLDIR}/lib/groff:$${PATH} ${TOOLDIR}/bin/${_TOOL_PREFIX}groff
 TOOL_HEXDUMP=		${TOOLDIR}/bin/${_TOOL_PREFIX}hexdump
 TOOL_HP300MKBOOT=	${TOOLDIR}/bin/${_TOOL_PREFIX}hp300-mkboot
@@ -386,6 +450,7 @@ TOOL_RPCGEN=		RPCGEN_CPP=${CPP:Q} ${TOOLDIR}/bin/${_TOOL_PREFIX}rpcgen
 TOOL_SED=		${TOOLDIR}/bin/${_TOOL_PREFIX}sed
 TOOL_SLC=		${TOOLDIR}/bin/${_TOOL_PREFIX}slc
 TOOL_SOELIM=		${TOOLDIR}/bin/${_TOOL_PREFIX}soelim
+TOOL_SORTINFO=		${TOOLDIR}/bin/${_TOOL_PREFIX}sortinfo
 TOOL_SPARKCRC=		${TOOLDIR}/bin/${_TOOL_PREFIX}sparkcrc
 TOOL_STAT=		${TOOLDIR}/bin/${_TOOL_PREFIX}stat
 TOOL_STRFILE=		${TOOLDIR}/bin/${_TOOL_PREFIX}strfile
@@ -414,7 +479,7 @@ TOOL_OBJC.gcc=	gcc
 
 # PCC supports C and Fortran
 TOOL_CC.pcc=		pcc
-TOOL_CPP.pcc=		/usr/libexec/pcpp
+TOOL_CPP.pcc=		pcpp
 TOOL_CXX.pcc=		p++
 
 TOOL_AMIGAAOUT2BB=	amiga-aout2bb
@@ -432,6 +497,7 @@ TOOL_CRUNCHGEN=		crunchgen
 TOOL_CTAGS=		ctags
 TOOL_CTFCONVERT=	ctfconvert
 TOOL_CTFMERGE=		ctfmerge
+TOOL_CVSLATEST=		cvslatest
 TOOL_DB=		db
 TOOL_DISKLABEL=		disklabel
 TOOL_EQN=		eqn
@@ -493,6 +559,7 @@ TOOL_ROFF_RAW=		${TOOL_GROFF} -Z
 TOOL_RPCGEN=		rpcgen
 TOOL_SED=		sed
 TOOL_SOELIM=		soelim
+TOOL_SORTINFO=		sortinfo
 TOOL_SPARKCRC=		sparkcrc
 TOOL_STAT=		stat
 TOOL_STRFILE=		strfile
@@ -505,6 +572,13 @@ TOOL_VFONTEDPR=		/usr/libexec/vfontedpr
 TOOL_ZIC=		zic
 
 .endif	# USETOOLS != yes						# }
+
+# Standalone code should not be compiled with PIE or CTF
+# Should create a better test
+.if defined(BINDIR) && ${BINDIR} == "/usr/mdec"
+NOPIE=			# defined
+NOCTF=			# defined
+.endif
 
 # Fallback to ensure that all variables are defined to something
 TOOL_CC.false=		false
@@ -525,12 +599,6 @@ CPP=		${TOOL_CPP.${ACTIVE_CPP}}
 CXX=		${TOOL_CXX.${ACTIVE_CXX}}
 FC=		${TOOL_FC.${ACTIVE_FC}}
 OBJC=		${TOOL_OBJC.${ACTIVE_OBJC}}
-
-# Override with tools versions if needed
-.if ${MKCTF:Uno} != "no" && !defined(NOCTF)
-CTFCONVERT=	${TOOL_CTFCONVERT}
-CTFMERGE=	${TOOL_CTFMERGE}
-.endif
 
 # For each ${MACHINE_CPU}, list the ports that use it.
 MACHINES.aarch64=	evbarm64
@@ -575,6 +643,7 @@ OBJCOPY_ELF2AOUT_FLAGS?=	\
 	-R .ARM.attributes	\
 	-R .ARM.exidx		\
 	-R .ARM.extab		\
+	-R .SUNW_ctf		\
 	-R .arm.atpcs		\
 	-R .comment		\
 	-R .debug_abbrev	\
@@ -914,7 +983,7 @@ MK${var}:=	yes
     || ${MACHINE_ARCH} == "mips64eb" || ${MACHINE_ARCH} == "mips64el" \
     || ${MACHINE_ARCH} == "powerpc64" || ${MACHINE_CPU} == "aarch64" \
     || ${MACHINE_ARCH} == "riscv64" \
-    || !empty(MACHINE_ARCH:Mearm*)
+    || (!empty(MACHINE_ARCH:Mearm*) && ${HAVE_GCC:U} == 48)
 MKCOMPAT?=	yes
 .else
 # Don't let this build where it really isn't supported.
@@ -969,6 +1038,25 @@ MKBINUTILS?=	${MKBFD}
 #
 .if ${MACHINE} == "amd64"
 MKZFS?=		yes
+.endif
+
+#
+# DTrace works on amd64, i386 and earm*
+#
+
+.if ${MACHINE_ARCH} == "i386" || \
+    ${MACHINE_ARCH} == "x86_64" || \
+    !empty(MACHINE_ARCH:Mearm*)
+MKDTRACE?=	yes
+MKCTF?=		yes
+.endif
+#
+# PIE is enabled on amd64 by default
+#
+.if ${MACHINE_ARCH} == "x86_64"
+MKPIE?=		yes
+.else
+MKPIE?=		no
 .endif
 
 #
@@ -1124,11 +1212,13 @@ MKNLS:=		no
 .if !empty(MACHINE_ARCH:Mearm*)
 _NEEDS_LIBCXX.${MACHINE_ARCH}=	yes
 .endif
+_NEEDS_LIBCXX.aarch64=		yes
 _NEEDS_LIBCXX.i386=		yes
 _NEEDS_LIBCXX.powerpc=		yes
 _NEEDS_LIBCXX.powerpc64=	yes
+_NEEDS_LIBCXX.sparc=		yes
+_NEEDS_LIBCXX.sparc64=		yes
 _NEEDS_LIBCXX.x86_64=		yes
-_NEEDS_LIBCXX.aarch64=		yes
 
 .if ${MKLLVM} == "yes" && ${_NEEDS_LIBCXX.${MACHINE_ARCH}:Uno} == "yes"
 MKLIBCXX:=	yes
@@ -1425,5 +1515,11 @@ TARGETS+=	lintmanpages
 .endif
 
 TESTSBASE=	/usr/tests${MLIBDIR:D/${MLIBDIR}}
+
+# Override with tools versions if needed
+.if ${MKCTF:Uno} != "no" && !defined(NOCTF)
+CTFCONVERT=	${TOOL_CTFCONVERT}
+CTFMERGE=	${TOOL_CTFMERGE}
+.endif
 
 .endif	# !defined(_BSD_OWN_MK_)

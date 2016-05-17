@@ -43,6 +43,7 @@ OBJECTS = \
 	$(OBJDIR)/dtparserparse.o\
 	$(OBJDIR)/prparserlex.o\
 	$(OBJDIR)/prparserparse.o\
+	$(OBJDIR)/acfileio.o\
 	$(OBJDIR)/adfile.o\
 	$(OBJDIR)/adisasm.o\
 	$(OBJDIR)/adwalk.o\
@@ -55,7 +56,9 @@ OBJECTS = \
 	$(OBJDIR)/aslbtypes.o\
 	$(OBJDIR)/aslcodegen.o\
 	$(OBJDIR)/aslcompile.o\
+	$(OBJDIR)/asldebug.o\
 	$(OBJDIR)/aslerror.o\
+	$(OBJDIR)/aslexternal.o\
 	$(OBJDIR)/aslfiles.o\
 	$(OBJDIR)/aslfileio.o\
 	$(OBJDIR)/aslfold.o\
@@ -93,12 +96,14 @@ OBJECTS = \
 	$(OBJDIR)/aslrestype2w.o\
 	$(OBJDIR)/aslstartup.o\
 	$(OBJDIR)/aslstubs.o\
+	$(OBJDIR)/aslpld.o\
 	$(OBJDIR)/asltransform.o\
 	$(OBJDIR)/asltree.o\
 	$(OBJDIR)/aslutils.o\
 	$(OBJDIR)/asluuid.o\
 	$(OBJDIR)/aslwalks.o\
 	$(OBJDIR)/aslxref.o\
+	$(OBJDIR)/aslxrefout.o\
 	$(OBJDIR)/cmfsize.o\
 	$(OBJDIR)/dbfileio.o\
 	$(OBJDIR)/dmbuffer.o\
@@ -113,6 +118,7 @@ OBJECTS = \
 	$(OBJDIR)/dmresrcs.o\
 	$(OBJDIR)/dmrestag.o\
 	$(OBJDIR)/dmtable.o\
+	$(OBJDIR)/dmtables.o\
 	$(OBJDIR)/dmtbdump.o\
 	$(OBJDIR)/dmtbinfo.o\
 	$(OBJDIR)/dmutils.o\
@@ -134,8 +140,11 @@ OBJECTS = \
 	$(OBJDIR)/dtio.o\
 	$(OBJDIR)/dtsubtable.o\
 	$(OBJDIR)/dttable.o\
+	$(OBJDIR)/dttable1.o\
+	$(OBJDIR)/dttable2.o\
 	$(OBJDIR)/dttemplate.o\
 	$(OBJDIR)/dtutils.o\
+	$(OBJDIR)/exconcat.o\
 	$(OBJDIR)/exconvrt.o\
 	$(OBJDIR)/excreate.o\
 	$(OBJDIR)/exdump.o\
@@ -189,8 +198,10 @@ OBJECTS = \
 	$(OBJDIR)/tbprint.o\
 	$(OBJDIR)/tbutils.o\
 	$(OBJDIR)/tbxface.o\
+	$(OBJDIR)/tbxfload.o\
 	$(OBJDIR)/utaddress.o\
 	$(OBJDIR)/utalloc.o\
+	$(OBJDIR)/utascii.o\
 	$(OBJDIR)/utbuffer.o\
 	$(OBJDIR)/utcache.o\
 	$(OBJDIR)/utcopy.o\
@@ -199,7 +210,6 @@ OBJECTS = \
 	$(OBJDIR)/utdelete.o\
 	$(OBJDIR)/uterror.o\
 	$(OBJDIR)/utexcep.o\
-	$(OBJDIR)/utfileio.o\
 	$(OBJDIR)/utglobal.o\
 	$(OBJDIR)/uthex.o\
 	$(OBJDIR)/utinit.o\
@@ -234,7 +244,9 @@ MISC = \
 	$(OBJDIR)/prparser.y.h
 
 ASL_PARSER = \
+	$(ASL_COMPILER)/aslcstyle.y\
 	$(ASL_COMPILER)/aslparser.y\
+	$(ASL_COMPILER)/aslresources.y\
 	$(ASL_COMPILER)/aslsupport.y\
 	$(ASL_COMPILER)/asltokens.y\
 	$(ASL_COMPILER)/asltypes.y\
@@ -260,10 +272,23 @@ CFLAGS += \
 include ../Makefile.rules
 
 #
+# Function to safely execute yacc
+#
+safe_yacc = \
+	_d=`mktemp -d $(OBJDIR)/$(1).XXXXXX` &&\
+	cd $$_d &&\
+	$(YACC) $(YFLAGS) -d -p$(1) $(abspath $(2)) &&\
+	cd - &&\
+	mv $$_d/y.tab$(suffix $(3)) $(3);\
+	_r=$$?;\
+	rm -fr $$_d;\
+	exit $$_r
+
+#
 # Macro processing for iASL .y files
 #
 $(OBJDIR)/aslcompiler.y :      $(ASL_PARSER)
-	$(MACROPROC) $(MFLAGS) $(ASL_COMPILER)/aslparser.y > $(OBJDIR)/aslcompiler.y
+	$(MACROPROC) $(MFLAGS) $(ASL_COMPILER)/aslparser.y > $@
 
 #
 # Parser and Lexer - intermediate C files
@@ -271,30 +296,20 @@ $(OBJDIR)/aslcompiler.y :      $(ASL_PARSER)
 $(OBJDIR)/aslcompilerlex.c :   $(ASL_LEXER)
 	$(LEX) $(LFLAGS) -PAslCompiler -o$@ $(ASL_COMPILER)/aslcompiler.l
 
-$(OBJDIR)/aslcompiler.y.h :    $(OBJDIR)/aslcompiler.y
-	$(YACC) $(YFLAGS) -pAslCompiler -o/dev/null --defines=$@ $<
-
-$(OBJDIR)/aslcompilerparse.c : $(OBJDIR)/aslcompiler.y
-	$(YACC) $(YFLAGS) -pAslCompiler -o$@ --defines=/dev/null $<
+$(OBJDIR)/aslcompilerparse.c $(OBJDIR)/aslcompiler.y.h : $(OBJDIR)/aslcompiler.y
+	$(call safe_yacc,AslCompiler,$<,$@)
 
 $(OBJDIR)/dtparserlex.c :      $(ASL_COMPILER)/dtparser.l $(OBJDIR)/dtparser.y.h
 	$(LEX) $(LFLAGS) -PDtParser -o$@ $<
 
-$(OBJDIR)/dtparser.y.h :       $(ASL_COMPILER)/dtparser.y
-	$(YACC) $(YFLAGS) -pDtParser -o/dev/null --defines=$@ $<
-
-$(OBJDIR)/dtparserparse.c :    $(ASL_COMPILER)/dtparser.y
-	$(YACC) $(YFLAGS) -pDtParser -o$@ --defines=/dev/null $<
+$(OBJDIR)/dtparserparse.c $(OBJDIR)/dtparser.y.h :       $(ASL_COMPILER)/dtparser.y
+	$(call safe_yacc,DtParser,$<,$@)
 
 $(OBJDIR)/prparserlex.c :      $(ASL_COMPILER)/prparser.l $(OBJDIR)/prparser.y.h
 	$(LEX) $(LFLAGS) -PPrParser -o$@ $<
 
-$(OBJDIR)/prparser.y.h :       $(ASL_COMPILER)/prparser.y
-	$(YACC) $(YFLAGS) -pPrParser -o/dev/null --defines=$@ $<
-
-$(OBJDIR)/prparserparse.c :    $(ASL_COMPILER)/prparser.y
-	$(YACC) $(YFLAGS) -pPrParser -o$@ --defines=/dev/null $<
-
+$(OBJDIR)/prparserparse.c $(OBJDIR)/prparser.y.h :       $(ASL_COMPILER)/prparser.y
+	$(call safe_yacc,PrParser,$<,$@)
 
 #
 # Parsers and Lexers - final object files

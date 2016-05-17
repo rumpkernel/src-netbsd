@@ -1,4 +1,4 @@
-/*	$NetBSD: time.h,v 1.4 2010/03/26 21:33:28 christos Exp $	*/
+/*	$NetBSD: time.h,v 1.7 2016/04/28 11:45:02 christos Exp $	*/
 
 /*-
  * Copyright (c) 2007 Pawel Jakub Dawidek <pjd@FreeBSD.org>
@@ -65,6 +65,16 @@ gethrtime(void) {
 #define	gethrestime(ts)		getnanotime(ts)
 
 #else
+
+#ifdef CLOCK_REALTIME
+int clock_gettime(clockid_t, struct timespec *)
+#ifdef __RENAME
+    __RENAME(__clock_gettime50)
+#endif
+;
+#else
+#include <stdio.h>	/* For NULL */
+#endif
 
 static __inline hrtime_t gethrtime(void) {
 #ifdef CLOCK_REALTIME

@@ -1,4 +1,4 @@
-/*	$NetBSD: if_ethersubr.c,v 1.214 2015/10/13 12:33:07 roy Exp $	*/
+/*	$NetBSD: if_ethersubr.c,v 1.222 2016/04/28 00:16:56 ozaki-r Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -61,7 +61,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_ethersubr.c,v 1.214 2015/10/13 12:33:07 roy Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_ethersubr.c,v 1.222 2016/04/28 00:16:56 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
@@ -88,6 +88,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_ethersubr.c,v 1.214 2015/10/13 12:33:07 roy Exp $
 #include <sys/device.h>
 #include <sys/rnd.h>
 #include <sys/rndsource.h>
+#include <sys/cpu.h>
 
 #include <net/if.h>
 #include <net/netisr.h>
@@ -177,7 +178,7 @@ const uint8_t ethermulticastaddr_slowprotocols[ETHER_ADDR_LEN] =
 #define senderr(e) { error = (e); goto bad;}
 
 static	int ether_output(struct ifnet *, struct mbuf *,
-	    const struct sockaddr *, struct rtentry *);
+	    const struct sockaddr *, const struct rtentry *);
 
 /*
  * Ethernet output routine.
@@ -187,7 +188,7 @@ static	int ether_output(struct ifnet *, struct mbuf *,
 static int
 ether_output(struct ifnet * const ifp0, struct mbuf * const m0,
 	const struct sockaddr * const dst,
-	struct rtentry *rt)
+	const struct rtentry *rt)
 {
 	uint16_t etype = 0;
 	int error = 0, hdrcmplt = 0;
@@ -196,7 +197,6 @@ ether_output(struct ifnet * const ifp0, struct mbuf * const m0,
 	struct mbuf *mcopy = NULL;
 	struct ether_header *eh;
 	struct ifnet *ifp = ifp0;
-	ALTQ_DECL(struct altq_pktattr pktattr;)
 #ifdef INET
 	struct arphdr *ah;
 #endif /* INET */
@@ -242,7 +242,8 @@ ether_output(struct ifnet * const ifp0, struct mbuf * const m0,
 			(void)memcpy(edst, etherbroadcastaddr, sizeof(edst));
 		else if (m->m_flags & M_MCAST)
 			ETHER_MAP_IP_MULTICAST(&satocsin(dst)->sin_addr, edst);
-		else if ((error = arpresolve(ifp, rt, m, dst, edst)) != 0)
+		else if ((error = arpresolve(ifp, rt, m, dst, edst,
+		    sizeof(edst))) != 0)
 			return error == EWOULDBLOCK ? 0 : error;
 		/* If broadcasting on a simplex interface, loopback a copy */
 		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX))
@@ -416,9 +417,9 @@ ether_output(struct ifnet * const ifp0, struct mbuf * const m0,
 	 * address family/header pointer in the pktattr.
 	 */
 	if (ALTQ_IS_ENABLED(&ifp->if_snd))
-		altq_etherclassify(&ifp->if_snd, m, &pktattr);
+		altq_etherclassify(&ifp->if_snd, m);
 #endif
-	return ifq_enqueue(ifp, m ALTQ_COMMA ALTQ_DECL(&pktattr));
+	return ifq_enqueue(ifp, m);
 
 bad:
 	if (m)
@@ -433,8 +434,7 @@ bad:
  * classification engine understands link headers.
  */
 void
-altq_etherclassify(struct ifaltq *ifq, struct mbuf *m,
-    struct altq_pktattr *pktattr)
+altq_etherclassify(struct ifaltq *ifq, struct mbuf *m)
 {
 	struct ether_header *eh;
 	uint16_t ether_type;
@@ -502,10 +502,10 @@ altq_etherclassify(struct ifaltq *ifq, struct mbuf *m,
 	hdr = mtod(m, void *);
 
 	if (ALTQ_NEEDS_CLASSIFY(ifq))
-		pktattr->pattr_class =
+		m->m_pkthdr.pattr_class =
 		    (*ifq->altq_classify)(ifq->altq_clfier, m, af);
-	pktattr->pattr_af = af;
-	pktattr->pattr_hdr = hdr;
+	m->m_pkthdr.pattr_af = af;
+	m->m_pkthdr.pattr_hdr = hdr;
 
 	m->m_data -= hlen;
 	m->m_len += hlen;
@@ -513,9 +513,9 @@ altq_etherclassify(struct ifaltq *ifq, struct mbuf *m,
 	return;
 
  bad:
-	pktattr->pattr_class = NULL;
-	pktattr->pattr_hdr = NULL;
-	pktattr->pattr_af = AF_UNSPEC;
+	m->m_pkthdr.pattr_class = NULL;
+	m->m_pkthdr.pattr_hdr = NULL;
+	m->m_pkthdr.pattr_af = AF_UNSPEC;
 }
 #endif /* ALTQ */
 
@@ -538,6 +538,8 @@ ether_input(struct ifnet *ifp, struct mbuf *m)
 #if defined (LLC) || defined(NETATALK)
 	struct llc *l;
 #endif
+
+	KASSERT(!cpu_intr_p());
 
 	if ((ifp->if_flags & IFF_UP) == 0) {
 		m_freem(m);
@@ -692,29 +694,10 @@ ether_input(struct ifnet *ifp, struct mbuf *m)
 	}
 #if NPPPOE > 0
 	case ETHERTYPE_PPPOEDISC:
+		pppoedisc_input(ifp, m);
+		return;
 	case ETHERTYPE_PPPOE:
-		if (m->m_flags & M_PROMISC) {
-			m_freem(m);
-			return;
-		}
-#ifndef PPPOE_SERVER
-		if (m->m_flags & (M_MCAST | M_BCAST)) {
-			m_freem(m);
-			return;
-		}
-#endif
-
-		if (etype == ETHERTYPE_PPPOEDISC)
-			inq = &ppoediscinq;
-		else
-			inq = &ppoeinq;
-		if (IF_QFULL(inq)) {
-			IF_DROP(inq);
-			m_freem(m);
-		} else {
-			IF_ENQUEUE(inq, m);
-			softint_schedule(pppoe_softintr);
-		}
+		pppoe_input(ifp, m);
 		return;
 #endif /* NPPPOE > 0 */
 	case ETHERTYPE_SLOWPROTOCOLS: {
@@ -932,7 +915,7 @@ ether_ifattach(struct ifnet *ifp, const uint8_t *lla)
 	ifp->if_dlt = DLT_EN10MB;
 	ifp->if_mtu = ETHERMTU;
 	ifp->if_output = ether_output;
-	ifp->if_input = ether_input;
+	ifp->_if_input = ether_input;
 	if (ifp->if_baudrate == 0)
 		ifp->if_baudrate = IF_Mbps(10);		/* just a default */
 
@@ -1414,6 +1397,75 @@ ether_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 		return ifioctl_common(ifp, cmd, data);
 	}
 	return 0;
+}
+
+/*
+ * Enable/disable passing VLAN packets if the parent interface supports it.
+ * Return:
+ * 	 0: Ok
+ *	-1: Parent interface does not support vlans
+ *	>0: Error
+ */
+int
+ether_enable_vlan_mtu(struct ifnet *ifp)
+{
+	int error;
+	struct ethercom *ec = (void *)ifp;
+
+	/* Already have VLAN's do nothing. */
+	if (ec->ec_nvlans != 0)
+		return 0;
+
+	/* Parent does not support VLAN's */
+	if ((ec->ec_capabilities & ETHERCAP_VLAN_MTU) == 0)
+		return -1;
+
+	/*
+	 * Parent supports the VLAN_MTU capability,
+	 * i.e. can Tx/Rx larger than ETHER_MAX_LEN frames;
+	 * enable it.
+	 */
+	ec->ec_capenable |= ETHERCAP_VLAN_MTU;
+
+	/* Interface is down, defer for later */
+	if ((ifp->if_flags & IFF_UP) == 0)
+		return 0;
+
+	if ((error = if_flags_set(ifp, ifp->if_flags)) == 0)
+		return 0;
+
+	ec->ec_capenable &= ~ETHERCAP_VLAN_MTU;
+	return error;
+}
+
+int
+ether_disable_vlan_mtu(struct ifnet *ifp)
+{
+	int error;
+	struct ethercom *ec = (void *)ifp;
+
+	/* We still have VLAN's, defer for later */
+	if (ec->ec_nvlans != 0)
+		return 0;
+
+	/* Parent does not support VLAB's, nothing to do. */
+	if ((ec->ec_capenable & ETHERCAP_VLAN_MTU) == 0)
+		return -1;
+
+	/*
+	 * Disable Tx/Rx of VLAN-sized frames.
+	 */
+	ec->ec_capenable &= ~ETHERCAP_VLAN_MTU;
+	
+	/* Interface is down, defer for later */
+	if ((ifp->if_flags & IFF_UP) == 0)
+		return 0;
+
+	if ((error = if_flags_set(ifp, ifp->if_flags)) == 0)
+		return 0;
+
+	ec->ec_capenable |= ETHERCAP_VLAN_MTU;
+	return error;
 }
 
 static int

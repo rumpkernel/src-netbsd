@@ -1,4 +1,4 @@
-/*	$NetBSD: time.h,v 1.70 2015/07/31 12:51:32 kamil Exp $	*/
+/*	$NetBSD: time.h,v 1.72 2016/04/23 23:08:26 christos Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -199,7 +199,7 @@ ms2bintime(uint64_t ms)
 {
 	struct bintime bt;
 
-	bt.sec = ms / 1000U;
+	bt.sec = (time_t)(ms / 1000U);
 	bt.frac = (((ms % 1000U) >> 32)/1000U) >> 32;
 
 	return bt;
@@ -210,7 +210,7 @@ us2bintime(uint64_t us)
 {
 	struct bintime bt;
 
-	bt.sec = us / 1000000U;
+	bt.sec = (time_t)(us / 1000000U);
 	bt.frac = (((us % 1000000U) >> 32)/1000000U) >> 32;
 
 	return bt;
@@ -221,7 +221,7 @@ ns2bintime(uint64_t ns)
 {
 	struct bintime bt;
 
-	bt.sec = ns / 1000000000U;
+	bt.sec = (time_t)(ns / 1000000000U);
 	bt.frac = (((ns % 1000000000U) >> 32)/1000000000U) >> 32;
 
 	return bt;
@@ -284,6 +284,8 @@ struct	itimerspec {
 #define	CLOCK_VIRTUAL	1
 #define	CLOCK_PROF	2
 #define	CLOCK_MONOTONIC	3
+#define CLOCK_THREAD_CPUTIME_ID		0x80000000
+#define CLOCK_PROCESS_CPUTIME_ID	0x40000000
 
 #if defined(_NETBSD_SOURCE)
 #define	TIMER_RELTIME	0x0	/* relative timer */

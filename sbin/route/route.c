@@ -1,4 +1,4 @@
-/*	$NetBSD: route.c,v 1.151 2015/03/23 18:33:17 roy Exp $	*/
+/*	$NetBSD: route.c,v 1.154 2016/04/04 07:37:07 ozaki-r Exp $	*/
 
 /*
  * Copyright (c) 1983, 1989, 1991, 1993
@@ -39,7 +39,7 @@ __COPYRIGHT("@(#) Copyright (c) 1983, 1989, 1991, 1993\
 #if 0
 static char sccsid[] = "@(#)route.c	8.6 (Berkeley) 4/28/95";
 #else
-__RCSID("$NetBSD: route.c,v 1.151 2015/03/23 18:33:17 roy Exp $");
+__RCSID("$NetBSD: route.c,v 1.154 2016/04/04 07:37:07 ozaki-r Exp $");
 #endif
 #endif /* not lint */
 
@@ -47,7 +47,6 @@ __RCSID("$NetBSD: route.c,v 1.151 2015/03/23 18:33:17 roy Exp $");
 #include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
-#include <sys/mbuf.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -333,8 +332,7 @@ flushroutes(int argc, char * const argv[], int doall)
 			print_rtmsg(rtm, rtm->rtm_msglen);
 		if ((rtm->rtm_flags & flags) != flags)
 			continue;
-		if (!(rtm->rtm_flags & (RTF_GATEWAY | RTF_STATIC |
-					RTF_LLINFO)) && !doall)
+		if (!(rtm->rtm_flags & (RTF_GATEWAY | RTF_STATIC)) && !doall)
 			continue;
 		if (af != AF_UNSPEC && sa->sa_family != af)
 			continue;
@@ -493,9 +491,6 @@ newroute(int argc, char *const *argv)
 			case K_NOSTATIC:
 				flags &= ~RTF_STATIC;
 				break;
-			case K_LLINFO:
-				flags |= RTF_LLINFO;
-				break;
 			case K_LOCK:
 				locking = 1;
 				break;
@@ -517,12 +512,6 @@ newroute(int argc, char *const *argv)
 			case K_NOBLACKHOLE:
 				flags &= ~RTF_BLACKHOLE;
 				break;
-			case K_CLONED:
-				flags |= RTF_CLONED;
-				break;
-			case K_NOCLONED:
-				flags &= ~RTF_CLONED;
-				break;
 			case K_PROTO1:
 				flags |= RTF_PROTO1;
 				break;
@@ -532,14 +521,11 @@ newroute(int argc, char *const *argv)
 			case K_PROXY:
 				flags |= RTF_ANNOUNCE;
 				break;
-			case K_CLONING:
-				flags |= RTF_CLONING;
+			case K_CONNECTED:
+				flags |= RTF_CONNECTED;
 				break;
-			case K_NOCLONING:
-				flags &= ~RTF_CLONING;
-				break;
-			case K_XRESOLVE:
-				flags |= RTF_XRESOLVE;
+			case K_NOCONNECTED:
+				flags &= ~RTF_CONNECTED;
 				break;
 			case K_STATIC:
 				flags |= RTF_STATIC;
@@ -660,22 +646,22 @@ newroute(int argc, char *const *argv)
 		} else
 			break;
 	}
-	if (*cmd == 'g')
-		return ret != 0;
-	if (!qflag) {
-		oerrno = errno;
-		(void)printf("%s %s %s", cmd, ishost? "host" : "net", dest);
-		if (*gateway) {
-			(void)printf(": gateway %s", gateway);
-			if (attempts > 1 && ret == 0 && af == AF_INET)
-			    (void)printf(" (%s)",
-			        inet_ntoa(soup->so_gate->sin.sin_addr));
-		}
-		if (ret == 0)
-			(void)printf("\n");
-		else
-			(void)printf(": %s\n", route_strerror(oerrno));
+	if (*cmd == 'g' || qflag)
+		goto out;
+
+	oerrno = errno;
+	(void)printf("%s %s %s", cmd, ishost? "host" : "net", dest);
+	if (*gateway) {
+		(void)printf(": gateway %s", gateway);
+		if (attempts > 1 && ret == 0 && af == AF_INET)
+		    (void)printf(" (%s)",
+			inet_ntoa(soup->so_gate->sin.sin_addr));
 	}
+	if (ret == 0)
+		(void)printf("\n");
+	else
+		(void)printf(": %s\n", route_strerror(oerrno));
+out:
 	free(sou.so_dst);
 	free(sou.so_gate);
 	free(sou.so_mask);
@@ -1278,7 +1264,6 @@ const char * const msgtypes[] = {
 	[RTM_LOCK] = "RTM_LOCK: fix specified metrics",
 	[RTM_OLDADD] = "RTM_OLDADD: caused by SIOCADDRT",
 	[RTM_OLDDEL] = "RTM_OLDDEL: caused by SIOCDELRT",
-	[RTM_RESOLVE] = "RTM_RESOLVE: Route created by cloning",
 	[RTM_NEWADDR] = "RTM_NEWADDR: address being added to iface",
 	[RTM_DELADDR] = "RTM_DELADDR: address being removed from iface",
 	[RTM_OOIFINFO] = "RTM_OOIFINFO: iface status change (pre-1.5)",
@@ -1292,7 +1277,7 @@ const char * const msgtypes[] = {
 const char metricnames[] =
 "\011pksent\010rttvar\7rtt\6ssthresh\5sendpipe\4recvpipe\3expire\2hopcount\1mtu";
 const char routeflags[] =
-"\1UP\2GATEWAY\3HOST\4REJECT\5DYNAMIC\6MODIFIED\7DONE\010MASK_PRESENT\011CLONING\012XRESOLVE\013LLINFO\014STATIC\015BLACKHOLE\016CLONED\017PROTO2\020PROTO1\023LOCAL\024BROADCAST";
+"\1UP\2GATEWAY\3HOST\4REJECT\5DYNAMIC\6MODIFIED\7DONE\010MASK_PRESENT\011CONNECTED\012XRESOLVE\013LLINFO\014STATIC\015BLACKHOLE\016CLONED\017PROTO2\020PROTO1\023LOCAL\024BROADCAST";
 const char ifnetflags[] =
 "\1UP\2BROADCAST\3DEBUG\4LOOPBACK\5PTP\6NOTRAILERS\7RUNNING\010NOARP\011PPROMISC\012ALLMULTI\013OACTIVE\014SIMPLEX\015LINK0\016LINK1\017LINK2\020MULTICAST";
 const char addrnames[] =

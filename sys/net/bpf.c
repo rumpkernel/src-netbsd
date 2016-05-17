@@ -1,4 +1,4 @@
-/*	$NetBSD: bpf.c,v 1.192 2015/10/14 19:40:09 christos Exp $	*/
+/*	$NetBSD: bpf.c,v 1.195 2016/02/09 08:32:12 ozaki-r Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1993
@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bpf.c,v 1.192 2015/10/14 19:40:09 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bpf.c,v 1.195 2016/02/09 08:32:12 ozaki-r Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_bpf.h"
@@ -475,11 +475,17 @@ bpfopen(dev_t dev, int flag, int mode, struct lwp *l)
 static int
 bpf_close(struct file *fp)
 {
-	struct bpf_d *d = fp->f_bpf;
+	struct bpf_d *d;
 	int s;
 
 	KERNEL_LOCK(1, NULL);
 	mutex_enter(&bpf_mtx);
+
+	if ((d = fp->f_bpf) == NULL) {
+		mutex_exit(&bpf_mtx);
+		KERNEL_UNLOCK_ONE(NULL);
+		return 0;
+	}
 
 	/*
 	 * Refresh the PID associated with this bpf file.
@@ -495,14 +501,15 @@ bpf_close(struct file *fp)
 	splx(s);
 	bpf_freed(d);
 	LIST_REMOVE(d, bd_list);
-	callout_destroy(&d->bd_callout);
-	seldestroy(&d->bd_sel);
-	softint_disestablish(d->bd_sih);
-	free(d, M_DEVBUF);
 	fp->f_bpf = NULL;
 
 	mutex_exit(&bpf_mtx);
 	KERNEL_UNLOCK_ONE(NULL);
+
+	callout_destroy(&d->bd_callout);
+	seldestroy(&d->bd_sel);
+	softint_disestablish(d->bd_sih);
+	free(d, M_DEVBUF);
 
 	return (0);
 }
@@ -720,8 +727,9 @@ bpf_write(struct file *fp, off_t *offp, struct uio *uio,
 
 	if (mc != NULL) {
 		if (error == 0)
-			(*ifp->if_input)(ifp, mc);
-		m_freem(mc);
+			ifp->_if_input(ifp, mc);
+		else
+			m_freem(mc);
 	}
 	splx(s);
 	KERNEL_UNLOCK_ONE(NULL);

@@ -1,4 +1,4 @@
-/* $NetBSD: if_pppoe.c,v 1.104 2015/08/24 22:21:26 pooka Exp $ */
+/* $NetBSD: if_pppoe.c,v 1.106 2016/04/24 16:59:15 christos Exp $ */
 
 /*-
  * Copyright (c) 2002, 2008 The NetBSD Foundation, Inc.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_pppoe.c,v 1.104 2015/08/24 22:21:26 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_pppoe.c,v 1.106 2016/04/24 16:59:15 christos Exp $");
 
 #include "pppoe.h"
 
@@ -160,10 +160,11 @@ static void pppoe_softintr_handler(void *);
 extern int sppp_ioctl(struct ifnet *, unsigned long, void *);
 
 /* input routines */
-static void pppoe_input(void);
+static void pppoeintr(void);
 static void pppoe_disc_input(struct mbuf *);
 static void pppoe_dispatch_disc_pkt(struct mbuf *, int);
 static void pppoe_data_input(struct mbuf *);
+static void pppoe_enqueue(struct ifqueue *, struct mbuf *);
 
 /* management routines */
 static int pppoe_connect(struct pppoe_softc *);
@@ -349,13 +350,13 @@ pppoe_softintr_handler(void *dummy)
 {
 	/* called at splsoftnet() */
 	mutex_enter(softnet_lock);
-	pppoe_input();
+	pppoeintr();
 	mutex_exit(softnet_lock);
 }
 
 /* called at appropriate protection level */
 static void
-pppoe_input(void)
+pppoeintr(void)
 {
 	struct mbuf *m;
 	int s, disc_done, data_done;
@@ -484,10 +485,9 @@ pppoe_dispatch_disc_pkt(struct mbuf *m, int off)
 					n = m_pulldown(m, off + sizeof(*pt),
 					    len, &noff);
 					if (n) {
-						strncpy(error,
+						strlcpy(error,
 						    mtod(n, char*) + noff,
 						    len);
-						error[len] = '\0';
 					}
 					printf("%s: connected to %s\n",
 					    devname, error);
@@ -559,9 +559,8 @@ pppoe_dispatch_disc_pkt(struct mbuf *m, int off)
 				n = m_pulldown(m, off + sizeof(*pt), len,
 				    &noff);
 				if (n && error) {
-					strncpy(error, 
+					strlcpy(error, 
 					    mtod(n, char *) + noff, len);
-					error[len] = '\0';
 				}
 			}
 			if (error) {
@@ -948,7 +947,8 @@ pppoe_ioctl(struct ifnet *ifp, unsigned long cmd, void *data)
 		struct pppoediscparms *parms = (struct pppoediscparms*)data;
 		memset(parms, 0, sizeof *parms);
 		if (sc->sc_eth_if)
-			strncpy(parms->ifname, sc->sc_eth_if->if_xname, IFNAMSIZ);
+			strlcpy(parms->ifname, sc->sc_eth_if->if_xname,
+			    sizeof(parms->ifname));
 		return 0;
 	}
 	break;
@@ -1563,4 +1563,43 @@ pppoe_clear_softc(struct pppoe_softc *sc, const char *message)
 	}
 	sc->sc_ac_cookie_len = 0;
 	sc->sc_session = 0;
+}
+
+static void
+pppoe_enqueue(struct ifqueue *inq, struct mbuf *m)
+{
+	if (m->m_flags & M_PROMISC) {
+		m_free(m);
+		return;
+	}
+
+#ifndef PPPOE_SERVER
+	if (m->m_flags & (M_MCAST | M_BCAST)) {
+		m_free(m);
+		return;
+	}
+#endif
+
+	if (IF_QFULL(inq)) {
+		IF_DROP(inq);
+		m_freem(m);
+	} else {
+		IF_ENQUEUE(inq, m);
+		softint_schedule(pppoe_softintr);
+	}
+	return;
+}
+
+void
+pppoe_input(struct ifnet *ifp, struct mbuf *m)
+{
+	pppoe_enqueue(&ppoeinq, m);
+	return;
+}
+
+void
+pppoedisc_input(struct ifnet *ifp, struct mbuf *m)
+{
+	pppoe_enqueue(&ppoediscinq, m);
+	return;
 }

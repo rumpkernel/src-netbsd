@@ -29,9 +29,12 @@
 #include <dlfcn.h>
 #include <link.h>
 #include <sys/dtrace.h>
+#include <sys/ioctl.h>
 
 #include <stdarg.h>
+#define dprintf __hide_dprintf
 #include <stdio.h>
+#undef dprintf
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -64,7 +67,7 @@ static int gen;			/* DOF helper generation */
 extern dof_hdr_t __SUNW_dof;	/* DOF defined in the .SUNW_dof section */
 static boolean_t dof_init_debug = B_FALSE;	/* From DTRACE_DOF_INIT_DEBUG */
 
-static void
+static void __printflike(2,3)
 dprintf(int debug, const char *fmt, ...)
 {
 	va_list ap;
@@ -146,7 +149,7 @@ dtrace_dof_init(void)
 	elf = (void *)lmp->l_addr;
 
 	dh.dofhp_dof = (uintptr_t)dof;
-	dh.dofhp_addr = elf->e_type == ET_DYN ? (uintptr_t) lmp->l_addr : 0;
+	dh.dofhp_addr = elf && elf->e_type == ET_DYN ? (uintptr_t) lmp->l_addr : 0;
 #if defined(__FreeBSD__) || defined(__NetBSD__)
 	dh.dofhp_pid = getpid();
 #endif

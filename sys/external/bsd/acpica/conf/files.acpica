@@ -1,4 +1,4 @@
-# $NetBSD: files.acpica,v 1.11 2015/08/28 02:33:59 uebayasi Exp $
+# $NetBSD: files.acpica,v 1.14 2016/05/04 19:27:57 christos Exp $
 
 define		acpica
 makeoptions	acpi	CPPFLAGS+="-I$S/external/bsd/acpica/dist/include"
@@ -14,7 +14,6 @@ file	debugger/dbcmds.c		acpica & acpi_debug & ddb
 file	debugger/dbconvert.c		acpica & acpi_debug & ddb
 file	debugger/dbdisply.c		acpica & acpi_debug & ddb
 file	debugger/dbexec.c		acpica & acpi_debug & ddb
-file	debugger/dbfileio.c		acpica & acpi_debug & ddb
 file	debugger/dbhistry.c		acpica & acpi_debug & ddb
 file	debugger/dbinput.c		acpica & acpi_debug & ddb
 file	debugger/dbmethod.c		acpica & acpi_debug & ddb
@@ -73,6 +72,7 @@ file	events/evxfgpe.c		acpica
 file	events/evxfregn.c		acpica
 
 # executer/
+file	executer/exconcat.c		acpica
 file	executer/exconfig.c		acpica
 file	executer/exconvrt.c		acpica
 file	executer/excreate.c		acpica
@@ -96,6 +96,7 @@ file	executer/exstore.c		acpica
 file	executer/exstoren.c		acpica
 file	executer/exstorob.c		acpica
 file	executer/exsystem.c		acpica
+file	executer/extrace.c		acpica
 file	executer/exutils.c		acpica
 
 # hardware/
@@ -151,7 +152,7 @@ file	parser/psxface.c		acpica
 file	resources/rsaddr.c		acpica
 file	resources/rscalc.c		acpica
 file	resources/rscreate.c		acpica
-file	resources/rsdump.c		acpica
+file	resources/rsdump.c		acpica & acpi_debug & ddb
 file	resources/rsdumpinfo.c		acpica & acpi_debug & ddb
 file	resources/rsinfo.c		acpica
 file	resources/rsio.c		acpica
@@ -177,6 +178,7 @@ file	tables/tbxfroot.c		acpica
 # utilities/
 file	utilities/utaddress.c		acpica
 file	utilities/utalloc.c		acpica
+file	utilities/utascii.c		acpica
 file	utilities/utbuffer.c		acpica
 file	utilities/utcache.c		acpica
 file	utilities/utcopy.c		acpica

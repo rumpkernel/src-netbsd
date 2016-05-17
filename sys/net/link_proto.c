@@ -1,4 +1,4 @@
-/*	$NetBSD: link_proto.c,v 1.28 2015/05/02 17:18:03 rtr Exp $	*/
+/*	$NetBSD: link_proto.c,v 1.30 2016/01/21 15:41:29 riastradh Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1993
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: link_proto.c,v 1.28 2015/05/02 17:18:03 rtr Exp $");
+__KERNEL_RCSID(0, "$NetBSD: link_proto.c,v 1.30 2016/01/21 15:41:29 riastradh Exp $");
 
 #include <sys/param.h>
 #include <sys/socket.h>

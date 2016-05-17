@@ -1,4 +1,4 @@
-/*	$NetBSD: calc.tab.h,v 1.1.1.1 2015/01/03 22:58:24 christos Exp $	*/
+/*	$NetBSD: calc.tab.h,v 1.1.1.3 2016/01/09 21:59:45 christos Exp $	*/
 
 #define DIGIT 257
 #define LETTER 258

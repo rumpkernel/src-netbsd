@@ -1,4 +1,4 @@
-/*	$NetBSD: err_syntax26.tab.c,v 1.1.1.1 2015/01/03 22:58:24 christos Exp $	*/
+/*	$NetBSD: err_syntax26.tab.c,v 1.1.1.3 2016/01/09 21:59:46 christos Exp $	*/
 
 /* original parser id follows */
 /* yysccsid[] = "@(#)yaccpar	1.9 (Berkeley) 02/21/93" */

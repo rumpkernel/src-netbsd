@@ -1,4 +1,4 @@
-/* $NetBSD: semaphore.h,v 1.4 2012/03/08 21:59:28 joerg Exp $ */
+/* $NetBSD: semaphore.h,v 1.5 2016/04/24 19:48:29 dholland Exp $ */
 
 /*-
  * Copyright (c) 2003 The NetBSD Foundation, Inc.
@@ -38,8 +38,8 @@ struct _sem_st;
 typedef	struct _sem_st *sem_t;
 
 #define	SEM_FAILED	((sem_t *)0)
-#define	SEM_VALUE_MAX	(~0U)
 
+#include <sys/semaphore.h> /* some kernel-only bits */
 #include <sys/time.h>
 
 __BEGIN_DECLS

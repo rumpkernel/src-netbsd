@@ -1,4 +1,4 @@
-/*	$NetBSD: if_hippisubr.c,v 1.44 2015/08/24 22:21:26 pooka Exp $	*/
+/*	$NetBSD: if_hippisubr.c,v 1.47 2016/04/28 00:16:56 ozaki-r Exp $	*/
 
 /*
  * Copyright (c) 1982, 1989, 1993
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_hippisubr.c,v 1.44 2015/08/24 22:21:26 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_hippisubr.c,v 1.47 2016/04/28 00:16:56 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
@@ -73,7 +73,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_hippisubr.c,v 1.44 2015/08/24 22:21:26 pooka Exp 
 #endif
 
 static int	hippi_output(struct ifnet *, struct mbuf *,
-			     const struct sockaddr *, struct rtentry *);
+			     const struct sockaddr *, const struct rtentry *);
 static void	hippi_input(struct ifnet *, struct mbuf *);
 
 /*
@@ -85,7 +85,7 @@ static void	hippi_input(struct ifnet *, struct mbuf *);
 
 static int
 hippi_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
-    struct rtentry *rt)
+    const struct rtentry *rt)
 {
 	uint16_t htype;
 	uint32_t ifield = 0;
@@ -94,7 +94,6 @@ hippi_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 	struct hippi_header *hh;
 	uint32_t *cci;
 	uint32_t d2_len;
-	ALTQ_DECL(struct altq_pktattr pktattr;)
 
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING))
 		senderr(ENETDOWN);
@@ -107,7 +106,7 @@ hippi_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 	 * If the queueing discipline needs packet classification,
 	 * do it before prepending link headers.
 	 */
-	IFQ_CLASSIFY(&ifp->if_snd, m, dst->sa_family, &pktattr);
+	IFQ_CLASSIFY(&ifp->if_snd, m, dst->sa_family);
 
 	switch (dst->sa_family) {
 #ifdef INET
@@ -185,7 +184,7 @@ hippi_output(struct ifnet *ifp, struct mbuf *m0, const struct sockaddr *dst,
 		m_copyback(m, m->m_pkthdr.len, 8 - d2_len % 8, (void *) buffer);
 	}
 
-	return ifq_enqueue(ifp, m ALTQ_COMMA ALTQ_DECL(&pktattr));
+	return ifq_enqueue(ifp, m);
 
  bad:
 	if (m)
@@ -288,7 +287,7 @@ hippi_ifattach(struct ifnet *ifp, void *lla)
 	ifp->if_dlt = DLT_HIPPI;
 	ifp->if_mtu = HIPPIMTU;
 	ifp->if_output = hippi_output;
-	ifp->if_input = hippi_input;
+	ifp->_if_input = hippi_input;
 	ifp->if_baudrate = IF_Mbps(800);	/* XXX double-check */
 
 	if_set_sadl(ifp, lla, 6, true);

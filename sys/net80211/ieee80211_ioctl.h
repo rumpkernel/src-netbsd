@@ -1,4 +1,4 @@
-/*	$NetBSD: ieee80211_ioctl.h,v 1.21 2015/09/06 06:01:01 dholland Exp $	*/
+/*	$NetBSD: ieee80211_ioctl.h,v 1.23 2016/04/08 14:30:47 roy Exp $	*/
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002-2005 Sam Leffler, Errno Consulting

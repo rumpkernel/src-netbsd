@@ -1,4 +1,4 @@
-/*	$NetBSD: limits.h,v 1.34 2015/05/29 07:37:31 manu Exp $	*/
+/*	$NetBSD: limits.h,v 1.36 2016/03/08 05:02:55 christos Exp $	*/
 
 /*
  * Copyright (c) 1988, 1993

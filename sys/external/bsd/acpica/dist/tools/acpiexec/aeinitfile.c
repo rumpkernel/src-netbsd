@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2015, Intel Corp.
+ * Copyright (C) 2000 - 2016, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -202,7 +202,8 @@ AeDoOneOverride (
 
     /* Extract the 64-bit integer */
 
-    Status = AcpiUtStrtoul64 (ValueString, 0, &Value);
+    Status = AcpiUtStrtoul64 (ValueString, ACPI_ANY_BASE,
+        ACPI_MAX64_BYTE_WIDTH, &Value);
     if (ACPI_FAILURE (Status))
     {
         AcpiOsPrintf ("%s %s\n", ValueString,

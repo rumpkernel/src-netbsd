@@ -1,4 +1,4 @@
-/*	$NetBSD: dk.c,v 1.85 2015/10/10 23:39:43 christos Exp $	*/
+/*	$NetBSD: dk.c,v 1.89 2016/04/27 02:19:12 christos Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005, 2006, 2007 The NetBSD Foundation, Inc.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: dk.c,v 1.85 2015/10/10 23:39:43 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: dk.c,v 1.89 2016/04/27 02:19:12 christos Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_dkwedge.h"
@@ -102,7 +102,7 @@ static int	dkwedge_cleanup_parent(struct dkwedge_softc *, int);
 static int	dkwedge_detach(device_t, int);
 static void	dkwedge_delall1(struct disk *, bool);
 static int	dkwedge_del1(struct dkwedge_info *, int);
-static struct vnode *dk_open_parent(dev_t, int);
+static int	dk_open_parent(dev_t, int, struct vnode **);
 static int	dk_close_parent(struct vnode *, int);
 
 static dev_type_open(dkopen);
@@ -267,7 +267,7 @@ dk_set_geometry(struct dkwedge_softc *sc, struct disk *pdk)
 
 	memset(dg, 0, sizeof(*dg));
 
-	dg->dg_secperunit = sc->sc_size >> pdk->dk_blkshift;
+	dg->dg_secperunit = sc->sc_size;
 	dg->dg_secsize = DEV_BSIZE << pdk->dk_blkshift;
 
 	/* fake numbers, 1 cylinder is 1 MB with default sector size */
@@ -761,6 +761,23 @@ dkwedge_find_by_wname(const char *wname)
 	return dv;
 }
 
+device_t
+dkwedge_find_by_parent(const char *name, size_t *i)
+{
+	rw_enter(&dkwedges_lock, RW_WRITER);
+	for (; *i < (size_t)ndkwedges; (*i)++) {
+		struct dkwedge_softc *sc;
+		if ((sc = dkwedges[*i]) == NULL)
+			continue;
+		if (strcmp(sc->sc_parent->dk_name, name) != 0)
+			continue;
+		rw_exit(&dkwedges_lock);
+		return sc->sc_dev;
+	}
+	rw_exit(&dkwedges_lock);
+	return NULL;
+}
+
 void
 dkwedge_print_wnames(void)
 {
@@ -969,14 +986,15 @@ dkwedge_read(struct disk *pdk, struct vnode *vp, daddr_t blkno,
 		isopen = true;
 		++pdk->dk_rawopens;
 		bdvp = pdk->dk_rawvp;
+		error = 0;
 	} else {
 		isopen = false;
-		bdvp = dk_open_parent(bdev, FREAD);
+		error = dk_open_parent(bdev, FREAD, &bdvp);
 	}
 	mutex_exit(&pdk->dk_rawlock);
 
-	if (bdvp == NULL)
-		return EBUSY;
+	if (error)
+		return error;
 
 	bp = getiobuf(bdvp, true);
 	bp->b_flags = B_READ;
@@ -1021,25 +1039,25 @@ dkwedge_lookup(dev_t dev)
 	return (dkwedges[unit]);
 }
 
-static struct vnode *
-dk_open_parent(dev_t dev, int mode)
+static int
+dk_open_parent(dev_t dev, int mode, struct vnode **vpp)
 {
 	struct vnode *vp;
 	int error;
 
 	error = bdevvp(dev, &vp);
 	if (error)
-		return NULL;
+		return error;
 
 	error = vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	if (error) {
 		vrele(vp);
-		return NULL;
+		return error;
 	}
 	error = VOP_OPEN(vp, mode, NOCRED);
 	if (error) {
 		vput(vp);
-		return NULL;
+		return error;
 	}
 
 	/* VOP_OPEN() doesn't do this for us. */
@@ -1051,7 +1069,9 @@ dk_open_parent(dev_t dev, int mode)
 
 	VOP_UNLOCK(vp);
 
-	return vp;
+	*vpp = vp;
+
+	return 0;
 }
 
 static int
@@ -1091,8 +1111,8 @@ dkopen(dev_t dev, int flags, int fmt, struct lwp *l)
 	if (sc->sc_dk.dk_openmask == 0) {
 		if (sc->sc_parent->dk_rawopens == 0) {
 			KASSERT(sc->sc_parent->dk_rawvp == NULL);
-			vp = dk_open_parent(sc->sc_pdev, FREAD | FWRITE);
-			if (vp == NULL)
+			error = dk_open_parent(sc->sc_pdev, FREAD | FWRITE, &vp);
+			if (error)
 				goto popen_fail;
 			sc->sc_parent->dk_rawvp = vp;
 		}
@@ -1551,7 +1571,8 @@ dkdump(dev_t dev, daddr_t blkno, void *va, size_t size)
 
 	/* Our content type is static, no need to open the device. */
 
-	if (strcmp(sc->sc_ptype, DKW_PTYPE_SWAP) != 0) {
+	if (strcmp(sc->sc_ptype, DKW_PTYPE_SWAP) != 0 &&
+	    strcmp(sc->sc_ptype, DKW_PTYPE_RAID) != 0) {
 		rv = ENXIO;
 		goto out;
 	}

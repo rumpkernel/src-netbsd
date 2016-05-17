@@ -1,4 +1,4 @@
-/*	$NetBSD: cd9660_vnops.c,v 1.52 2015/04/20 23:03:07 riastradh Exp $	*/
+/*	$NetBSD: cd9660_vnops.c,v 1.54 2016/03/12 02:36:25 christos Exp $	*/
 
 /*-
  * Copyright (c) 1994
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cd9660_vnops.c,v 1.52 2015/04/20 23:03:07 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cd9660_vnops.c,v 1.54 2016/03/12 02:36:25 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -319,7 +319,8 @@ iso_shipdir(struct isoreaddir *idp)
 	cl = idp->current.d_namlen;
 	cname = idp->current.d_name;
 
-	if ((assoc = cl > 1 && *cname == ASSOCCHAR)) {
+	assoc = (cl > 1) && (*cname == ASSOCCHAR);
+	if (assoc) {
 		cl--;
 		cname++;
 	}

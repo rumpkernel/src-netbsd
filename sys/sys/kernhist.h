@@ -1,4 +1,4 @@
-/*	$NetBSD: kernhist.h,v 1.10 2015/10/29 00:27:08 mrg Exp $	*/
+/*	$NetBSD: kernhist.h,v 1.12 2016/04/09 17:04:53 riastradh Exp $	*/
 
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -158,7 +158,7 @@ extern int kernhist_print_enabled;
 #define KERNHIST_PRINTNOW(E) \
 do { \
 		if (kernhist_print_enabled) { \
-			kernhist_entry_print(E); \
+			kernhist_entry_print(E, printf); \
 			if (KERNHIST_DELAY != 0) \
 				DELAY(KERNHIST_DELAY); \
 		} \
@@ -212,26 +212,23 @@ do { \
 	unsigned int _kernhist_call = 0;
 
 #ifdef DDB
-#define KERNHIST_DUMP(NAME)	kernhist_dump(&NAME)
+#define KERNHIST_DUMP(NAME)	kernhist_dump(&NAME, printf)
 #else
 #define KERNHIST_DUMP(NAME)
 #endif
 
-
-static inline void kernhist_entry_print(const struct kern_history_ent *);
-
 static inline void
-kernhist_entry_print(const struct kern_history_ent *e)
+kernhist_entry_print(const struct kern_history_ent *e, void (*pr)(const char *, ...) __printflike(1, 2))
 {
-	printf("%06" PRIu64 ".%06d ", e->tv.tv_sec, e->tv.tv_usec);
-	printf("%s#%ld@%d: ", e->fn, e->call, e->cpunum);
-	printf(e->fmt, e->v[0], e->v[1], e->v[2], e->v[3]);
-	printf("\n");
+	pr("%06" PRIu64 ".%06d ", e->tv.tv_sec, e->tv.tv_usec);
+	pr("%s#%ld@%d: ", e->fn, e->call, e->cpunum);
+	pr(e->fmt, e->v[0], e->v[1], e->v[2], e->v[3]);
+	pr("\n");
 }
 
 #if defined(DDB)
-void	kernhist_dump(struct kern_history *);
-void	kernhist_print(void (*)(const char *, ...) __printflike(1, 2));
+void	kernhist_dump(struct kern_history *, void (*)(const char *, ...) __printflike(1, 2));
+void	kernhist_print(void *, void (*)(const char *, ...) __printflike(1, 2));
 #endif /* DDB */
 
 #endif /* KERNHIST */

@@ -1,4 +1,4 @@
-/*	$NetBSD: kdump.c,v 1.120 2015/06/17 00:01:59 christos Exp $	*/
+/*	$NetBSD: kdump.c,v 1.123 2016/03/27 21:51:20 alnsn Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1993
@@ -39,7 +39,7 @@ __COPYRIGHT("@(#) Copyright (c) 1988, 1993\
 #if 0
 static char sccsid[] = "@(#)kdump.c	8.4 (Berkeley) 4/28/95";
 #else
-__RCSID("$NetBSD: kdump.c,v 1.120 2015/06/17 00:01:59 christos Exp $");
+__RCSID("$NetBSD: kdump.c,v 1.123 2016/03/27 21:51:20 alnsn Exp $");
 #endif
 #endif /* not lint */
 
@@ -109,7 +109,7 @@ static void	ioctldecode(u_long);
 static void	ktrsyscall(struct ktr_syscall *);
 static void	ktrsysret(struct ktr_sysret *, int);
 static void	ktrnamei(char *, int);
-static void	ktremul(char *, int, int);
+static void	ktremul(char *, size_t, size_t);
 static void	ktrgenio(struct ktr_genio *, int);
 static void	ktrpsig(void *, int);
 static void	ktrcsw(struct ktr_csw *);
@@ -126,7 +126,8 @@ static void visdump_buf(const void *, int, int);
 int
 main(int argc, char **argv)
 {
-	int ch, ktrlen, size;
+	unsigned int ktrlen, size;
+	int ch;
 	void *m;
 	int trpoints = 0;
 	int trset = 0;
@@ -249,7 +250,7 @@ main(int argc, char **argv)
 			col = dumpheader(&ktr_header);
 		else
 			col = -1;
-		if ((ktrlen = ktr_header.ktr_len) < 0)
+		if ((ktrlen = ktr_header.ktr_len) > INT_MAX)
 			errx(1, "bogus length 0x%x", ktrlen);
 		if (ktrlen > size) {
 			while (ktrlen > size)
@@ -460,6 +461,31 @@ output_long(u_long it, int as_x)
 		printf(as_x ? "%#lx" : "%ld", it);
 }
 
+static const char *
+fcntlname(u_long cmd)
+{
+#define	FCNTLCASE(a)	case a:	return # a
+	switch (cmd) {
+	FCNTLCASE(F_DUPFD);
+	FCNTLCASE(F_GETFD);
+	FCNTLCASE(F_SETFD);
+	FCNTLCASE(F_GETFL);
+	FCNTLCASE(F_SETFL);
+	FCNTLCASE(F_GETOWN);
+	FCNTLCASE(F_SETOWN);
+	FCNTLCASE(F_GETLK);
+	FCNTLCASE(F_SETLK);
+	FCNTLCASE(F_SETLKW);
+	FCNTLCASE(F_CLOSEM);
+	FCNTLCASE(F_MAXFD);
+	FCNTLCASE(F_DUPFD_CLOEXEC);
+	FCNTLCASE(F_GETNOSIGPIPE);
+	FCNTLCASE(F_SETNOSIGPIPE);
+	default:
+		return NULL;
+	}
+}
+
 static void
 ioctldecode(u_long cmd)
 {
@@ -544,6 +570,19 @@ ktrsyscall(struct ktr_syscall *ktr)
 			argcount--;
 			c = ',';
 
+		} else if (strcmp(sys_name, "fcntl") == 0 && argcount >= 2) {
+			(void)putchar('(');
+			output_long((long)*ap, !(decimal || small(*ap)));
+			ap++;
+			argcount--;
+			if ((cp = fcntlname(*ap)) != NULL)
+				(void)printf(",%s", cp);
+			else {
+				(void)printf(",%#lx", (unsigned long)*ap);
+			}
+			ap++;
+			argcount--;
+			c = ',';
 		} else if ((strstr(sys_name, "sigaction") != NULL ||
 		    strstr(sys_name, "sigvec") != NULL) && argcount >= 1) {
 			(void)printf("(SIG%s", signame(ap[0], 1));
@@ -713,7 +752,7 @@ ktrnamei(char *cp, int len)
 }
 
 static void
-ktremul(char *name, int len, int bufsize)
+ktremul(char *name, size_t len, size_t bufsize)
 {
 
 	if (len >= bufsize)

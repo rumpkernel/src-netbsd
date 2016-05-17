@@ -1,4 +1,4 @@
-/*	$NetBSD: svc_vc.c,v 1.30 2013/03/11 20:19:29 tron Exp $	*/
+/*	$NetBSD: svc_vc.c,v 1.34 2015/11/10 20:56:20 christos Exp $	*/
 
 /*
  * Copyright (c) 2010, Oracle America, Inc.
@@ -37,7 +37,7 @@
 static char *sccsid = "@(#)svc_tcp.c 1.21 87/08/11 Copyr 1984 Sun Micro";
 static char *sccsid = "@(#)svc_tcp.c	2.2 88/08/01 4.0 RPCSRC";
 #else
-__RCSID("$NetBSD: svc_vc.c,v 1.30 2013/03/11 20:19:29 tron Exp $");
+__RCSID("$NetBSD: svc_vc.c,v 1.34 2015/11/10 20:56:20 christos Exp $");
 #endif
 #endif
 
@@ -312,7 +312,6 @@ rendezvous_request(SVCXPRT *xprt, struct rpc_msg *msg)
 	socklen_t len;
 	struct __rpc_sockinfo si;
 	SVCXPRT *newxprt;
-	fd_set cleanfds;
 
 	_DIAGASSERT(xprt != NULL);
 	_DIAGASSERT(msg != NULL);
@@ -329,8 +328,7 @@ again:
 		 * running out.
 		 */
 		if (errno == EMFILE || errno == ENFILE) {
-			cleanfds = *get_fdset();
-			if (__svc_clean_idle(&cleanfds, 0, FALSE))
+			if (__svc_clean_idle(NULL, 0, FALSE))
 				goto again;
 		}
 		return FALSE;
@@ -758,9 +756,10 @@ svc_vc_rendezvous_ops(SVCXPRT *xprt)
  * cleaned. If timeout is 0, the least active connection is picked.
  */
 bool_t
-__svc_clean_idle(fd_set *fds, int timeout, bool_t cleanblock)
+/*ARGSUSED1*/
+__svc_clean_idle(fd_set *fds __unused, int timeout, bool_t cleanblock)
 {
-	int i, ncleaned;
+	int i, ncleaned, *fdmax;
 	SVCXPRT *xprt, *least_active;
 	struct timeval tv, tdiff, tmax;
 	struct cf_conn *cd;
@@ -769,28 +768,40 @@ __svc_clean_idle(fd_set *fds, int timeout, bool_t cleanblock)
 	tmax.tv_sec = tmax.tv_usec = 0;
 	least_active = NULL;
 	rwlock_wrlock(&svc_fd_lock);
-	for (i = ncleaned = 0; i <= svc_maxfd; i++) {
-		if (FD_ISSET(i, fds)) {
-			xprt = __svc_xports[i];
-			if (xprt == NULL || xprt->xp_ops == NULL ||
-			    xprt->xp_ops->xp_recv != svc_vc_recv)
-				continue;
-			cd = (struct cf_conn *)xprt->xp_p1;
-			if (!cleanblock && !cd->nonblock)
-				continue;
-			if (timeout == 0) {
-				timersub(&tv, &cd->last_recv_time, &tdiff);
-				if (timercmp(&tdiff, &tmax, >)) {
-					tmax = tdiff;
-					least_active = xprt;
-				}
-				continue;
+	fdmax = svc_fdset_getmax();
+	if (fdmax == NULL)
+		return FALSE;
+	for (i = ncleaned = 0; i <= *fdmax; i++) {
+		switch (svc_fdset_isset(i)) {
+		case 0:
+		case -1:
+			continue;
+		default:
+			break;
+		}
+
+		xprt = __svc_xports[i];
+		if (xprt == NULL || xprt->xp_ops == NULL ||
+		    xprt->xp_ops->xp_recv != svc_vc_recv)
+			continue;
+
+		cd = (struct cf_conn *)xprt->xp_p1;
+		if (!cleanblock && !cd->nonblock)
+			continue;
+
+		if (timeout == 0) {
+			timersub(&tv, &cd->last_recv_time, &tdiff);
+			if (timercmp(&tdiff, &tmax, >)) {
+				tmax = tdiff;
+				least_active = xprt;
 			}
-			if (tv.tv_sec - cd->last_recv_time.tv_sec > timeout) {
-				__xprt_unregister_unlocked(xprt);
-				__svc_vc_dodestroy(xprt);
-				ncleaned++;
-			}
+			continue;
+		}
+
+		if (tv.tv_sec - cd->last_recv_time.tv_sec > timeout) {
+			__xprt_unregister_unlocked(xprt);
+			__svc_vc_dodestroy(xprt);
+			ncleaned++;
 		}
 	}
 	if (timeout == 0 && least_active != NULL) {
