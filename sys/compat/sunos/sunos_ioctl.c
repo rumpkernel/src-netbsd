@@ -1,4 +1,4 @@
-/*	$NetBSD: sunos_ioctl.c,v 1.63 2015/09/26 04:13:39 christos Exp $	*/
+/*	$NetBSD: sunos_ioctl.c,v 1.67 2015/12/12 17:48:18 nakayama Exp $	*/
 
 /*
  * Copyright (c) 1993 Markus Wild.
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sunos_ioctl.c,v 1.63 2015/09/26 04:13:39 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sunos_ioctl.c,v 1.67 2015/12/12 17:48:18 nakayama Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -817,9 +817,9 @@ sunos_sys_ioctl(struct lwp *l, const struct sunos_sys_ioctl_args *uap, register_
 	    {
 		int tmp = 0;
 		switch ((int)(u_long)SCARG(uap, data)) {
-		case SUNOS_S_FLUSHR:	tmp = FREAD;
-		case SUNOS_S_FLUSHW:	tmp = FWRITE;
-		case SUNOS_S_FLUSHRW:	tmp = FREAD|FWRITE;
+		case SUNOS_S_FLUSHR:	tmp = FREAD; break;
+		case SUNOS_S_FLUSHW:	tmp = FWRITE; break;
+		case SUNOS_S_FLUSHRW:	tmp = FREAD|FWRITE; break;
 		}
                 error = (*ctl)(fp, TIOCFLUSH, &tmp);
 		break;
@@ -871,23 +871,27 @@ sunos_sys_ioctl(struct lwp *l, const struct sunos_sys_ioctl_args *uap, register_
 	case SUN_DKIOCGPART:
             {
 		struct partinfo pi;
+		struct disklabel label;
 
-		error = (*ctl)(fp, DIOCGPART, &pi);
+		error = (*ctl)(fp, DIOCGDINFO, &label);
+		if (error)
+			break;
+		error = (*ctl)(fp, DIOCGPARTINFO, &pi);
 		if (error)
 			break;
 
-		if (pi.disklab->d_secpercyl == 0) {
+		if (label.d_secpercyl == 0) {
 			error = ERANGE;	/* XXX */
 			break;
 		}
-		if (pi.part->p_offset % pi.disklab->d_secpercyl != 0) {
+		if (pi.pi_offset % label.d_secpercyl != 0) {
 			error = ERANGE;	/* XXX */
 			break;
 		}
 
 #define datapart	((struct sun_dkpart *)SCARG(uap, data))
-		datapart->sdkp_cyloffset = pi.part->p_offset / pi.disklab->d_secpercyl;
-		datapart->sdkp_nsectors = pi.part->p_size;
+		datapart->sdkp_cyloffset = pi.pi_offset / label.d_secpercyl;
+		datapart->sdkp_nsectors = pi.pi_size;
 #undef datapart
 		break;
 	    }

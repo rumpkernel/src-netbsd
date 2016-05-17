@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_mmap.c,v 1.153 2015/08/04 18:28:10 maxv Exp $	*/
+/*	$NetBSD: uvm_mmap.c,v 1.156 2016/04/07 12:07:36 christos Exp $	*/
 
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -46,7 +46,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_mmap.c,v 1.153 2015/08/04 18:28:10 maxv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_mmap.c,v 1.156 2016/04/07 12:07:36 christos Exp $");
 
 #include "opt_compat_netbsd.h"
 #include "opt_pax.h"
@@ -56,10 +56,7 @@ __KERNEL_RCSID(0, "$NetBSD: uvm_mmap.c,v 1.153 2015/08/04 18:28:10 maxv Exp $");
 #include <sys/filedesc.h>
 #include <sys/resourcevar.h>
 #include <sys/mman.h>
-
-#if defined(PAX_ASLR) || defined(PAX_MPROTECT)
 #include <sys/pax.h>
-#endif /* PAX_ASLR || PAX_MPROTECT */
 
 #include <sys/syscallargs.h>
 
@@ -371,7 +368,8 @@ sys_mmap(struct lwp *l, const struct sys_mmap_args *uap, register_t *retval)
 		 */
 
 		defaddr = p->p_emul->e_vm_default_addr(p,
-		    (vaddr_t)p->p_vmspace->vm_daddr, size);
+		    (vaddr_t)p->p_vmspace->vm_daddr, size,
+		    p->p_vmspace->vm_map.flags & VM_MAP_TOPDOWN);
 
 		if (addr == 0 ||
 		    !(p->p_vmspace->vm_map.flags & VM_MAP_TOPDOWN))
@@ -417,9 +415,7 @@ sys_mmap(struct lwp *l, const struct sys_mmap_args *uap, register_t *retval)
 		pos = 0;
 	}
 
-#ifdef PAX_MPROTECT
-	pax_mprotect(l, &prot, &maxprot);
-#endif /* PAX_MPROTECT */
+	PAX_MPROTECT_ADJUST(l, &prot, &maxprot);
 
 #ifdef PAX_ASLR
 	pax_aslr_mmap(l, &addr, orig_addr, flags);
@@ -1064,10 +1060,10 @@ uvm_mmap(struct vm_map *map, vaddr_t *addr, vsize_t size, vm_prot_t prot,
 }
 
 vaddr_t
-uvm_default_mapaddr(struct proc *p, vaddr_t base, vsize_t sz)
+uvm_default_mapaddr(struct proc *p, vaddr_t base, vsize_t sz, int topdown)
 {
 
-	if (p->p_vmspace->vm_map.flags & VM_MAP_TOPDOWN)
+	if (topdown)
 		return VM_DEFAULT_ADDRESS_TOPDOWN(base, sz);
 	else
 		return VM_DEFAULT_ADDRESS_BOTTOMUP(base, sz);
@@ -1086,7 +1082,8 @@ uvm_mmap_dev(struct proc *p, void **addrp, size_t len, dev_t dev,
 		flags |= MAP_FIXED;
 	else
 		*addrp = (void *)p->p_emul->e_vm_default_addr(p,
-		    (vaddr_t)p->p_vmspace->vm_daddr, len);
+		    (vaddr_t)p->p_vmspace->vm_daddr, len,
+		    p->p_vmspace->vm_map.flags & VM_MAP_TOPDOWN);
 
 	uobj = udv_attach(dev, prot, off, len);
 	if (uobj == NULL)
@@ -1109,7 +1106,8 @@ uvm_mmap_anon(struct proc *p, void **addrp, size_t len)
 		flags |= MAP_FIXED;
 	else
 		*addrp = (void *)p->p_emul->e_vm_default_addr(p,
-		    (vaddr_t)p->p_vmspace->vm_daddr, len);
+		    (vaddr_t)p->p_vmspace->vm_daddr, len,
+		    p->p_vmspace->vm_map.flags & VM_MAP_TOPDOWN);
 
 	error = uvm_mmap(&p->p_vmspace->vm_map, (vaddr_t *)addrp,
 			 (vsize_t)len, prot, prot, flags, UVM_ADV_NORMAL,

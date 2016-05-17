@@ -1,4 +1,4 @@
-/*	$NetBSD: specialreg.h,v 1.83 2015/08/14 06:54:22 msaitoh Exp $	*/
+/*	$NetBSD: specialreg.h,v 1.87 2016/04/27 08:51:32 msaitoh Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -318,9 +318,11 @@
 /* %ebx */
 #define CPUID_SEF_FSGSBASE	__BIT(0)
 #define CPUID_SEF_TSC_ADJUST	__BIT(1)
+#define CPUID_SEF_SGX		__BIT(2)
 #define CPUID_SEF_BMI1		__BIT(3)
 #define CPUID_SEF_HLE		__BIT(4)
 #define CPUID_SEF_AVX2		__BIT(5)
+#define CPUID_SEF_FDPEXONLY	__BIT(6)
 #define CPUID_SEF_SMEP		__BIT(7)
 #define CPUID_SEF_BMI2		__BIT(8)
 #define CPUID_SEF_ERMS		__BIT(9)
@@ -331,33 +333,42 @@
 #define CPUID_SEF_MPX		__BIT(14)
 #define CPUID_SEF_PQE		__BIT(15)
 #define CPUID_SEF_AVX512F	__BIT(16)
+#define CPUID_SEF_AVX512DQ	__BIT(17)
 #define CPUID_SEF_RDSEED	__BIT(18)
 #define CPUID_SEF_ADX		__BIT(19)
 #define CPUID_SEF_SMAP		__BIT(20)
+#define CPUID_SEF_CLFLUSHOPT	__BIT(23)
 #define CPUID_SEF_PT		__BIT(25)
 #define CPUID_SEF_AVX512PF	__BIT(26)
 #define CPUID_SEF_AVX512ER	__BIT(27)
 #define CPUID_SEF_AVX512CD	__BIT(28)
 #define CPUID_SEF_SHA		__BIT(29)
+#define CPUID_SEF_AVX512BW	__BIT(30)
+#define CPUID_SEF_AVX512VL	__BIT(31)
 
 #define CPUID_SEF_FLAGS	"\20" \
-	"\1" "FSGSBASE"	"\2" "TSCADJUST"		"\4" "BMI1"	\
-	"\5" "HLE"	"\6" "AVX2"			"\10" "SMEP"	\
+	"\1" "FSGSBASE"	"\2" "TSCADJUST" "\3" "SGX"	"\4" "BMI1"	\
+	"\5" "HLE"	"\6" "AVX2"	"\7" "FDPEXONLY" "\10" "SMEP"	\
 	"\11" "BMI2"	"\12" "ERMS"	"\13" "INVPCID"	"\14" "RTM"	\
 	"\15" "QM"	"\16" "FPUCSDS"	"\17" "MPX"    	"\20" "PQE"	\
-	"\21" "AVX512F"			"\23" "RDSEED"	"\24" "ADX"	\
-	"\25" "SMAP"							\
-			"\32" "PT"	"\33" "AVX512PF""\34" "AVX512ER"\
-	"\35" "AVX512CD""\36" "SHA"
+	"\21" "AVX512F"	"\22" "AVX512DQ" "\23" "RDSEED"	"\24" "ADX"	\
+	"\25" "SMAP"					"\28" "CLFLUSHOPT" \
+			"\32" "PT"	"\33" "AVX512PF" "\34" "AVX512ER" \
+	"\35" "AVX512CD""\36" "SHA"	"\37" "AVX512BW" "\38" "AVX512VL"
 
 /* %ecx */
 #define CPUID_SEF_PREFETCHWT1	__BIT(0)
+#define CPUID_SEF_UMIP		__BIT(2)
 #define CPUID_SEF_PKU		__BIT(3)
 #define CPUID_SEF_OSPKE		__BIT(4)
+#define CPUID_SEF_RDPID		__BIT(22)
+#define CPUID_SEF_SGXLC		__BIT(30)
 
 #define CPUID_SEF_FLAGS1	"\20" \
-	"\1" "PREFETCHWT1"				"\4" "PKU"	\
-	"\5" "OSPKE"
+	"\1" "PREFETCHWT1"		"\3" "UMIP"	"\4" "PKU"	\
+	"\5" "OSPKE"							\
+					"\27" "RDPID"			\
+					"\37" "SGXLC"
 
 /*
  * CPUID Processor extended state Enumeration Fn0000000d
@@ -445,6 +456,7 @@
 #define CPUID_WDT	0x00002000	/* watchdog timer support */
 #define CPUID_LWP	0x00008000	/* Light Weight Profiling */
 #define CPUID_FMA4	0x00010000	/* FMA4 instructions */
+#define CPUID_TCE	0x00020000	/* Translation cache Extension */
 #define CPUID_NODEID	0x00080000	/* NodeID MSR available*/
 #define CPUID_TBM	0x00200000	/* TBM instructions */
 #define CPUID_TOPOEXT	0x00400000	/* cpuid Topology Extension */
@@ -453,6 +465,8 @@
 #define CPUID_SPM	0x02000000	/* Stream Perf Mon */
 #define CPUID_DBE	0x04000000	/* Data Breakpoint Extension */
 #define CPUID_PTSC	0x08000000	/* PerfTsc */
+#define CPUID_L2IPERFC	0x10000000	/* L2I performance counter Extension */
+#define CPUID_MWAITX	0x20000000	/* MWAITX/MONITORX support */
 
 #define CPUID_AMD_FLAGS4	"\20" \
 	"\1" "LAHF"	"\2" "CMPLEGACY" "\3" "SVM"	"\4" "EAPIC" \
@@ -460,10 +474,10 @@
 	"\11" "3DNOWPREFETCH" \
 			"\12" "OSVW"	"\13" "IBS"	"\14" "XOP" \
 	"\15" "SKINIT"	"\16" "WDT"	"\17" "B14"	"\20" "LWP" \
-	"\21" "FMA4"	"\22" "B17"	"\23" "B18"	"\24" "NodeID" \
+	"\21" "FMA4"	"\22" "TCE"	"\23" "B18"	"\24" "NodeID" \
 	"\25" "B20"	"\26" "TBM"	"\27" "TopoExt"	"\30" "PCExtC" \
 	"\31" "PCExtNB"	"\32" "StrmPM"	"\33" "DBExt"	"\34" "PerfTsc" \
-	"\35" "B28"	"\36" "B29"	"\37" "B30"	"\40" "B31"
+	"\35" "L2IPERFC" "\36" "MWAITX"	"\37" "B30"	"\40" "B31"
 
 /*
  * AMD Advanced Power Management

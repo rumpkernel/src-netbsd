@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2015, Intel Corp.
+ * Copyright (C) 2000 - 2016, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -186,13 +186,16 @@ typedef struct acpi_dmtable_data
 
 typedef struct acpi_op_walk_info
 {
+    ACPI_WALK_STATE         *WalkState;
+    ACPI_PARSE_OBJECT       *MappingOp;
+    UINT8                   *PreviousAml;
+    UINT8                   *StartAml;
     UINT32                  Level;
     UINT32                  LastLevel;
     UINT32                  Count;
     UINT32                  BitOffset;
     UINT32                  Flags;
-    ACPI_WALK_STATE         *WalkState;
-    ACPI_PARSE_OBJECT       *MappingOp;
+    UINT32                  AmlOffset;
 
 } ACPI_OP_WALK_INFO;
 
@@ -299,6 +302,7 @@ extern ACPI_DMTABLE_INFO        AcpiDmTableInfoHest6[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoHest7[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoHest8[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoHest9[];
+extern ACPI_DMTABLE_INFO        AcpiDmTableInfoHest10[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoHestNotify[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoHestBank[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoHpet[];
@@ -315,6 +319,7 @@ extern ACPI_DMTABLE_INFO        AcpiDmTableInfoIort3[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoIort3a[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoIort3b[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoIort3c[];
+extern ACPI_DMTABLE_INFO        AcpiDmTableInfoIort4[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoIortAcc[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoIortHdr[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoIortMap[];
@@ -380,6 +385,7 @@ extern ACPI_DMTABLE_INFO        AcpiDmTableInfoPcct[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoPcctHdr[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoPcct0[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoPcct1[];
+extern ACPI_DMTABLE_INFO        AcpiDmTableInfoPcct2[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoRsdp1[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoRsdp2[];
 extern ACPI_DMTABLE_INFO        AcpiDmTableInfoS3pt[];
@@ -1044,7 +1050,7 @@ AcpiDmCloseOperator (
 
 
 /*
- * acdisasm
+ * dmtables
  */
 void
 AdDisassemblerHeader (
@@ -1053,5 +1059,36 @@ AdDisassemblerHeader (
 
 #define ACPI_IS_AML_TABLE   0
 #define ACPI_IS_DATA_TABLE  1
+
+
+/*
+ * adisasm
+ */
+ACPI_STATUS
+AdAmlDisassemble (
+    BOOLEAN                 OutToFile,
+    char                    *Filename,
+    char                    *Prefix,
+    char                    **OutFilename);
+
+ACPI_STATUS
+AdGetLocalTables (
+    void);
+
+ACPI_STATUS
+AdParseTable (
+    ACPI_TABLE_HEADER       *Table,
+    ACPI_OWNER_ID           *OwnerId,
+    BOOLEAN                 LoadTable,
+    BOOLEAN                 External);
+
+ACPI_STATUS
+AdDisplayTables (
+    char                    *Filename,
+    ACPI_TABLE_HEADER       *Table);
+
+ACPI_STATUS
+AdDisplayStatistics (
+    void);
 
 #endif  /* __ACDISASM_H__ */

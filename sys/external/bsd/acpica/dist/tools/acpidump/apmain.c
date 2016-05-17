@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2015, Intel Corp.
+ * Copyright (C) 2000 - 2016, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -237,7 +237,8 @@ ApDoOptions (
 
     case 'r':   /* Dump tables from specified RSDP */
 
-        Status = AcpiUtStrtoul64 (AcpiGbl_Optarg, 0, &Gbl_RsdpBase);
+        Status = AcpiUtStrtoul64 (AcpiGbl_Optarg, ACPI_ANY_BASE,
+            ACPI_MAX64_BYTE_WIDTH, &Gbl_RsdpBase);
         if (ACPI_FAILURE (Status))
         {
             AcpiLogError ("%s: Could not convert to a physical address\n",

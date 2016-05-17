@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_lwp.c,v 1.180 2015/10/02 16:54:15 christos Exp $	*/
+/*	$NetBSD: kern_lwp.c,v 1.184 2016/04/04 23:07:06 christos Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2006, 2007, 2008, 2009 The NetBSD Foundation, Inc.
@@ -211,7 +211,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_lwp.c,v 1.180 2015/10/02 16:54:15 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_lwp.c,v 1.184 2016/04/04 23:07:06 christos Exp $");
 
 #include "opt_ddb.h"
 #include "opt_lockdebug.h"
@@ -509,7 +509,7 @@ lwp_unstop(struct lwp *l)
 	if (l->l_wchan == NULL) {
 		/* setrunnable() will release the lock. */
 		setrunnable(l);
-	} else if (p->p_xstat && (l->l_flag & LW_SINTR) != 0) {
+	} else if (p->p_xsig && (l->l_flag & LW_SINTR) != 0) {
 		/* setrunnable() so we can receive the signal */
 		setrunnable(l);
 	} else {
@@ -992,9 +992,9 @@ lwp_startup(struct lwp *prev, struct lwp *new_lwp)
 		prev->l_ctxswtch = 0;
 	}
 	KPREEMPT_DISABLE(new_lwp);
-	spl0();
 	if (__predict_true(new_lwp->l_proc->p_vmspace))
 		pmap_activate(new_lwp);
+	spl0();
 
 	/* Note trip through cpu_switchto(). */
 	pserialize_switchpoint();
@@ -1043,7 +1043,7 @@ lwp_exit(struct lwp *l)
 		KASSERT(current == true);
 		KASSERT(p != &proc0);
 		/* XXXSMP kernel_lock not held */
-		exit1(l, 0);
+		exit1(l, 0, 0);
 		/* NOTREACHED */
 	}
 	p->p_nzlwps++;
@@ -1743,7 +1743,8 @@ lwp_ctl_alloc(vaddr_t *uaddr)
 		lp->lp_cur = 0;
 		lp->lp_max = LWPCTL_UAREA_SZ;
 		lp->lp_uva = p->p_emul->e_vm_default_addr(p,
-		     (vaddr_t)p->p_vmspace->vm_daddr, LWPCTL_UAREA_SZ);
+		     (vaddr_t)p->p_vmspace->vm_daddr, LWPCTL_UAREA_SZ,
+		     p->p_vmspace->vm_map.flags & VM_MAP_TOPDOWN);
 		error = uvm_map(&p->p_vmspace->vm_map, &lp->lp_uva,
 		    LWPCTL_UAREA_SZ, lp->lp_uao, 0, 0, UVM_MAPFLAG(UVM_PROT_RW,
 		    UVM_PROT_RW, UVM_INH_NONE, UVM_ADV_NORMAL, 0));

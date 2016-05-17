@@ -1,4 +1,4 @@
-/*	$NetBSD: if_fddisubr.c,v 1.95 2015/10/13 12:33:07 roy Exp $	*/
+/*	$NetBSD: if_fddisubr.c,v 1.99 2016/04/28 00:16:56 ozaki-r Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -96,7 +96,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_fddisubr.c,v 1.95 2015/10/13 12:33:07 roy Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_fddisubr.c,v 1.99 2016/04/28 00:16:56 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_gateway.h"
@@ -176,7 +176,7 @@ extern u_char	aarp_org_code[ 3 ];
 #define	CFDDIADDR(ifp)		CLLADDR((ifp)->if_sadl)
 
 static	int fddi_output(struct ifnet *, struct mbuf *,
-	    const struct sockaddr *, struct rtentry *);
+	    const struct sockaddr *, const struct rtentry *);
 static	void fddi_input(struct ifnet *, struct mbuf *);
 
 /*
@@ -186,7 +186,7 @@ static	void fddi_input(struct ifnet *, struct mbuf *);
  */
 static int
 fddi_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
-    struct rtentry *rt)
+    const struct rtentry *rt)
 {
 	uint16_t etype;
 	int error = 0, hdrcmplt = 0;
@@ -195,7 +195,6 @@ fddi_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 	struct fddi_header *fh;
 	struct mbuf *mcopy = NULL;
 	struct ifnet *ifp = ifp0;
-	ALTQ_DECL(struct altq_pktattr pktattr;)
 
 	MCLAIM(m, ifp->if_mowner);
 
@@ -224,7 +223,7 @@ fddi_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 	 * If the queueing discipline needs packet classification,
 	 * do it before prepending link headers.
 	 */
-	IFQ_CLASSIFY(&ifp->if_snd, m, dst->sa_family, &pktattr);
+	IFQ_CLASSIFY(&ifp->if_snd, m, dst->sa_family);
 
 	switch (dst->sa_family) {
 
@@ -235,7 +234,8 @@ fddi_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 		else if (m->m_flags & M_MCAST) {
 			ETHER_MAP_IP_MULTICAST(&satocsin(dst)->sin_addr,
 			    (char *)edst);
-		} else if ((error = arpresolve(ifp, rt, m, dst, edst)) != 0)
+		} else if ((error = arpresolve(ifp, rt, m, dst, edst,
+		    sizeof(edst))) != 0)
 			return error == EWOULDBLOCK ? 0 : error;
 		/* If broadcasting on a simplex interface, loopback a copy */
 		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX))
@@ -399,7 +399,7 @@ fddi_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 	if (ifp != ifp0)
 		ifp0->if_obytes += m->m_pkthdr.len;
 #endif /* NCARP > 0 */
-	return ifq_enqueue(ifp, m ALTQ_COMMA ALTQ_DECL(&pktattr));
+	return ifq_enqueue(ifp, m);
 
 bad:
 	if (m)
@@ -597,7 +597,7 @@ fddi_ifattach(struct ifnet *ifp, void *lla)
 	ifp->if_dlt = DLT_FDDI;
 	ifp->if_mtu = FDDIMTU;
 	ifp->if_output = fddi_output;
-	ifp->if_input = fddi_input;
+	ifp->_if_input = fddi_input;
 	ifp->if_baudrate = IF_Mbps(100);
 #ifdef IFF_NOTRAILERS
 	ifp->if_flags |= IFF_NOTRAILERS;

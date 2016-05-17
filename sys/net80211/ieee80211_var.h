@@ -1,4 +1,4 @@
-/*	$NetBSD: ieee80211_var.h,v 1.28 2010/01/17 19:45:07 pooka Exp $	*/
+/*	$NetBSD: ieee80211_var.h,v 1.30 2016/04/08 14:30:47 roy Exp $	*/
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002-2005 Sam Leffler, Errno Consulting

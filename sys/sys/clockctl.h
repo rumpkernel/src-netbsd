@@ -1,4 +1,4 @@
-/*      $NetBSD: clockctl.h,v 1.16 2015/09/06 06:01:02 dholland Exp $ */
+/*      $NetBSD: clockctl.h,v 1.18 2016/01/23 21:19:24 christos Exp $ */
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -62,7 +62,7 @@ struct clockctl_clock_settime {
 
 struct clockctl_ntp_adjtime {
 	struct timex *tp;
-	register_t retval;
+	__register_t retval;
 };
 
 #define CLOCKCTL_NTP_ADJTIME _IOWR('C', 0x8, struct clockctl_ntp_adjtime)
@@ -72,6 +72,7 @@ void    clockctlattach(int);
 int     clockctlopen(dev_t, int, int, struct lwp *);
 int     clockctlclose(dev_t, int, int, struct lwp *);
 int     clockctlioctl(dev_t, u_long, void *, int, struct lwp *);
+int	clockctl_init(void);
 #endif
 
 #endif /* _SYS_CLOCKCTL_H_ */

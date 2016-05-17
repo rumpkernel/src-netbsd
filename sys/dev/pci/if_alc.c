@@ -1,3 +1,4 @@
+/*	$NetBSD: if_alc.c,v 1.20 2016/02/17 20:05:45 christos Exp $	*/
 /*	$OpenBSD: if_alc.c,v 1.1 2009/08/08 09:31:13 kevlo Exp $	*/
 /*-
  * Copyright (c) 2009, Pyun YongHyeon <yongari@FreeBSD.org>
@@ -1417,7 +1418,7 @@ alc_attach(device_t parent, device_t self, void *aux)
 #ifdef ALC_CHECKSUM
 	ifp->if_capabilities |= IFCAP_CSUM_IPv4_Tx | IFCAP_CSUM_IPv4_Rx |
 				IFCAP_CSUM_TCPv4_Tx | IFCAP_CSUM_TCPv4_Rx |
-				IFCAP_CSUM_UDPv4_Tx | IFCAP_CSUM_TCPv4_Rx;
+				IFCAP_CSUM_UDPv4_Tx | IFCAP_CSUM_UDPv4_Rx;
 #endif
 
 #if NVLAN > 0
@@ -2034,11 +2035,42 @@ static int
 alc_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
 	struct alc_softc *sc = ifp->if_softc;
+	struct mii_data *mii = &sc->sc_miibus;
+	struct ifreq *ifr = (struct ifreq *)data;
 	int s, error = 0;
 
 	s = splnet();
 
 	error = ether_ioctl(ifp, cmd, data);
+	switch (cmd) {
+	case SIOCSIFADDR:
+		ifp->if_flags |= IFF_UP;
+		if (!(ifp->if_flags & IFF_RUNNING))
+			alc_init(ifp);
+		break;
+ 
+	case SIOCSIFFLAGS:
+		if (ifp->if_flags & IFF_UP) {
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
+				alc_init(ifp);
+		} else {
+			if (ifp->if_flags & IFF_RUNNING)
+				alc_stop(ifp, 0);
+		}
+		break;
+ 
+	case SIOCSIFMEDIA:
+	case SIOCGIFMEDIA:
+		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, cmd);
+		break;
+ 
+	default:
+		error = ether_ioctl(ifp, cmd, data);
+		break;
+	}
+ 
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING)
 			alc_iff(sc);
@@ -2357,13 +2389,6 @@ alc_newbuf(struct alc_softc *sc, struct alc_rxdesc *rxd, bool init)
 	    sc->alc_cdata.alc_rx_sparemap, m, BUS_DMA_NOWAIT);
 
 	if (error != 0) {
-		if (!error) {
-			bus_dmamap_unload(sc->sc_dmat,
-			    sc->alc_cdata.alc_rx_sparemap);
-			error = EFBIG;
-			printf("%s: too many segments?!\n",
-			    device_xname(sc->sc_dev));
-		}
 		m_freem(m);
 
 		if (init)
@@ -2564,7 +2589,7 @@ alc_rxeof(struct alc_softc *sc, struct rx_rdesc *rrd)
 			bpf_mtap(ifp, m);
 
 			/* Pass it on. */
-			(*ifp->if_input)(ifp, m);
+			if_percpuq_enqueue(ifp->if_percpuq, m);
 		}
 	}
 	/* Reset mbuf chains. */

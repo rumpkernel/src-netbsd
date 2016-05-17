@@ -1,4 +1,4 @@
-#	$NetBSD: makesyscalls.sh,v 1.154 2015/09/24 14:30:52 christos Exp $
+#	$NetBSD: makesyscalls.sh,v 1.164 2016/01/26 23:46:37 pooka Exp $
 #
 # Copyright (c) 1994, 1996, 2000 Christopher G. Demetriou
 # All rights reserved.
@@ -51,6 +51,7 @@ esac
 #	switchname	the name for the 'struct sysent' we define
 #	namesname	the name for the 'const char *[]' we define
 #	constprefix	the prefix for the system call constants
+#	emulname	the emulation name
 #	registertype	the type for register_t
 #	nsysent		the size of the sysent table
 #	sys_nosys	[optional] name of function called for unsupported
@@ -165,6 +166,7 @@ BEGIN {
 	switchname = \"$switchname\"
 	namesname = \"$namesname\"
 	constprefix = \"$constprefix\"
+	emulname = \"$emulname\"
 	registertype = \"$registertype\"
 	sysalign=\"$sysalign\"
 	if (!registertype) {
@@ -255,10 +257,9 @@ NR == 1 {
 
 	printf " * created from%s\n */\n\n", $0 > sysautoload
 	printf "#include <sys/cdefs.h>\n__KERNEL_RCSID(0, \"%s\");\n\n", tag > sysautoload
-	printf("static struct {\n")			> sysautoload
-	printf("\tu_int\t\tal_code;\n")			> sysautoload
-	printf("\tconst char\t*al_module;\n")		> sysautoload
-	printf("} const syscalls_autoload[] = {\n")	> sysautoload
+	printf("#include <sys/proc.h>\n")		> sysautoload
+	printf("static struct sc_autoload " emulname \
+		"_syscalls_autoload[] = {\n")		> sysautoload
 
 	printf " * created from%s\n */\n\n", $0 > rumpcalls
 	printf "#ifdef RUMP_CLIENT\n" > rumpcalls
@@ -286,8 +287,8 @@ NR == 1 {
 	printf "#include <sys/syscall.h>\n" > rumpcalls
 	printf "#include <sys/syscallargs.h>\n\n" > rumpcalls
 	printf "#include <sys/syscallvar.h>\n\n" > rumpcalls
+	printf "#include <rump-sys/kern.h>\n\n" > rumpcalls
 	printf "#include <rump/rumpuser.h>\n" > rumpcalls
-	printf "#include \"rump_private.h\"\n\n" > rumpcalls
 	printf "#define rsys_syscall(num, data, dlen, retval)\t\\\n" > rumpcalls
 	printf "    rump_syscall(num, data, dlen, retval)\n\n" > rumpcalls
 	printf "#define rsys_seterrno(error) rumpuser_seterrno(error)\n" \
@@ -984,6 +985,8 @@ function putent(type, compatwrap) {
 	printf("\t") > rumpcalls
 	if (returntype != "void" && type != "NOERR")
 		printf("error = ") > rumpcalls
+	else if (returntype != "void")
+		printf("(void)") > rumpcalls
 	printf("rsys_syscall(%s%s%s, " \
 	    "%s, %s, retval);\n", constprefix, compatwrap_, funcalias, \
 	    argarg, argsize) > rumpcalls
@@ -1149,6 +1152,7 @@ END {
 cat $sysprotos >> $sysarghdr
 echo "#endif /* _${constprefix}SYSCALL_H_ */" >> $sysnumhdr
 echo "#endif /* _${constprefix}SYSCALLARGS_H_ */" >> $sysarghdr
+printf "\t    { 0, NULL }\n" >> $sysautoload
 echo "};" >> $sysautoload
 printf "\n#endif /* _RUMP_RUMP_SYSCALLS_H_ */\n" >> $rumpprotos
 cat $sysdcl $sysent > $syssw

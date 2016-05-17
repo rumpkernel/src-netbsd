@@ -1,4 +1,4 @@
-/*	$NetBSD: in6_proto.c,v 1.107 2015/10/13 21:28:35 rjs Exp $	*/
+/*	$NetBSD: in6_proto.c,v 1.112 2016/04/26 08:44:45 ozaki-r Exp $	*/
 /*	$KAME: in6_proto.c,v 1.66 2000/10/10 15:35:47 itojun Exp $	*/
 
 /*
@@ -62,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: in6_proto.c,v 1.107 2015/10/13 21:28:35 rjs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: in6_proto.c,v 1.112 2016/04/26 08:44:45 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_gateway.h"
@@ -80,8 +80,6 @@ __KERNEL_RCSID(0, "$NetBSD: in6_proto.c,v 1.107 2015/10/13 21:28:35 rjs Exp $");
 #include <sys/mbuf.h>
 
 #include <net/if.h>
-#include <net/radix.h>
-#include <net/route.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -288,7 +286,6 @@ const struct ip6protosw inet6sw[] = {
 	.pr_protocol = IPPROTO_RAW,
 	.pr_flags = PR_ATOMIC|PR_ADDR|PR_PURGEIF,
 	.pr_input = rip6_input,
-	.pr_output = rip6_output,
 	.pr_ctlinput = rip6_ctlinput,
 	.pr_ctloutput = rip6_ctloutput,
 	.pr_usrreqs = &rip6_usrreqs,
@@ -305,7 +302,6 @@ const struct ip6protosw inet6sw[] = {
 	.pr_protocol = IPPROTO_ICMPV6,
 	.pr_flags = PR_ATOMIC|PR_ADDR|PR_LASTHDR,
 	.pr_input = icmp6_input,
-	.pr_output = rip6_output,
 	.pr_ctlinput = rip6_ctlinput,
 	.pr_ctloutput = icmp6_ctloutput,
 	.pr_usrreqs = &rip6_usrreqs,
@@ -357,7 +353,6 @@ const struct ip6protosw inet6sw[] = {
 	.pr_protocol = IPPROTO_IPV4,
 	.pr_flags = PR_ATOMIC|PR_ADDR|PR_LASTHDR,
 	.pr_input = encap6_input,
-	.pr_output = rip6_output,
 	.pr_ctlinput = encap6_ctlinput,
 	.pr_ctloutput = rip6_ctloutput,
 	.pr_usrreqs = &rip6_usrreqs,
@@ -369,7 +364,6 @@ const struct ip6protosw inet6sw[] = {
 	.pr_protocol = IPPROTO_IPV6,
 	.pr_flags = PR_ATOMIC|PR_ADDR|PR_LASTHDR,
 	.pr_input = encap6_input,
-	.pr_output = rip6_output,
 	.pr_ctlinput = encap6_ctlinput,
 	.pr_ctloutput = rip6_ctloutput,
 	.pr_usrreqs = &rip6_usrreqs,
@@ -381,7 +375,6 @@ const struct ip6protosw inet6sw[] = {
 	.pr_protocol = IPPROTO_ETHERIP,
 	.pr_flags = PR_ATOMIC|PR_ADDR|PR_LASTHDR,
 	.pr_input = ip6_etherip_input,
-	.pr_output = rip6_output,
 	.pr_ctlinput = rip6_ctlinput,
 	.pr_ctloutput = rip6_ctloutput,
 	.pr_usrreqs = &rip6_usrreqs,
@@ -393,7 +386,6 @@ const struct ip6protosw inet6sw[] = {
 	.pr_protocol = IPPROTO_CARP,
 	.pr_flags = PR_ATOMIC|PR_ADDR,
 	.pr_input = carp6_proto_input,
-	.pr_output = rip6_output,
 	.pr_ctloutput = rip6_ctloutput,
 	.pr_usrreqs = &rip6_usrreqs,
 },
@@ -403,7 +395,6 @@ const struct ip6protosw inet6sw[] = {
 	.pr_protocol = IPPROTO_PIM,
 	.pr_flags = PR_ATOMIC|PR_ADDR|PR_LASTHDR,
 	.pr_input = pim6_input,
-	.pr_output = rip6_output,
 	.pr_ctloutput = rip6_ctloutput,
 	.pr_usrreqs = &rip6_usrreqs,
 	.pr_init = pim6_init,
@@ -413,7 +404,6 @@ const struct ip6protosw inet6sw[] = {
 	.pr_domain = &inet6domain,
 	.pr_flags = PR_ATOMIC|PR_ADDR|PR_LASTHDR,
 	.pr_input = rip6_input,
-	.pr_output = rip6_output,
 	.pr_ctloutput = rip6_ctloutput,
 	.pr_usrreqs = &rip6_usrreqs,
 	.pr_init = rip6_init,

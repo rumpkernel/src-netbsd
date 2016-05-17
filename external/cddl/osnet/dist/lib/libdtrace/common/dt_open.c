@@ -277,10 +277,10 @@ static const dt_ident_t _dtrace_globals[] = {
 	DT_VERS_1_2, &dt_idops_func, "_symaddr(uintptr_t)" },
 { "getmajor", DT_IDENT_FUNC, 0, DIF_SUBR_GETMAJOR,
 	DT_ATTR_EVOLCMN, DT_VERS_1_0,
-	&dt_idops_func, "genunix`major_t(genunix`dev_t)" },
+	&dt_idops_func, "netbsd`__devmajor_t(netbsd`dev_t)" },
 { "getminor", DT_IDENT_FUNC, 0, DIF_SUBR_GETMINOR,
 	DT_ATTR_EVOLCMN, DT_VERS_1_0,
-	&dt_idops_func, "genunix`minor_t(genunix`dev_t)" },
+	&dt_idops_func, "netbsd`__devminor_t(netbsd`dev_t)" },
 { "htonl", DT_IDENT_FUNC, 0, DIF_SUBR_HTONL, DT_ATTR_EVOLCMN, DT_VERS_1_3,
 	&dt_idops_func, "uint32_t(uint32_t)" },
 { "htonll", DT_IDENT_FUNC, 0, DIF_SUBR_HTONLL, DT_ATTR_EVOLCMN, DT_VERS_1_3,
@@ -788,10 +788,10 @@ const dtrace_pattr_t _dtrace_prvdesc = {
 };
 
 #ifdef illumos
-const char *_dtrace_defcpp = "/usr/ccs/lib/cpp"; /* default cpp(1) to invoke */
+const char *_dtrace_defcpps[] = { "/usr/ccs/lib/cpp" }; /* default cpp(1) to invoke */
 const char *_dtrace_defld = "/usr/ccs/bin/ld";   /* default ld(1) to invoke */
 #else
-const char *_dtrace_defcpp = "cpp"; /* default cpp(1) to invoke */
+const char *_dtrace_defcpps[] = { "/usr/bin/cpp", "/usr/bin/clang-cpp" }; /* default cpp(1) to invoke */
 const char *_dtrace_defld = "ld";   /* default ld(1) to invoke */
 const char *_dtrace_defobjcopy = "objcopy"; /* default objcopy(1) to invoke */
 #endif
@@ -1025,6 +1025,36 @@ dt_get_sysinfo(int cmd, char *buf, size_t len)
 }
 #endif
 
+#ifndef illumos
+# ifdef __FreeBSD__
+#  define DEFKERNEL	"kernel"
+#  define BOOTFILE	"kern.bootfile"
+# endif
+# ifdef __NetBSD__
+#  define DEFKERNEL	"netbsd"
+#  define BOOTFILE	"machdep.booted_kernel"
+# endif
+
+const char *
+dt_bootfile(char *bootfile, size_t len)
+{
+	char *p;
+	size_t olen = len;
+
+	if (sysctlbyname(BOOTFILE, bootfile, &len, NULL, 0) != 0)
+		strlcpy(bootfile, DEFKERNEL, olen);
+
+	if ((p = strrchr(bootfile, '/')) != NULL)
+		p++;
+	else
+		p = bootfile;
+	return p;
+}
+
+# undef DEFKERNEL
+# undef BOOTFILE
+#endif
+
 static dtrace_hdl_t *
 dt_vopen(int version, int flags, int *errp,
     const dtrace_vector_t *vector, void *arg)
@@ -1195,7 +1225,16 @@ alloc:
 	dtp->dt_provs = calloc(dtp->dt_provbuckets, sizeof (dt_provider_t *));
 	dt_proc_hash_create(dtp);
 	dtp->dt_vmax = DT_VERS_LATEST;
-	dtp->dt_cpp_path = strdup(_dtrace_defcpp);
+	dtp->dt_cpp_path = NULL;
+	for (i = 0; i < (int)sizeof(_dtrace_defcpps) / sizeof(_dtrace_defcpps[0]); ++i) {
+		if (access(_dtrace_defcpps[i], X_OK) == 0) {
+			dtp->dt_cpp_path = strdup(_dtrace_defcpps[i]);
+			break;
+		}
+	}
+	if (dtp->dt_cpp_path == NULL)
+		dtp->dt_cpp_path = strdup("cpp");
+
 	dtp->dt_cpp_argv = malloc(sizeof (char *));
 	dtp->dt_cpp_argc = 1;
 	dtp->dt_cpp_args = 1;
@@ -1300,37 +1339,25 @@ alloc:
 
 	/*
 	 * On FreeBSD the kernel module name can't be hard-coded. The
-	 * 'kern.bootfile' sysctl value tells us exactly which file is being
-	 * used as the kernel.
+	 * 'kern.bootfile' sysctl value tells us exactly which file is
+	 * being used as the kernel.
 	 */
 #ifndef illumos
+# ifdef __FreeBSD__
+#  define THREAD	"struct thread"
+#  define MUTEX		"struct mtx"
+#  define RWLOCK	"struct rwlock"
+# endif
+# ifdef __NetBSD__
+#  define THREAD	"struct lwp"
+#  define MUTEX		"struct kmutex"
+#  define RWLOCK	"struct krwlock"
+# endif
 	{
-	char bootfile[MAXPATHLEN];
-	char *p;
-	size_t len = sizeof(bootfile);
+	const char *p;
+	char kernname[512];
 
-#ifdef __FreeBSD__
-#define DEFKERNEL	"kernel"
-#define BOOTFILE	"kern.bootfile"
-#define THREAD		"struct thread"
-#define MUTEX		"struct mtx"
-#define RWLOCK		"struct rwlock"
-#endif
-#ifdef __NetBSD__
-#define DEFKERNEL	"netbsd"
-#define BOOTFILE	"machdep.booted_kernel"
-#define THREAD		"struct lwp"
-#define MUTEX		"struct kmutex"
-#define RWLOCK		"struct krwlock"
-#endif
-	/* This call shouldn't fail, but use a default just in case. */
-	if (sysctlbyname(BOOTFILE, bootfile, &len, NULL, 0) != 0)
-		strlcpy(bootfile, DEFKERNEL, sizeof(bootfile));
-
-	if ((p = strrchr(bootfile, '/')) != NULL)
-		p++;
-	else
-		p = bootfile;
+	p = dt_bootfile(kernname, sizeof(kernname));
 
 	/*
 	 * Format the global variables based on the kernel module name.
@@ -1340,8 +1367,11 @@ alloc:
 	snprintf(threadmtx_str, sizeof(threadmtx_str), "%s *(%s`%s *)",
 	    THREAD, p, MUTEX);
 	snprintf(rwlock_str, sizeof(rwlock_str), "int(%s`%s *)", p, RWLOCK);
-	snprintf(sxlock_str, sizeof(sxlock_str), "int(%s`struct sxlock *)",p);
+	snprintf(sxlock_str, sizeof(sxlock_str), "int(%s`struct sxlock *)", p);
 	}
+# undef THREAD
+# undef MUTEX
+# undef RWLOCK
 #endif
 
 	dtp->dt_macros = dt_idhash_create("macro", NULL, 0, UINT_MAX);

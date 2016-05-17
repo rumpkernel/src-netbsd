@@ -1,5 +1,5 @@
 /*	$KAME: sctp_usrreq.c,v 1.50 2005/06/16 20:45:29 jinmei Exp $	*/
-/*	$NetBSD: sctp_usrreq.c,v 1.1 2015/10/13 21:28:35 rjs Exp $	*/
+/*	$NetBSD: sctp_usrreq.c,v 1.4 2016/04/25 21:21:02 rjs Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002, 2003, 2004 Cisco Systems, Inc.
@@ -33,7 +33,7 @@
  * SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sctp_usrreq.c,v 1.1 2015/10/13 21:28:35 rjs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sctp_usrreq.c,v 1.4 2016/04/25 21:21:02 rjs Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
@@ -78,8 +78,8 @@ __KERNEL_RCSID(0, "$NetBSD: sctp_usrreq.c,v 1.1 2015/10/13 21:28:35 rjs Exp $");
 #include <netinet/sctp_indata.h>
 #include <netinet/sctp_asconf.h>
 #ifdef IPSEC
-#include <netinet6/ipsec.h>
-#include <netkey/key.h>
+#include <netipsec/ipsec.h>
+#include <netipsec/key.h>
 #endif /* IPSEC */
 
 #include <net/net_osdep.h>
@@ -943,13 +943,13 @@ sctp_fill_up_addresses(struct sctp_inpcb *inp,
 	}
 
 	if (inp->sctp_flags & SCTP_PCB_FLAGS_BOUNDALL) {
-		TAILQ_FOREACH(ifn, &ifnet_list, if_list) {
+		IFNET_FOREACH(ifn) {
 			if ((loopback_scope == 0) &&
 			    (ifn->if_type == IFT_LOOP)) {
 				/* Skip loopback if loopback_scope not set */
 				continue;
 			}
-			TAILQ_FOREACH(ifa, &ifn->if_addrlist, ifa_list) {
+			IFADDR_FOREACH(ifa, ifn) {
 				if (stcb) {
 				/*
 				 * For the BOUND-ALL case, the list
@@ -980,7 +980,7 @@ sctp_fill_up_addresses(struct sctp_inpcb *inp,
 						in6_sin_2_v4mapsin6(sin, (struct sockaddr_in6 *)sas);
 						((struct sockaddr_in6 *)sas)->sin6_port = inp->sctp_lport;
 						sas = (struct sockaddr_storage *)((vaddr_t)sas + sizeof(struct sockaddr_in6));
-						actual += sizeof(sizeof(struct sockaddr_in6));
+						actual += sizeof(struct sockaddr_in6);
 					} else {
 						memcpy(sas, sin, sizeof(*sin));
 						((struct sockaddr_in *)sas)->sin_port = inp->sctp_lport;
@@ -1096,8 +1096,8 @@ sctp_count_max_addresses(struct sctp_inpcb *inp)
 		struct ifnet *ifn;
 		struct ifaddr *ifa;
 
-		TAILQ_FOREACH(ifn, &ifnet_list, if_list) {
-			TAILQ_FOREACH(ifa, &ifn->if_addrlist, ifa_list) {
+		IFNET_FOREACH(ifn) {
+			IFADDR_FOREACH(ifa, ifn) {
 				/* Count them if they are the right type */
 				if (ifa->ifa_addr->sa_family == AF_INET) {
 					if (inp->sctp_flags & SCTP_PCB_FLAGS_NEEDS_MAPPED_V4)

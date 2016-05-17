@@ -1,4 +1,4 @@
-#	$NetBSD: files,v 1.1150 2015/09/04 06:10:47 uebayasi Exp $
+#	$NetBSD: files,v 1.1158 2016/05/01 10:21:02 nonaka Exp $
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
 
 version 	20150846
@@ -106,6 +106,7 @@ defflag opt_syscall_stats.h	SYSCALL_TIMES_HASCOUNTER: SYSCALL_TIMES
 file kern/subr_syscall_stats.c	syscall_stats
 
 defparam opt_pax.h		PAX_MPROTECT
+				PAX_MPROTECT_DEBUG
 				PAX_SEGVGUARD
  				PAX_ASLR
  				PAX_ASLR_DELTA_MMAP_LSB
@@ -660,10 +661,11 @@ file	dev/ic/rtw.c			rtw
 file	dev/ic/rtwphy.c			rtw
 file	dev/ic/rtwphyio.c		rtw
 
-# Ralink RT2500/RT2600 802.11
+# Ralink RT2500/RT2600/RT2860 802.11
 device	ral: arp, ether, ifnet, wlan, firmload
 file	dev/ic/rt2560.c			ral
 file	dev/ic/rt2661.c			ral
+file	dev/ic/rt2860.c			ral
 
 # Marvell Libertas Open
 device  malo: arp, ether, ifnet, wlan, firmload
@@ -1146,6 +1148,9 @@ define drm {}
 include "external/bsd/drm/conf/files.drm"
 include "dev/drm/files.drm"
 
+# Linux API support
+include "external/bsd/common/conf/files.linux"
+
 # DRM/KMS - Newer direct rendering manager with kernel mode-switching
 include "external/bsd/drm2/drm/files.drmkms"
 
@@ -1226,10 +1231,8 @@ define	sdmmcbus { }			# SD/MMC attachment
 # use them in an 'attach-with'.
 #
 
-defparam USB_MEM_RESERVE
-
 define	usbroothub
-file	dev/usb/usbroothub_subr.c	usbroothub
+file	dev/usb/usbroothub.c	usbroothub
 
 define	usb_dma
 
@@ -1255,11 +1258,11 @@ file	dev/usb/xhci.c			xhci			needs-flag
 
 # Mentor graphics OTG IP
 defflag	opt_motg.h	MOTG_ALLWINNER
-device	motg: usbus, usbroothub, usb_dma
+device	motg: usbus, usbroothub
 file	dev/usb/motg.c			motg			needs-flag
 
 # SL811HS/T USB controller
-defflag	opt_slhci.h	SLHCI_DEBUG SLHCI_TRY_LSVH SLHCI_PROFILE_TRANSFER
+defflag	opt_slhci.h	SLHCI_TRY_LSVH SLHCI_PROFILE_TRANSFER
 device	slhci: usbus, usbroothub
 file	dev/ic/sl811hs.c		slhci			needs-flag
 
@@ -1371,6 +1374,14 @@ file	dev/ic/bwi.c			bwi
 device	dme: arp, ether, ifnet
 file	dev/ic/dm9000.c			dme
 
+# NVM Express Controller
+#
+device	nvme {nsid = -1}
+file	dev/ic/nvme.c			nvme
+
+attach	ld at nvme with ld_nvme
+file	dev/ic/ld_nvme.c		ld_nvme
+
 # legitimate pseudo-devices
 #
 defpseudodev vnd:	disk
@@ -1436,7 +1447,7 @@ file	dev/kttcp.c			kttcp		needs-flag
 # Veriexec
 defpseudo veriexec
 file	kern/kern_veriexec.c	veriexec
-file	dev/verified_exec.c		veriexec	needs-flag
+file	dev/veriexec.c		veriexec	needs-flag
 
 # driver attach / detach user interface
 defpseudo drvctl
@@ -1565,3 +1576,8 @@ include "dev/iscsi/files.iscsi"
 # athn
 #
 include "dev/ic/files.athn"
+
+#
+# MI clk api
+#
+include "dev/clk/files.clk"

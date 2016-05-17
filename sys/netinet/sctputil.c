@@ -1,5 +1,5 @@
 /*	$KAME: sctputil.c,v 1.39 2005/06/16 20:54:06 jinmei Exp $	*/
-/*	$NetBSD: sctputil.c,v 1.1 2015/10/13 21:28:35 rjs Exp $	*/
+/*	$NetBSD: sctputil.c,v 1.6 2016/04/26 11:02:57 rjs Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002, 2003, 2004 Cisco Systems, Inc.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sctputil.c,v 1.1 2015/10/13 21:28:35 rjs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sctputil.c,v 1.6 2016/04/26 11:02:57 rjs Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
@@ -57,7 +57,6 @@ __KERNEL_RCSID(0, "$NetBSD: sctputil.c,v 1.1 2015/10/13 21:28:35 rjs Exp $");
 
 #include <sys/callout.h>
 
-#include <net/radix.h>
 #include <net/route.h>
 
 #ifdef INET6
@@ -88,8 +87,8 @@ __KERNEL_RCSID(0, "$NetBSD: sctputil.c,v 1.1 2015/10/13 21:28:35 rjs Exp $");
 #include <netinet/sctp_pcb.h>
 
 #ifdef IPSEC
-#include <netinet6/ipsec.h>
-#include <netkey/key.h>
+#include <netipsec/ipsec.h>
+#include <netipsec/key.h>
 #endif /* IPSEC */
 
 #include <netinet/sctputil.h>
@@ -844,9 +843,10 @@ sctp_expand_mapping_array(struct sctp_association *asoc)
 {
 	/* mapping array needs to grow */
 	u_int8_t *new_array;
-	uint16_t new_size;
+	uint16_t new_size, old_size;
 
-	new_size = asoc->mapping_array_size + SCTP_MAPPING_ARRAY_INCR;
+	old_size = asoc->mapping_array_size;
+	new_size = old_size + SCTP_MAPPING_ARRAY_INCR;
 	new_array = malloc(new_size, M_PCB, M_NOWAIT);
 	if (new_array == NULL) {
 		/* can't get more, forget it */
@@ -854,8 +854,8 @@ sctp_expand_mapping_array(struct sctp_association *asoc)
 		       new_size);
 		return (-1);
 	}
-	memset(new_array, 0, new_size);
-	memcpy(new_array, asoc->mapping_array, asoc->mapping_array_size);
+	memcpy(new_array, asoc->mapping_array, old_size);
+	memset(new_array + old_size, 0, SCTP_MAPPING_ARRAY_INCR);
 	free(asoc->mapping_array, M_PCB);
 	asoc->mapping_array = new_array;
 	asoc->mapping_array_size = new_size;
@@ -2087,13 +2087,7 @@ sctp_notify_assoc_change(u_int32_t event, struct sctp_tcb *stcb,
 		const struct sockaddr_in *sin;
 
 		sin = (const struct sockaddr_in *)to;
-		memset(&sin6, 0, sizeof(sin6));
-		sin6.sin6_family = AF_INET6;
-		sin6.sin6_len = sizeof(struct sockaddr_in6);
-		sin6.sin6_addr.s6_addr16[2] = 0xffff;
-		memcpy(&sin6.sin6_addr.s6_addr16[3], &sin->sin_addr,
-		    sizeof(sin6.sin6_addr.s6_addr16[3]));
-		sin6.sin6_port = sin->sin_port;
+		in6_sin_2_v4mapsin6(sin, &sin6);
 		to = (struct sockaddr *)&sin6;
 	}
 	/* check and strip embedded scope junk */
@@ -2179,13 +2173,7 @@ sctp_notify_peer_addr_change(struct sctp_tcb *stcb, uint32_t state,
 		const struct sockaddr_in *sin;
 
 		sin = (const struct sockaddr_in *)to;
-		memset(&sin6, 0, sizeof(sin6));
-		sin6.sin6_family = AF_INET6;
-		sin6.sin6_len = sizeof(struct sockaddr_in6);
-		sin6.sin6_addr.s6_addr16[2] = 0xffff;
-		bcopy(&sin->sin_addr, &sin6.sin6_addr.s6_addr16[3],
-		    sizeof(sin6.sin6_addr.s6_addr16[3]));
-		sin6.sin6_port = sin->sin_port;
+		in6_sin_2_v4mapsin6(sin, &sin6);
 		to = (struct sockaddr *)&sin6;
 	}
 	/* check and strip embedded scope junk */
@@ -2279,13 +2267,7 @@ sctp_notify_send_failed(struct sctp_tcb *stcb, u_int32_t error,
 		const struct sockaddr_in *sin;
 
 		sin = satocsin(to);
-		memset(&sin6, 0, sizeof(sin6));
-		sin6.sin6_family = AF_INET6;
-		sin6.sin6_len = sizeof(struct sockaddr_in6);
-		sin6.sin6_addr.s6_addr16[2] = 0xffff;
-		bcopy(&sin->sin_addr, &sin6.sin6_addr.s6_addr16[3],
-		    sizeof(sin6.sin6_addr.s6_addr16[3]));
-		sin6.sin6_port = sin->sin_port;
+		in6_sin_2_v4mapsin6(sin, &sin6);
 		to = (struct sockaddr *)&sin6;
 	}
 	/* check and strip embedded scope junk */
@@ -2357,13 +2339,7 @@ sctp_notify_adaption_layer(struct sctp_tcb *stcb,
 		const struct sockaddr_in *sin;
 
 		sin = satocsin(to);
-		memset(&sin6, 0, sizeof(sin6));
-		sin6.sin6_family = AF_INET6;
-		sin6.sin6_len = sizeof(struct sockaddr_in6);
-		sin6.sin6_addr.s6_addr16[2] = 0xffff;
-		bcopy(&sin->sin_addr, &sin6.sin6_addr.s6_addr16[3],
-		    sizeof(sin6.sin6_addr.s6_addr16[3]));
-		sin6.sin6_port = sin->sin_port;
+		in6_sin_2_v4mapsin6(sin, &sin6);
 		to = (struct sockaddr *)&sin6;
 	}
 	/* check and strip embedded scope junk */
@@ -2433,13 +2409,7 @@ sctp_notify_partial_delivery_indication(struct sctp_tcb *stcb,
 		const struct sockaddr_in *sin;
 
 		sin = satocsin(to);
-		memset(&sin6, 0, sizeof(sin6));
-		sin6.sin6_family = AF_INET6;
-		sin6.sin6_len = sizeof(struct sockaddr_in6);
-		sin6.sin6_addr.s6_addr16[2] = 0xffff;
-		bcopy(&sin->sin_addr, &sin6.sin6_addr.s6_addr16[3],
-		    sizeof(sin6.sin6_addr.s6_addr16[3]));
-		sin6.sin6_port = sin->sin_port;
+		in6_sin_2_v4mapsin6(sin, &sin6);
 		to = (struct sockaddr *)&sin6;
 	}
 	/* check and strip embedded scope junk */
@@ -2518,13 +2488,7 @@ sctp_notify_shutdown_event(struct sctp_tcb *stcb)
 		const struct sockaddr_in *sin;
 
 		sin = satocsin(to);
-		memset(&sin6, 0, sizeof(sin6));
-		sin6.sin6_family = AF_INET6;
-		sin6.sin6_len = sizeof(struct sockaddr_in6);
-		sin6.sin6_addr.s6_addr16[2] = 0xffff;
-		bcopy(&sin->sin_addr, &sin6.sin6_addr.s6_addr16[3],
-		    sizeof(sin6.sin6_addr.s6_addr16[3]));
-		sin6.sin6_port = sin->sin_port;
+		in6_sin_2_v4mapsin6(sin, &sin6);
 		to = (struct sockaddr *)&sin6;
 	}
 	/* check and strip embedded scope junk */
@@ -2620,13 +2584,7 @@ sctp_notify_stream_reset(struct sctp_tcb *stcb,
 		const struct sockaddr_in *sin;
 
 		sin = satocsin(to);
-		memset(&sin6, 0, sizeof(sin6));
-		sin6.sin6_family = AF_INET6;
-		sin6.sin6_len = sizeof(struct sockaddr_in6);
-		sin6.sin6_addr.s6_addr16[2] = 0xffff;
-		bcopy(&sin->sin_addr, &sin6.sin6_addr.s6_addr16[3],
-		    sizeof(sin6.sin6_addr.s6_addr16[3]));
-		sin6.sin6_port = sin->sin_port;
+		in6_sin_2_v4mapsin6(sin, &sin6);
 		to = (struct sockaddr *)&sin6;
 	}
 	/* check and strip embedded scope junk */
@@ -3651,9 +3609,9 @@ sctp_find_ifa_by_addr(struct sockaddr *sa)
 	struct ifaddr *ifa;
 
 	/* go through all our known interfaces */
-	TAILQ_FOREACH(ifn, &ifnet_list, if_list) {
+	IFNET_FOREACH(ifn) {
 		/* go through each interface addresses */
-		TAILQ_FOREACH(ifa, &ifn->if_addrlist, ifa_list) {
+		IFADDR_FOREACH(ifa, ifn) {
 			/* correct family? */
 			if (ifa->ifa_addr->sa_family != sa->sa_family)
 				continue;

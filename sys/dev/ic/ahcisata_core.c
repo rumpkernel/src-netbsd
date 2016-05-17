@@ -1,4 +1,4 @@
-/*	$NetBSD: ahcisata_core.c,v 1.54 2015/05/24 22:30:05 jmcneill Exp $	*/
+/*	$NetBSD: ahcisata_core.c,v 1.56 2016/05/02 19:18:29 christos Exp $	*/
 
 /*
  * Copyright (c) 2006 Manuel Bouyer.
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ahcisata_core.c,v 1.54 2015/05/24 22:30:05 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ahcisata_core.c,v 1.56 2016/05/02 19:18:29 christos Exp $");
 
 #include <sys/types.h>
 #include <sys/malloc.h>
@@ -1714,11 +1714,13 @@ ahci_atapi_complete(struct ata_channel *chp, struct ata_xfer *xfer, int irq)
 	}
 
 	chp->ch_queue->active_xfer = NULL;
-	bus_dmamap_sync(sc->sc_dmat, achp->ahcic_datad[slot], 0,
-	    achp->ahcic_datad[slot]->dm_mapsize,
-	    (sc_xfer->xs_control & XS_CTL_DATA_IN) ? BUS_DMASYNC_POSTREAD :
-	    BUS_DMASYNC_POSTWRITE);
-	bus_dmamap_unload(sc->sc_dmat, achp->ahcic_datad[slot]);
+	if (xfer->c_bcount > 0) {
+		bus_dmamap_sync(sc->sc_dmat, achp->ahcic_datad[slot], 0,
+		    achp->ahcic_datad[slot]->dm_mapsize,
+		    (sc_xfer->xs_control & XS_CTL_DATA_IN) ?
+		    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
+		bus_dmamap_unload(sc->sc_dmat, achp->ahcic_datad[slot]);
+	}
 
 	if (chp->ch_drive[drive].drive_flags & ATA_DRIVE_WAITDRAIN) {
 		ahci_atapi_kill_xfer(chp, xfer, KILL_GONE);
@@ -1844,11 +1846,12 @@ ahci_atapi_probe_device(struct atapibus_softc *sc, int target)
 		sa.sa_inqbuf.type =  ATAPI_CFG_TYPE(id->atap_config);
 		sa.sa_inqbuf.removable = id->atap_config & ATAPI_CFG_REMOV ?
 		    T_REMOV : T_FIXED;
-		scsipi_strvis((u_char *)model, 40, id->atap_model, 40);
-		scsipi_strvis((u_char *)serial_number, 20, id->atap_serial,
-		    20);
-		scsipi_strvis((u_char *)firmware_revision, 8,
-		    id->atap_revision, 8);
+		strnvisx(model, sizeof(model), id->atap_model, 40,
+		    VIS_TRIM|VIS_SAFE|VIS_OCTAL);
+		strnvisx(serial_number, sizeof(serial_number), id->atap_serial,
+		    20, VIS_TRIM|VIS_SAFE|VIS_OCTAL);
+		strnvisx(firmware_revision, sizeof(firmware_revision),
+		    id->atap_revision, 8, VIS_TRIM|VIS_SAFE|VIS_OCTAL);
 		sa.sa_inqbuf.vendor = model;
 		sa.sa_inqbuf.product = serial_number;
 		sa.sa_inqbuf.revision = firmware_revision;
