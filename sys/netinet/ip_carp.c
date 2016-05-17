@@ -1,4 +1,4 @@
-/*	$NetBSD: ip_carp.c,v 1.62 2015/08/24 22:21:26 pooka Exp $	*/
+/*	$NetBSD: ip_carp.c,v 1.64 2016/04/28 00:16:56 ozaki-r Exp $	*/
 /*	$OpenBSD: ip_carp.c,v 1.113 2005/11/04 08:11:54 mcbride Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
 #endif
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ip_carp.c,v 1.62 2015/08/24 22:21:26 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ip_carp.c,v 1.64 2016/04/28 00:16:56 ozaki-r Exp $");
 
 /*
  * TODO:
@@ -394,7 +394,7 @@ carp_setroute(struct carp_softc *sc, int cmd)
 			(void)rtrequest(RTM_GET, ifa->ifa_addr, ifa->ifa_addr,
 			    ifa->ifa_netmask, RTF_HOST, &rt);
 			hr_otherif = (rt && rt->rt_ifp != &sc->sc_if &&
-			    rt->rt_flags & (RTF_CLONING|RTF_CLONED));
+			    (rt->rt_flags & RTF_CONNECTED));
 			if (rt != NULL) {
 				rtfree(rt);
 				rt = NULL;
@@ -411,22 +411,22 @@ carp_setroute(struct carp_softc *sc, int cmd)
 			case RTM_ADD:
 				if (hr_otherif) {
 					ifa->ifa_rtrequest = NULL;
-					ifa->ifa_flags &= ~RTF_CLONING;
+					ifa->ifa_flags &= ~RTF_CONNECTED;
 
 					rtrequest(RTM_ADD, ifa->ifa_addr,
 					    ifa->ifa_addr, ifa->ifa_netmask,
 					    RTF_UP | RTF_HOST, NULL);
 				}
 				if (!hr_otherif || nr_ourif || !rt) {
-					if (nr_ourif && !(rt->rt_flags &
-					    RTF_CLONING))
+					if (nr_ourif &&
+					    (rt->rt_flags & RTF_CONNECTED) == 0)
 						rtrequest(RTM_DELETE,
 						    ifa->ifa_addr,
 						    ifa->ifa_addr,
 						    ifa->ifa_netmask, 0, NULL);
 
 					ifa->ifa_rtrequest = arp_rtrequest;
-					ifa->ifa_flags |= RTF_CLONING;
+					ifa->ifa_flags |= RTF_CONNECTED;
 
 					if (rtrequest(RTM_ADD, ifa->ifa_addr,
 					    ifa->ifa_addr, ifa->ifa_netmask, 0,
@@ -2090,7 +2090,7 @@ carp_start(struct ifnet *ifp)
 
 int
 carp_output(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *sa,
-    struct rtentry *rt)
+    const struct rtentry *rt)
 {
 	struct carp_softc *sc = ((struct carp_softc *)ifp->if_softc);
 	KASSERT(KERNEL_LOCKED_P());

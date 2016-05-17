@@ -1,4 +1,4 @@
-/*	$NetBSD: pure_calc.tab.h,v 1.1.1.1 2015/01/03 22:58:25 christos Exp $	*/
+/*	$NetBSD: pure_calc.tab.h,v 1.1.1.3 2016/01/09 21:59:47 christos Exp $	*/
 
 #ifndef _calc__defines_h_
 #define _calc__defines_h_

@@ -1,4 +1,4 @@
-/*	$NetBSD: make.h,v 1.96 2015/09/21 21:50:16 pooka Exp $	*/
+/*	$NetBSD: make.h,v 1.98 2016/02/18 18:29:14 christos Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -84,6 +84,7 @@
 #include <sys/param.h>
 
 #include <ctype.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,6 +92,10 @@
 
 #ifdef BSD4_4
 # include <sys/cdefs.h>
+#endif
+
+#ifndef FD_CLOEXEC
+#define FD_CLOEXEC 1
 #endif
 
 #if defined(__GNUC__)
@@ -484,6 +489,10 @@ void Main_ExportMAKEFLAGS(Boolean);
 Boolean Main_SetObjdir(const char *);
 int mkTempFile(const char *, char **);
 int str2Lst_Append(Lst, char *, const char *);
+
+#define	VARF_UNDEFERR	1
+#define	VARF_WANTRES	2
+#define	VARF_ASSIGN	4
 
 #ifdef __GNUC__
 #define UNCONST(ptr)	({ 		\

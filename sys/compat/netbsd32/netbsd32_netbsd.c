@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_netbsd.c,v 1.197 2015/07/30 09:55:57 maxv Exp $	*/
+/*	$NetBSD: netbsd32_netbsd.c,v 1.199 2016/02/28 23:24:35 khorben Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001, 2008 Matthew R. Green
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: netbsd32_netbsd.c,v 1.197 2015/07/30 09:55:57 maxv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: netbsd32_netbsd.c,v 1.199 2016/02/28 23:24:35 khorben Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_ddb.h"
@@ -112,6 +112,10 @@ struct uvm_object *emul_netbsd32_object;
 
 extern struct sysctlnode netbsd32_sysctl_root;
 
+#ifdef MODULAR
+#include <compat/netbsd32/netbsd32_syscalls_autoload.c>
+#endif
+
 struct emul emul_netbsd32 = {
 	.e_name =		"netbsd32",
 	.e_path =		"/emul/netbsd32",
@@ -126,6 +130,9 @@ struct emul emul_netbsd32 = {
 	.e_syscallnames =	netbsd32_syscallnames,
 #else
 	.e_syscallnames =	NULL,
+#endif
+#ifdef MODULAR
+	.e_sc_autoload =	netbsd32_syscalls_autoload,
 #endif
 	.e_sendsig =		netbsd32_sendsig,
 	.e_trapsignal =		trapsignal,
@@ -1530,7 +1537,7 @@ netbsd32_mmap(struct lwp *l, const struct netbsd32_mmap_args *uap, register_t *r
 #endif
 	error = sys_mmap(l, &ua, retval);
 	if ((u_long)*retval > (u_long)UINT_MAX) {
-		printf("netbsd32_mmap: retval out of range: 0x%lx",
+		printf("netbsd32_mmap: retval out of range: 0x%lx\n",
 		    (u_long)*retval);
 		/* Should try to recover and return an error here. */
 	}

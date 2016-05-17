@@ -1,4 +1,4 @@
-/*	$NetBSD: mntopts.h,v 1.15 2012/10/19 17:09:06 drochner Exp $	*/
+/*	$NetBSD: mntopts.h,v 1.17 2016/02/21 22:45:25 christos Exp $	*/
 
 /*-
  * Copyright (c) 1994
@@ -33,6 +33,8 @@
 #ifndef _MNTOPTS_H_
 #define _MNTOPTS_H_
 
+#include <sys/cdefs.h>
+
 struct mntopt {
 	const char *m_option;	/* option name */
 	int m_inverse;		/* if a negative option, eg "dev" */
@@ -53,6 +55,7 @@ struct mntopt {
 #define MOPT_USERQUOTA		{ "userquota",	0, 0, 0 }
 #define MOPT_GROUPQUOTA		{ "groupquota",	0, 0, 0 }
 #define MOPT_NOATIME		{ "atime",	1, MNT_NOATIME, 0 }
+#define MOPT_RELATIME		{ "relatime",	0, MNT_RELATIME, 0 }
 #define MOPT_SYMPERM		{ "symperm",	0, MNT_SYMPERM, 0 }
 #define MOPT_SOFTDEP		{ "softdep",	0, MNT_SOFTDEP, 0 }
 #define MOPT_LOG		{ "log",	0, MNT_LOG, 0 }

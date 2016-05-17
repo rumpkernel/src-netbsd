@@ -1,4 +1,4 @@
-/*	$NetBSD: nsswitch.h,v 1.21 2011/07/17 20:54:34 joerg Exp $	*/
+/*	$NetBSD: nsswitch.h,v 1.23 2016/01/23 01:26:14 dholland Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998, 1999, 2004 The NetBSD Foundation, Inc.
@@ -175,8 +175,8 @@ typedef struct {
  * nss_module_unregister_fn - module un-registration function
  *	called at module unload
  */
-typedef	void (*nss_module_unregister_fn)(ns_mtab *, u_int);
-typedef	ns_mtab *(*nss_module_register_fn)(const char *, u_int *,
+typedef	void (*nss_module_unregister_fn)(ns_mtab *, unsigned int);
+typedef	ns_mtab *(*nss_module_register_fn)(const char *, unsigned int *,
 					   nss_module_unregister_fn *);
 
 #ifdef _NS_PRIVATE
@@ -193,7 +193,7 @@ typedef	ns_mtab *(*nss_module_register_fn)(const char *, u_int *,
 typedef struct {
 	const char	*name;		/* name of database */
 	ns_src		*srclist;	/* list of sources */
-	u_int		 srclistsize;	/* size of srclist */
+	unsigned int	 srclistsize;	/* size of srclist */
 } ns_dbt;
 
 /*
@@ -203,7 +203,7 @@ typedef struct {
 	const char	*name;		/* module name */
 	void		*handle;	/* handle from dlopen() */
 	ns_mtab		*mtab;		/* method table */
-	u_int		 mtabsize;	/* size of mtab */
+	unsigned int	 mtabsize;	/* size of mtab */
 					/* called to unload module */
 	nss_module_unregister_fn unregister;
 } ns_mod;

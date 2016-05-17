@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.inc,v 1.192 2015/10/25 16:01:04 pooka Exp $
+#	$NetBSD: Makefile.inc,v 1.194 2016/04/03 00:19:42 christos Exp $
 #	from: @(#)Makefile.inc	8.6 (Berkeley) 5/4/95
 
 # gen sources
@@ -35,8 +35,9 @@ SRCS+=	alarm.c alphasort.c arc4random.c assert.c asysctl.c \
 	sysctlnametomib.c syslog.c telldir.c time.c \
 	times.c toascii.c tolower_.c ttyname.c ttyslot.c toupper_.c ualarm.c \
 	ulimit.c uname.c unvis.c usleep.c utime.c utimens.c utmp.c \
-	utmpx.c valloc.c vis.c wait.c wait3.c waitpid.c warn.c warnx.c \
-	warnc.c vwarn.c vwarnx.c vwarnc.c verr.c verrx.c verrc.c wordexp.c
+	utmpx.c valloc.c vis.c wait.c wait3.c waitid.c waitpid.c warn.c \
+	warnx.c warnc.c vwarn.c vwarnx.c vwarnc.c verr.c verrx.c verrc.c \
+	wordexp.c
 
 # uses alloca
 COPTS.execvp.c = -Wno-stack-protector
@@ -188,7 +189,7 @@ MLINKS+=unvis.3 strnunvis.3 unvis.3 strnunvisx.3
 MLINKS+=vis.3 svis.3 vis.3 strvis.3 vis.3 strvisx.3 vis.3 strsvis.3 \
 	vis.3 strsvisx.3 vis.3 nvis.3
 MLINKS+=vis.3 snvis.3 vis.3 strnvis.3 vis.3 strnvisx.3 vis.3 strsnvis.3 \
-	vis.3 strsnvisx.3
+	vis.3 strsnvisx.3 vis.3 stravis.3
 
 CPPFLAGS.ctype_.c+=	-I${LIBCDIR}/locale
 CPPFLAGS.isctype.c+=	-I${LIBCDIR}/locale

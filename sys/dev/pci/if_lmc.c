@@ -1,4 +1,4 @@
-/* $NetBSD: if_lmc.c,v 1.56 2014/11/28 08:03:46 ozaki-r Exp $ */
+/* $NetBSD: if_lmc.c,v 1.59 2016/04/28 00:16:56 ozaki-r Exp $ */
 
 /*-
  * Copyright (c) 2002-2006 David Boggs. <boggs@boggs.palo-alto.ca.us>
@@ -74,7 +74,7 @@
  */
 
 # include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_lmc.c,v 1.56 2014/11/28 08:03:46 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_lmc.c,v 1.59 2016/04/28 00:16:56 ozaki-r Exp $");
 # include <sys/param.h>	/* OS version */
 # include "opt_inet.h"	/* INET6, INET */
 # include "opt_altq_enabled.h" /* ALTQ */
@@ -3355,7 +3355,7 @@ ifnet_input(struct ifnet *ifp, struct mbuf *mbuf)
  */
 static int  /* context: process */
 ifnet_output(struct ifnet *ifp, struct mbuf *m,
- const struct sockaddr *dst, struct rtentry *rt)
+ const struct sockaddr *dst, const struct rtentry *rt)
   {
   softc_t *sc = IFP2SC(ifp);
   int error = 0;
@@ -3375,7 +3375,7 @@ ifnet_output(struct ifnet *ifp, struct mbuf *m,
   /* Some BSD QUEUE routines are not interrupt-safe. */
   {
   DISABLE_INTR; /* noop in FreeBSD */
-  IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
+  IFQ_ENQUEUE(&ifp->if_snd, m, error);
   ENABLE_INTR; /* noop in FreeBSD */
   }
 
@@ -3510,7 +3510,7 @@ ifnet_setup(struct ifnet *ifp)
   ifp->if_flags    = IFF_POINTOPOINT;
   ifp->if_flags   |= IFF_SIMPLEX;
   ifp->if_flags   |= IFF_NOARP;
-  ifp->if_input    = ifnet_input;
+  ifp->_if_input    = ifnet_input;
   ifp->if_output   = ifnet_output;
   ifp->if_start    = ifnet_start;
   ifp->if_ioctl    = ifnet_ioctl;

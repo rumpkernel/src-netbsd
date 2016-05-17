@@ -1,4 +1,4 @@
-/*	$NetBSD: reallocarray.c,v 1.5 2015/07/26 02:22:33 kamil Exp $	*/
+/*	$NetBSD: reallocarray.c,v 1.7 2016/04/06 11:07:58 roy Exp $	*/
 /*	$OpenBSD: reallocarray.c,v 1.1 2014/05/08 21:43:49 deraadt Exp $	*/
 
 /*-
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__RCSID("$NetBSD: reallocarray.c,v 1.5 2015/07/26 02:22:33 kamil Exp $");
+__RCSID("$NetBSD: reallocarray.c,v 1.7 2016/04/06 11:07:58 roy Exp $");
 
 #define _OPENBSD_SOURCE
 #include <errno.h>
@@ -40,11 +40,12 @@ __RCSID("$NetBSD: reallocarray.c,v 1.5 2015/07/26 02:22:33 kamil Exp $");
 void *
 reallocarray(void *optr, size_t nmemb, size_t size)
 {
+	int e;
+
 	if (nmemb == 0 || size == 0)
 		return realloc(optr, 0);
 
-	int e = reallocarr(&optr, nmemb, size);
-
+	e = reallocarr(&optr, nmemb, size);
 	if (e == 0)
 		return optr;
 	errno = e;

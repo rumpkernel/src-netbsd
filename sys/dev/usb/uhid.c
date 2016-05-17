@@ -1,4 +1,4 @@
-/*	$NetBSD: uhid.c,v 1.94 2015/03/20 03:04:48 mrg Exp $	*/
+/*	$NetBSD: uhid.c,v 1.97 2016/05/09 04:55:34 mlelstv Exp $	*/
 
 /*
  * Copyright (c) 1998, 2004, 2008, 2012 The NetBSD Foundation, Inc.
@@ -35,16 +35,17 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uhid.c,v 1.94 2015/03/20 03:04:48 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uhid.c,v 1.97 2016/05/09 04:55:34 mlelstv Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_compat_netbsd.h"
+#include "opt_usb.h"
 #endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/malloc.h>
+#include <sys/kmem.h>
 #include <sys/signalvar.h>
 #include <sys/device.h>
 #include <sys/ioctl.h>
@@ -130,11 +131,11 @@ const struct cdevsw uhid_cdevsw = {
 	.d_flag = D_OTHER
 };
 
-Static void uhid_intr(struct uhidev *, void *, u_int len);
+Static void uhid_intr(struct uhidev *, void *, u_int);
 Static void uhid_softintr(void *);
 
-Static int uhid_do_read(struct uhid_softc *, struct uio *uio, int);
-Static int uhid_do_write(struct uhid_softc *, struct uio *uio, int);
+Static int uhid_do_read(struct uhid_softc *, struct uio *, int);
+Static int uhid_do_write(struct uhid_softc *, struct uio *, int);
 Static int uhid_do_ioctl(struct uhid_softc*, u_long, void *, int, struct lwp *);
 
 int             uhid_match(device_t, cfdata_t, void *);
@@ -186,7 +187,7 @@ uhid_attach(device_t parent, device_t self, void *aux)
 	       sc->sc_isize, sc->sc_osize, sc->sc_fsize);
 
 	mutex_init(&sc->sc_access_lock, MUTEX_DEFAULT, IPL_NONE);
-	mutex_init(&sc->sc_lock, MUTEX_DEFAULT, IPL_USB);
+	mutex_init(&sc->sc_lock, MUTEX_DEFAULT, IPL_SOFTUSB);
 	cv_init(&sc->sc_cv, "uhidrea");
 	cv_init(&sc->sc_detach_cv, "uhiddet");
 
@@ -263,7 +264,7 @@ uhid_intr(struct uhidev *addr, void *data, u_int len)
 
 #ifdef UHID_DEBUG
 	if (uhiddebug > 5) {
-		u_int32_t i;
+		uint32_t i;
 
 		DPRINTF(("uhid_intr: data ="));
 		for (i = 0; i < len; i++)
@@ -339,7 +340,10 @@ uhidopen(dev_t dev, int flag, int mode, struct lwp *l)
 	}
 	mutex_exit(&sc->sc_access_lock);
 
-	sc->sc_obuf = malloc(sc->sc_osize, M_USBDEV, M_WAITOK);
+	if (sc->sc_osize > 0)
+		sc->sc_obuf = kmem_alloc(sc->sc_osize, KM_SLEEP);
+	else
+		sc->sc_obuf = NULL;
 	sc->sc_state &= ~UHID_IMMED;
 
 	mutex_enter(proc_lock);
@@ -367,7 +371,8 @@ uhidclose(dev_t dev, int flag, int mode, struct lwp *l)
 	uhidev_stop(&sc->sc_hdev);
 
 	clfree(&sc->sc_q);
-	free(sc->sc_obuf, M_USBDEV);
+	if (sc->sc_osize > 0)
+		kmem_free(sc->sc_obuf, sc->sc_osize);
 
 	uhidev_close(&sc->sc_hdev);
 
@@ -472,7 +477,7 @@ uhid_do_write(struct uhid_softc *sc, struct uio *uio, int flag)
 
 	size = sc->sc_osize;
 	error = 0;
-	if (uio->uio_resid != size)
+	if (uio->uio_resid != size || size == 0)
 		return EINVAL;
 	error = uiomove(sc->sc_obuf, size, uio);
 	if (!error) {
@@ -572,7 +577,7 @@ uhid_do_ioctl(struct uhid_softc *sc, u_long cmd, void *addr,
 	case USB_GET_REPORT_DESC:
 		uhidev_get_report_desc(sc->sc_hdev.sc_parent, &desc, &size);
 		rd = (struct usb_ctl_report_desc *)addr;
-		size = min(size, sizeof rd->ucrd_data);
+		size = min(size, sizeof(rd->ucrd_data));
 		rd->ucrd_size = size;
 		memcpy(rd->ucrd_data, desc, size);
 		break;
@@ -646,7 +651,7 @@ uhid_do_ioctl(struct uhid_softc *sc, u_long cmd, void *addr,
 
 	case USB_GET_DEVICEINFO:
 		usbd_fill_deviceinfo(sc->sc_hdev.sc_parent->sc_udev,
-			             (struct usb_device_info *)addr, 0);
+				     (struct usb_device_info *)addr, 0);
 		break;
 #ifdef COMPAT_30
 	case USB_GET_DEVICEINFO_OLD:
@@ -655,15 +660,15 @@ uhid_do_ioctl(struct uhid_softc *sc, u_long cmd, void *addr,
 
 		break;
 #endif
-        case USB_GET_STRING_DESC:
+	case USB_GET_STRING_DESC:
 	    {
-                struct usb_string_desc *si = (struct usb_string_desc *)addr;
-                err = usbd_get_string_desc(sc->sc_hdev.sc_parent->sc_udev,
+		struct usb_string_desc *si = (struct usb_string_desc *)addr;
+		err = usbd_get_string_desc(sc->sc_hdev.sc_parent->sc_udev,
 			si->usd_string_index,
-                	si->usd_language_id, &si->usd_desc, &size);
-                if (err)
-                        return EINVAL;
-                break;
+			si->usd_language_id, &si->usd_desc, &size);
+		if (err)
+			return EINVAL;
+		break;
 	    }
 
 	default:
@@ -743,7 +748,7 @@ filt_uhidread(struct knote *kn, long hint)
 	struct uhid_softc *sc = kn->kn_hook;
 
 	kn->kn_data = sc->sc_q.c_cc;
-	return (kn->kn_data > 0);
+	return kn->kn_data > 0;
 }
 
 static const struct filterops uhidread_filtops =

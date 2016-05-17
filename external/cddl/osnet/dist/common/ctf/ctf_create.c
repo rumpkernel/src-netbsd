@@ -19,6 +19,9 @@
  *
  * CDDL HEADER END
  */
+#ifdef HAVE_NBTOOL_CONFIG_H
+#include "nbtool_config.h"
+#endif
 
 /*
  * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
@@ -613,8 +616,11 @@ ctf_add_generic(ctf_file_t *fp, uint_t flag, const char *name, ctf_dtdef_t **rp)
 	if (!(fp->ctf_flags & LCTF_RDWR))
 		return (ctf_set_errno(fp, ECTF_RDONLY));
 
-	if (CTF_INDEX_TO_TYPE(fp->ctf_dtnextid, 1) > CTF_MAX_TYPE)
+	if (CTF_TYPE_ISCHILD(fp->ctf_dtnextid) ||
+	    CTF_INDEX_TO_TYPE(fp->ctf_dtnextid, 1) > CTF_MAX_TYPE) {
+		ctf_dprintf("type id overflow %lu\n", fp->ctf_dtnextid);
 		return (ctf_set_errno(fp, ECTF_FULL));
+	}
 
 	if ((dtd = ctf_alloc(sizeof (ctf_dtdef_t))) == NULL)
 		return (ctf_set_errno(fp, EAGAIN));

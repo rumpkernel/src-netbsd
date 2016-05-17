@@ -1,4 +1,4 @@
-/*	$NetBSD: sctp_indata.c,v 1.1 2015/10/13 21:28:35 rjs Exp $ */
+/*	$NetBSD: sctp_indata.c,v 1.4 2016/04/25 21:21:02 rjs Exp $ */
 /*	$KAME: sctp_indata.c,v 1.36 2005/03/06 16:04:17 itojun Exp $	*/
 
 /*
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sctp_indata.c,v 1.1 2015/10/13 21:28:35 rjs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sctp_indata.c,v 1.4 2016/04/25 21:21:02 rjs Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_ipsec.h"
@@ -83,8 +83,8 @@ __KERNEL_RCSID(0, "$NetBSD: sctp_indata.c,v 1.1 2015/10/13 21:28:35 rjs Exp $");
 #include <netinet/sctp_uio.h>
 #include <netinet/sctp_timer.h>
 #ifdef IPSEC
-#include <netinet6/ipsec.h>
-#include <netkey/key.h>
+#include <netipsec/ipsec.h>
+#include <netipsec/key.h>
 #endif /*IPSEC*/
 
 #include <net/net_osdep.h>
@@ -424,13 +424,7 @@ sctp_deliver_data(struct sctp_tcb *stcb, struct sctp_association *asoc,
 			const struct sockaddr_in *sin;
 
 			sin = (const struct sockaddr_in *)to;
-			memset(&sin6, 0, sizeof(sin6));
-			sin6.sin6_family = AF_INET6;
-			sin6.sin6_len = sizeof(struct sockaddr_in6);
-			sin6.sin6_addr.s6_addr16[2] = 0xffff;
-			bcopy(&sin->sin_addr, &sin6.sin6_addr.s6_addr16[3],
-			    sizeof(sin6.sin6_addr.s6_addr16[3]));
-			sin6.sin6_port = sin->sin_port;
+			in6_sin_2_v4mapsin6(sin, &sin6);
 			to = (struct sockaddr *)&sin6;
 		}
 		/* check and strip embedded scope junk */
@@ -653,14 +647,7 @@ sctp_service_reassembly(struct sctp_tcb *stcb, struct sctp_association *asoc, in
 				const struct sockaddr_in *sin;
 
 				sin = satocsin(to);
-				memset(&sin6, 0, sizeof(sin6));
-				sin6.sin6_family = AF_INET6;
-				sin6.sin6_len = sizeof(struct sockaddr_in6);
-				sin6.sin6_addr.s6_addr16[2] = 0xffff;
-				bcopy(&sin->sin_addr,
-				      &sin6.sin6_addr.s6_addr16[3],
-				      sizeof(sin6.sin6_addr.s6_addr16[3]));
-				sin6.sin6_port = sin->sin_port;
+				in6_sin_2_v4mapsin6(sin, &sin6);
 				to = (struct sockaddr *)&sin6;
 			}
 			/* check and strip embedded scope junk */
@@ -1962,14 +1949,7 @@ sctp_process_a_data_chunk(struct sctp_tcb *stcb, struct sctp_association *asoc,
 			const struct sockaddr_in *sin;
 
 			sin = satocsin(to);
-			memset(&sin6, 0, sizeof(sin6));
-			sin6.sin6_family = AF_INET6;
-			sin6.sin6_len = sizeof(struct sockaddr_in6);
-			sin6.sin6_addr.s6_addr16[2] = 0xffff;
-			bcopy(&sin->sin_addr,
-			    &sin6.sin6_addr.s6_addr16[3],
-			    sizeof(sin6.sin6_addr.s6_addr16[3]));
-			sin6.sin6_port = sin->sin_port;
+			in6_sin_2_v4mapsin6(sin, &sin6);
 			to = (struct sockaddr *)&sin6;
 		}
 
@@ -3756,7 +3736,7 @@ sctp_handle_sack(struct sctp_sack_chunk *ch, struct sctp_tcb *stcb,
 	/* always set this up to cum-ack */
 	asoc->this_sack_highest_gap = last_tsn;
 
-	if (((num_seg * sizeof (sizeof(struct sctp_gap_ack_block))) + sizeof(struct sctp_sack_chunk)) > sack_length) {
+	if (num_seg * sizeof(struct sctp_gap_ack_block) + sizeof(struct sctp_sack_chunk) > sack_length) {
 		/* skip corrupt segments */
 		strike_enabled = 0;
 		goto skip_segments;

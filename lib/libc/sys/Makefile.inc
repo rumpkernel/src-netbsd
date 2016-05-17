@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.inc,v 1.227 2015/01/31 23:10:56 christos Exp $
+#	$NetBSD: Makefile.inc,v 1.230 2016/04/23 23:11:31 christos Exp $
 #	@(#)Makefile.inc	8.3 (Berkeley) 10/24/94
 
 # sys sources
@@ -8,7 +8,8 @@
 SRCS+=	cpuset.c
 # glue to offer userland wrappers for some syscalls
 SRCS+=	posix_fadvise.c posix_madvise.c sched.c sigqueue.c sigtimedwait.c \
-	sigwait.c sigwaitinfo.c statvfs.c swapon.c semctl.c 
+	sigwait.c sigwaitinfo.c statvfs.c swapon.c semctl.c \
+	clock_getcpuclockid.c
 
 .if ${RUMPRUN} != "yes"
 # modules with non-default implementations on at least one architecture:
@@ -32,7 +33,7 @@ CLEANFILES+=	${_LSRC:MLintSys*.c}
 # with old syscall interfaces.
 GLUE+= fdiscard.c ftruncate.c lseek.c mmap.c \
 	pread.c preadv.c pwrite.c pwritev.c truncate.c ntp_adjtime.c \
-	mknodat.c
+	mknodat.c 
 GLUENOERR+= posix_fallocate.c
 GLUE50+= adjtime.c clock_settime.c settimeofday.c
 
@@ -91,6 +92,7 @@ ASM_GLUE+= tmp___${glue:.c=}50.S
 ASM=	access.S acct.S \
 	bind.S \
 	chdir.S chflags.S chmod.S chown.S chroot.S clock_nanosleep.S \
+		clock_getcpuclockid2.S \
 		__clock_getres50.S __clock_gettime50.S \
 	dup.S dup2.S dup3.S \
 	extattrctl.S \
@@ -132,8 +134,8 @@ ASM=	access.S acct.S \
 		__posix_chown.S __posix_fchown.S __posix_lchown.S \
 		__posix_rename.S profil.S \
 	__quotactl.S \
-	rasctl.S readlinkat.S reboot.S recvfrom.S recvmmsg.S recvmsg.S rename.S \
-		renameat.S revoke.S rmdir.S \
+	rasctl.S readlinkat.S reboot.S recvfrom.S recvmmsg.S recvmsg.S \
+		rename.S renameat.S revoke.S rmdir.S \
 	semconfig.S semget.S semop.S \
 		sendmmsg.S sendmsg.S sendto.S setegid.S seteuid.S \
 		setgid.S setgroups.S __setitimer50.S __setlogin.S setpgid.S \
@@ -173,7 +175,7 @@ WEAKASM= accept.S __aio_suspend50.S close.S connect.S execve.S \
 	readv.S _sched_setparam.S _sched_getparam.S _sched_setaffinity.S \
 	_sched_getaffinity.S sched_yield.S \
 	__select50.S setcontext.S __sigprocmask14.S __sigsuspend14.S sysarch.S \
-	__wait450.S write.S writev.S
+	__wait450.S wait6.S write.S writev.S
 
 NOERR=	getegid.S geteuid.S getgid.S getpid.S getppid.S getuid.S \
 	issetugid.S posix_spawn.S sync.S __posix_fadvise50.S
@@ -241,7 +243,8 @@ LintSysPseudoNoerr.c: ${LIBCDIR}/sys/makelintstub \
 	    -s ${DESTDIR}/usr/include/sys/syscall.h ${PSEUDONOERR}
 
 MAN+=	accept.2 access.2 acct.2 adjtime.2 bind.2 brk.2 chdir.2 \
-	chflags.2 chmod.2 chown.2 chroot.2 clock_settime.2 clone.2 close.2 \
+	chflags.2 chmod.2 chown.2 chroot.2 clock_getcpuclockid2.2 \
+	clock_settime.2 clone.2 close.2 \
 	connect.2 dup.2 execve.2 _exit.2 extattr_get_file.2 \
 	fcntl.2 fdatasync.2 fdiscard.2 fhopen.2 \
 	flock.2 fork.2 fsync.2 getcontext.2 getdents.2 \
@@ -249,7 +252,7 @@ MAN+=	accept.2 access.2 acct.2 adjtime.2 bind.2 brk.2 chdir.2 \
 	getitimer.2 getlogin.2 getpeername.2 getpgrp.2 getpid.2 \
 	getpriority.2 getrlimit.2 getrusage.2 getsid.2 getsockname.2 \
 	getsockopt.2 gettimeofday.2 getuid.2 intro.2 ioctl.2 issetugid.2 \
-	kill.2 kqueue.2 ktrace.2 \
+	kill.2 kqueue.2 ktrace.2 _ksem.2 \
 	lfs_bmapv.2 lfs_markv.2 lfs_segclean.2 lfs_segwait.2 \
 	link.2 listen.2 lseek.2 \
 	_lwp_create.2 _lwp_ctl.2 _lwp_detach.2 _lwp_exit.2 \
@@ -321,6 +324,16 @@ MLINKS+=gettimeofday.2 settimeofday.2
 MLINKS+=getuid.2 geteuid.2
 MLINKS+=intro.2 errno.2
 MLINKS+=kqueue.2 kevent.2
+MLINKS+=_ksem.2 _ksem_open.2
+MLINKS+=_ksem.2 _ksem_close.2
+MLINKS+=_ksem.2 _ksem_init.2
+MLINKS+=_ksem.2 _ksem_destroy.2
+MLINKS+=_ksem.2 _ksem_getvalue.2
+MLINKS+=_ksem.2 _ksem_post.2
+MLINKS+=_ksem.2 _ksem_wait.2
+MLINKS+=_ksem.2 _ksem_timedwait.2
+MLINKS+=_ksem.2 _ksem_trywait.2
+MLINKS+=_ksem.2 _ksem_unlink.2
 MLINKS+=ktrace.2 fktrace.2
 MLINKS+=lseek.2 seek.2
 MLINKS+=link.2 linkat.2
@@ -363,7 +376,9 @@ MLINKS+=utimes.2 futimes.2 utimes.2 lutimes.2
 MLINKS+=utimes.2 utimens.2 utimes.2 futimens.2 utimes.2 lutimens.2
 MLINKS+=utimes.2 utimensat.2
 MLINKS+=wait.2 wait3.2 wait.2 wait4.2 wait.2 waitpid.2
+MLINKS+=wait.2 wait6.2 wait.2 waitid.2
 MLINKS+=write.2 writev.2 write.2 pwrite.2 write.2 pwritev.2
 MLINKS+=pipe.2 pipe2.2
 MLINKS+=accept.2 paccept.2
 MLINKS+=nanosleep.2 clock_nanosleep.2
+MLINKS+=clock_getcpuclockid2.2 clock_getcpuclockid.2

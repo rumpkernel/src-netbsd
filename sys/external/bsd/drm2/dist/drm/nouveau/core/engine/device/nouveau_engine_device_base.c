@@ -1,4 +1,4 @@
-/*	$NetBSD: nouveau_engine_device_base.c,v 1.5 2015/10/17 21:13:38 jmcneill Exp $	*/
+/*	$NetBSD: nouveau_engine_device_base.c,v 1.10 2016/04/13 08:50:51 riastradh Exp $	*/
 
 /*
  * Copyright 2012 Red Hat Inc.
@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nouveau_engine_device_base.c,v 1.5 2015/10/17 21:13:38 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nouveau_engine_device_base.c,v 1.10 2016/04/13 08:50:51 riastradh Exp $");
 
 #include <core/object.h>
 #include <core/device.h>
@@ -177,8 +177,12 @@ nouveau_devobj_ctor(struct nouveau_object *parent,
 	if (!(args->disable & NV_DEVICE_DISABLE_IDENTIFY) &&
 	    !device->card_type) {
 #ifdef __NetBSD__
-		if (bus_space_map(mmiot, mmio_base, mmio_size, 0, &mmioh) != 0)
+		if (mmio_size < 0x102000)
 			return -ENOMEM;
+		/* XXX errno NetBSD->Linux */
+		ret = -bus_space_map(mmiot, mmio_base, 0x102000, 0, &mmioh);
+		if (ret)
+			return ret;
 
 #ifndef __BIG_ENDIAN
 		if (bus_space_read_4(mmiot, mmioh, 4) != 0)
@@ -189,7 +193,7 @@ nouveau_devobj_ctor(struct nouveau_object *parent,
 
 		boot0 = bus_space_read_4(mmiot, mmioh, 0x000000);
 		strap = bus_space_read_4(mmiot, mmioh, 0x101000);
-		bus_space_unmap(mmiot, mmioh, mmio_size);
+		bus_space_unmap(mmiot, mmioh, 0x102000);
 #else
 		map = ioremap(mmio_base, 0x102000);
 		if (map == NULL)
@@ -293,10 +297,17 @@ nouveau_devobj_ctor(struct nouveau_object *parent,
 #ifdef __NetBSD__
 	if (!(args->disable & NV_DEVICE_DISABLE_MMIO) &&
 	    !nv_subdev(device)->mmiosz) {
-		if (bus_space_map(mmiot, mmio_base, mmio_size, 0,
-			&nv_subdev(device)->mmioh) != 0) {
+		/*
+		 * Map only through PRAMIN -- don't map the command
+		 * FIFO MMIO regions, which start at NV_FIFO_OFFSET =
+		 * 0x800000 and are mapped separately.
+		 */
+		mmio_size = MIN(mmio_size, 0x800000);
+		/* XXX errno NetBSD->Linux */
+		ret = -bus_space_map(mmiot, mmio_base, mmio_size, 0, &mmioh);
+		if (ret) {
 			nv_error(device, "unable to map device registers\n");
-			return -ENOMEM;
+			return ret;
 		}
 		nv_subdev(device)->mmiot = mmiot;
 		nv_subdev(device)->mmioh = mmioh;

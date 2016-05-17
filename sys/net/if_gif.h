@@ -1,4 +1,4 @@
-/*	$NetBSD: if_gif.h,v 1.19 2008/11/12 12:36:28 ad Exp $	*/
+/*	$NetBSD: if_gif.h,v 1.22 2016/04/28 00:16:56 ozaki-r Exp $	*/
 /*	$KAME: if_gif.h,v 1.23 2001/07/27 09:21:42 itojun Exp $	*/
 
 /*
@@ -73,7 +73,7 @@ struct gif_softc {
 void	gifattach0(struct gif_softc *);
 void	gif_input(struct mbuf *, int, struct ifnet *);
 int	gif_output(struct ifnet *, struct mbuf *,
-		   const struct sockaddr *, struct rtentry *);
+		   const struct sockaddr *, const struct rtentry *);
 int	gif_ioctl(struct ifnet *, u_long, void *);
 int	gif_set_tunnel(struct ifnet *, struct sockaddr *, struct sockaddr *);
 void	gif_delete_tunnel(struct ifnet *);
@@ -81,4 +81,8 @@ void	gif_delete_tunnel(struct ifnet *);
 int	gif_encapcheck(struct mbuf *, int, int, void *);
 #endif
 
+/*
+ * Locking notes:
+ * - All members of struct si_sync are protected by si_lock (an adaptive mutex)
+ */
 #endif /* !_NET_IF_GIF_H_ */

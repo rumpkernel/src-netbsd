@@ -1,4 +1,4 @@
-/*	$NetBSD: udp_usrreq.c,v 1.222 2015/08/24 22:21:26 pooka Exp $	*/
+/*	$NetBSD: udp_usrreq.c,v 1.225 2016/04/26 08:44:45 ozaki-r Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -66,7 +66,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: udp_usrreq.c,v 1.222 2015/08/24 22:21:26 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: udp_usrreq.c,v 1.225 2016/04/26 08:44:45 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
@@ -89,7 +89,6 @@ __KERNEL_RCSID(0, "$NetBSD: udp_usrreq.c,v 1.222 2015/08/24 22:21:26 pooka Exp $
 #include <sys/sysctl.h>
 
 #include <net/if.h>
-#include <net/route.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -405,16 +404,12 @@ udp_input(struct mbuf *m, ...)
 		memset(&src6, 0, sizeof(src6));
 		src6.sin6_family = AF_INET6;
 		src6.sin6_len = sizeof(struct sockaddr_in6);
-		src6.sin6_addr.s6_addr[10] = src6.sin6_addr.s6_addr[11] = 0xff;
-		memcpy(&src6.sin6_addr.s6_addr[12], &ip->ip_src,
-			sizeof(ip->ip_src));
+		in6_in_2_v4mapin6(&ip->ip_src, &src6.sin6_addr);
 		src6.sin6_port = uh->uh_sport;
 		memset(&dst6, 0, sizeof(dst6));
 		dst6.sin6_family = AF_INET6;
 		dst6.sin6_len = sizeof(struct sockaddr_in6);
-		dst6.sin6_addr.s6_addr[10] = dst6.sin6_addr.s6_addr[11] = 0xff;
-		memcpy(&dst6.sin6_addr.s6_addr[12], &ip->ip_dst,
-			sizeof(ip->ip_dst));
+		in6_in_2_v4mapin6(&ip->ip_dst, &dst6.sin6_addr);
 		dst6.sin6_port = uh->uh_dport;
 
 		n += udp6_realinput(AF_INET, &src6, &dst6, m, iphlen);
@@ -775,19 +770,14 @@ end:
 
 
 int
-udp_output(struct mbuf *m, ...)
+udp_output(struct mbuf *m, struct inpcb *inp)
 {
-	struct inpcb *inp;
 	struct udpiphdr *ui;
 	struct route *ro;
 	int len = m->m_pkthdr.len;
 	int error = 0;
-	va_list ap;
 
 	MCLAIM(m, &udp_tx_mowner);
-	va_start(ap, m);
-	inp = va_arg(ap, struct inpcb *);
-	va_end(ap);
 
 	/*
 	 * Calculate data length and get a mbuf

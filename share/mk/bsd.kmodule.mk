@@ -1,10 +1,18 @@
-#	$NetBSD: bsd.kmodule.mk,v 1.55 2015/07/09 14:50:08 matt Exp $
+#	$NetBSD: bsd.kmodule.mk,v 1.58 2016/02/02 18:38:10 christos Exp $
 
 # We are not building this with PIE
 MKPIE=no
 
 .include <bsd.init.mk>
 .include <bsd.klinks.mk>
+
+.if ${MKCTF:Uno} == "yes"
+CFLAGS+=	-g
+# Only need symbols for ctf, strip them after converting to CTF
+CTFFLAGS=	-L VERSION
+CTFMFLAGS=	-t -L VERSION
+.endif
+
 .include <bsd.sys.mk>
 
 ##### Basic targets
@@ -181,6 +189,9 @@ ${PROG}: ${OBJS} ${DPADD} ${KMODSCRIPT}
 		-Wl,-Map=${.TARGET}.map \
 		-o ${.TARGET} ${OBJS}
 .endif
+.endif
+.if defined(CTFMERGE)
+	${CTFMERGE} ${CTFMFLAGS} -o ${.TARGET} ${OBJS}
 .endif
 
 ##### Install rules

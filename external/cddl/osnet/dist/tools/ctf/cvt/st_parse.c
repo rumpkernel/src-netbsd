@@ -403,7 +403,7 @@ parse_sou(char *cp, iidesc_t *idp)
 }
 
 int
-parse_stab(stab_t *stab, char *cp, iidesc_t **iidescp)
+parse_stab(stab_t *stab, char * volatile cp, iidesc_t **iidescp)
 {
 	iidesc_t *ii = NULL;
 	iitype_t (*parse)(char *, iidesc_t *);
@@ -1125,7 +1125,7 @@ compute_sum(const char *w)
 	return (HASH(sum));
 }
 
-static void
+static void __dead
 reset(void)
 {
 	longjmp(resetbuf, 1);

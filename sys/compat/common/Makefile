@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.54 2015/09/07 03:44:19 uebayasi Exp $
+#	$NetBSD: Makefile,v 1.56 2016/04/06 19:45:45 roy Exp $
 
 LIB=		compat
 NOPIC=		# defined
@@ -47,6 +47,9 @@ SRCS+=	kern_50.c kern_time_50.c kern_select_50.c rndpseudo_50.c rtsock_50.c \
 # Compatibility code for NetBSD 6.0
 SRCS+=	kern_sa_60.c tty_60.c kern_time_60.c
 
+# Compatibility code for NetBSD 7.0
+SRCS+=	uipc_usrreq_70.c
+
 # really, all machines where sizeof(int) != sizeof(long) (LP64)
 .if (${MACHINE_ARCH} != "alpha" && ${MACHINE_ARCH} != "sparc64" \
   && ${MACHINE_ARCH} != "x86_64")
@@ -64,13 +67,11 @@ lib${LIB}.o:: ${OBJS:O}
 	@echo building standard ${LIB} library
 	@rm -f lib${LIB}.o
 	@${LD} -r -o lib${LIB}.o `NM=${NM} ${LORDER} ${OBJS} | ${TSORT}`
-	@echo done
 
 lib${LIB}.po:: ${POBJS:O}
 	@echo building profiled ${LIB} library
 	@rm -f lib${LIB}.po
 	@${LD} -r -o lib${LIB}.po `NM=${NM} ${LORDER} ${POBJS} | ${TSORT}`
-	@echo done
 
 showsources: ${SRCS}
 	@echo ${.ALLSRC}
