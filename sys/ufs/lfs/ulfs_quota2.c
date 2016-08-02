@@ -1,6 +1,6 @@
-/*	$NetBSD: ulfs_quota2.c,v 1.22 2015/11/14 22:03:54 pgoyette Exp $	*/
-/*  from NetBSD: ufs_quota2.c,v 1.35 2012/09/27 07:47:56 bouyer Exp  */
-/*  from NetBSD: ffs_quota2.c,v 1.4 2011/06/12 03:36:00 rmind Exp  */
+/*	$NetBSD: ulfs_quota2.c,v 1.28 2016/07/07 06:55:44 msaitoh Exp $	*/
+/*  from NetBSD: ufs_quota2.c,v 1.40 2015/03/28 19:24:05 maxv Exp Exp  */
+/*  from NetBSD: ffs_quota2.c,v 1.5 2015/02/22 14:12:48 maxv Exp  */
 
 /*-
   * Copyright (c) 2010 Manuel Bouyer
@@ -29,7 +29,7 @@
   */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ulfs_quota2.c,v 1.22 2015/11/14 22:03:54 pgoyette Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ulfs_quota2.c,v 1.28 2016/07/07 06:55:44 msaitoh Exp $");
 
 #include <sys/buf.h>
 #include <sys/param.h>
@@ -44,6 +44,7 @@ __KERNEL_RCSID(0, "$NetBSD: ulfs_quota2.c,v 1.22 2015/11/14 22:03:54 pgoyette Ex
 #include <sys/kauth.h>
 #include <sys/quota.h>
 #include <sys/quotactl.h>
+#include <sys/timevar.h>
 
 #include <ufs/lfs/lfs.h>
 #include <ufs/lfs/lfs_accessors.h>
@@ -629,6 +630,15 @@ lfsquota2_handle_cmd_put(struct ulfsmount *ump, const struct quotakey *key,
 		goto out_il;
 	
 	lfsquota2_ulfs_rwq2e(q2ep, &q2e, needswap);
+	/*
+	 * Reset time limit if previously had no soft limit or were
+	 * under it, but now have a soft limit and are over it.
+	 */
+	if (val->qv_softlimit &&
+	    q2e.q2e_val[key->qk_objtype].q2v_cur >= val->qv_softlimit &&
+	    (q2e.q2e_val[key->qk_objtype].q2v_softlimit == 0 ||
+	     q2e.q2e_val[key->qk_objtype].q2v_cur < q2e.q2e_val[key->qk_objtype].q2v_softlimit))
+		q2e.q2e_val[key->qk_objtype].q2v_time = time_second + val->qv_grace;
 	quota2_dict_update_q2e_limits(key->qk_objtype, val, &q2e);
 	lfsquota2_ulfs_rwq2e(&q2e, q2ep, needswap);
 	quota2_bwrite(ump->um_mountp, bp);
@@ -1555,7 +1565,7 @@ lfs_quota2_mount(struct mount *mp)
 {
 	struct ulfsmount *ump = VFSTOULFS(mp);
 	struct lfs *fs = ump->um_lfs;
-	int error = 0;
+	int error;
 	struct vnode *vp;
 	struct lwp *l = curlwp;
 
@@ -1570,15 +1580,17 @@ lfs_quota2_mount(struct mount *mp)
 		    mp->mnt_stat.f_mntonname);
 		return EINVAL;
 	}
+
+	error = 0;
         if ((fs->lfs_quota_flags & FS_Q2_DO_TYPE(ULFS_USRQUOTA)) &&
             fs->lfs_quotaino[ULFS_USRQUOTA] == 0) {
-                printf("%s: no user quota inode\n",
-		    mp->mnt_stat.f_mntonname); 
+                printf("%s: No user quota inode\n",
+		    mp->mnt_stat.f_mntonname);
                 error = EINVAL;
         }
         if ((fs->lfs_quota_flags & FS_Q2_DO_TYPE(ULFS_GRPQUOTA)) &&
             fs->lfs_quotaino[ULFS_GRPQUOTA] == 0) {
-                printf("%s: no group quota inode\n",
+                printf("%s: No group quota inode\n",
 		    mp->mnt_stat.f_mntonname);
                 error = EINVAL;
         }
@@ -1618,6 +1630,7 @@ lfs_quota2_mount(struct mount *mp)
 		mutex_exit(vp->v_interlock);
 		VOP_UNLOCK(vp);
 	}
+
 	mp->mnt_flag |= MNT_QUOTA;
 	return 0;
 }

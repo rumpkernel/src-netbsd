@@ -1,4 +1,4 @@
-/*	$NetBSD: umount.c,v 1.48 2015/06/27 08:29:56 manu Exp $	*/
+/*	$NetBSD: umount.c,v 1.52 2016/06/26 04:01:30 dholland Exp $	*/
 
 /*-
  * Copyright (c) 1980, 1989, 1993
@@ -39,7 +39,7 @@ __COPYRIGHT("@(#) Copyright (c) 1980, 1989, 1993\
 #if 0
 static char sccsid[] = "@(#)umount.c	8.8 (Berkeley) 5/8/95";
 #else
-__RCSID("$NetBSD: umount.c,v 1.48 2015/06/27 08:29:56 manu Exp $");
+__RCSID("$NetBSD: umount.c,v 1.52 2016/06/26 04:01:30 dholland Exp $");
 #endif
 #endif /* not lint */
 
@@ -59,6 +59,7 @@ __RCSID("$NetBSD: umount.c,v 1.48 2015/06/27 08:29:56 manu Exp $");
 #endif /* !SMALL */
 
 #include <err.h>
+#include <errno.h>
 #include <fstab.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -147,7 +148,9 @@ main(int argc, char *argv[])
 
 	if (nfshost != NULL) {
 		memset(&hints, 0, sizeof hints);
-		getaddrinfo(nfshost, NULL, &hints, &nfshost_ai);
+		if (getaddrinfo(nfshost, NULL, &hints, &nfshost_ai) != 0) {
+			nfshost_ai = NULL;
+		}
 	}
 		
 	errs = 0;
@@ -183,7 +186,7 @@ umountfs(const char *name, const char **typelist, int raw)
 	const char *proto = NULL;
 #endif /* !SMALL */
 	const char *mntpt;
-	char *type, rname[MAXPATHLEN];
+	char *type, rname[MAXPATHLEN], umountprog[MAXPATHLEN];
 	mntwhat what;
 	struct stat sb;
 
@@ -204,7 +207,7 @@ umountfs(const char *name, const char **typelist, int raw)
 		}
 #ifdef SMALL
 		else {
- 			warn("%s", rname);
+ 			warn("%s", name);
  			return 1;
 		}
 #endif /* SMALL */
@@ -251,21 +254,57 @@ umountfs(const char *name, const char **typelist, int raw)
 				memcpy(hostp, name, len);
 				hostp[len] = 0;
 				name += len + 1;
-				getaddrinfo(hostp, NULL, &hints, &ai);
+				if (getaddrinfo(hostp, NULL, &hints, &ai) != 0)
+					ai = NULL;
 			}
 		}
 
 		if (!namematch(ai))
 			return 1;
 #endif /* ! SMALL */
+		snprintf(umountprog, sizeof(umountprog), "umount_%s", type);
+	}
+
+#ifndef SMALL
+	if (verbose) {
+		(void)printf("%s: unmount from %s\n", name, mntpt);
+		/* put this before the test of FAKE */ 
+		if (!raw) {
+			(void)printf("Trying unmount program %s\n",
+			    umountprog);
+		}
+	}
+	if (fake)
+		return 0;
+#endif /* ! SMALL */
+
+	if (!raw) {
+		/*
+		 * The only options that need to be passed on are -f
+		 * and -v.
+		 */
+		char *args[3];
+		unsigned nargs = 0;
+
+		args[nargs++] = umountprog;
+		if (fflag == MNT_FORCE) {
+			args[nargs++] = __UNCONST("-f");
+		}
+#ifndef SMALL
+		if (verbose) {
+			args[nargs++] = __UNCONST("-v");
+		}
+#endif
+		execvp(umountprog, args);
+		if (errno != ENOENT) {
+			warn("%s: execvp", umountprog);
+		}
 	}
 
 #ifndef SMALL
 	if (verbose)
-		(void)printf("%s: unmount from %s\n", name, mntpt);
-	if (fake)
-		return 0;
-#endif /* ! SMALL */
+		(void)printf("(No separate unmount program.)\n");
+#endif
 
 	if (unmount(mntpt, fflag) == -1) {
 		warn("%s", mntpt);

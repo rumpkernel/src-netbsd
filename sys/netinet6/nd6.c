@@ -1,4 +1,4 @@
-/*	$NetBSD: nd6.c,v 1.193 2016/04/26 09:30:01 ozaki-r Exp $	*/
+/*	$NetBSD: nd6.c,v 1.204 2016/07/15 07:40:09 ozaki-r Exp $	*/
 /*	$KAME: nd6.c,v 1.279 2002/06/08 11:16:51 itojun Exp $	*/
 
 /*
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nd6.c,v 1.193 2016/04/26 09:30:01 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nd6.c,v 1.204 2016/07/15 07:40:09 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_net_mpsafe.h"
@@ -56,6 +56,7 @@ __KERNEL_RCSID(0, "$NetBSD: nd6.c,v 1.193 2016/04/26 09:30:01 ozaki-r Exp $");
 #include <sys/syslog.h>
 #include <sys/queue.h>
 #include <sys/cprng.h>
+#include <sys/workqueue.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -109,14 +110,17 @@ int nd6_recalc_reachtm_interval = ND6_RECALC_REACHTM_INTERVAL;
 
 static void nd6_setmtu0(struct ifnet *, struct nd_ifinfo *);
 static void nd6_slowtimo(void *);
-static int regen_tmpaddr(struct in6_ifaddr *);
+static int regen_tmpaddr(const struct in6_ifaddr *);
 static void nd6_free(struct llentry *, int);
 static void nd6_llinfo_timer(void *);
 static void nd6_timer(void *);
+static void nd6_timer_work(struct work *, void *);
 static void clear_llinfo_pqueue(struct llentry *);
 
 static callout_t nd6_slowtimo_ch;
 static callout_t nd6_timer_ch;
+static struct workqueue	*nd6_timer_wq;
+static struct work	nd6_timer_wk;
 
 static int fill_drlist(void *, size_t *, size_t);
 static int fill_prlist(void *, size_t *, size_t);
@@ -126,12 +130,18 @@ MALLOC_DEFINE(M_IP6NDP, "NDP", "IPv6 Neighbour Discovery");
 void
 nd6_init(void)
 {
+	int error;
 
 	/* initialization of the default router list */
 	TAILQ_INIT(&nd_defrouter);
 
 	callout_init(&nd6_slowtimo_ch, CALLOUT_MPSAFE);
 	callout_init(&nd6_timer_ch, CALLOUT_MPSAFE);
+
+	error = workqueue_create(&nd6_timer_wq, "nd6_timer",
+	    nd6_timer_work, NULL, PRI_SOFTNET, IPL_SOFTNET, WQ_MPSAFE);
+	if (error)
+		panic("%s: workqueue_create failed (%d)\n", __func__, error);
 
 	/* start timer */
 	callout_reset(&nd6_slowtimo_ch, ND6_SLOWTIMER_INTERVAL * hz,
@@ -556,7 +566,7 @@ out:
  * ND6 timer routine to expire default route list and prefix list
  */
 static void
-nd6_timer(void *ignored_arg)
+nd6_timer_work(struct work *wk, void *arg)
 {
 	struct nd_defrouter *next_dr, *dr;
 	struct nd_prefix *next_pr, *pr;
@@ -583,8 +593,8 @@ nd6_timer(void *ignored_arg)
 	 * rather separate address lifetimes and prefix lifetimes.
 	 */
   addrloop:
-	for (ia6 = in6_ifaddr; ia6; ia6 = nia6) {
-		nia6 = ia6->ia_next;
+	for (ia6 = IN6_ADDRLIST_WRITER_FIRST(); ia6; ia6 = nia6) {
+		nia6 = IN6_ADDRLIST_WRITER_NEXT(ia6);
 		/* check address lifetime */
 		if (IFA6_IS_INVALID(ia6)) {
 			int regen = 0;
@@ -678,16 +688,23 @@ nd6_timer(void *ignored_arg)
 	mutex_exit(softnet_lock);
 }
 
+static void
+nd6_timer(void *ignored_arg)
+{
+
+	workqueue_enqueue(nd6_timer_wq, &nd6_timer_wk, NULL);
+}
+
 /* ia6: deprecated/invalidated temporary address */
 static int
-regen_tmpaddr(struct in6_ifaddr *ia6)
+regen_tmpaddr(const struct in6_ifaddr *ia6)
 {
 	struct ifaddr *ifa;
 	struct ifnet *ifp;
 	struct in6_ifaddr *public_ifa6 = NULL;
 
 	ifp = ia6->ia_ifa.ifa_ifp;
-	IFADDR_FOREACH(ifa, ifp) {
+	IFADDR_READER_FOREACH(ifa, ifp) {
 		struct in6_ifaddr *it6;
 
 		if (ifa->ifa_addr->sa_family != AF_INET6)
@@ -723,7 +740,7 @@ regen_tmpaddr(struct in6_ifaddr *ia6)
 		 * address with the prefix.
 		 */
 		if (!IFA6_IS_DEPRECATED(it6))
-		    public_ifa6 = it6;
+			public_ifa6 = it6;
 	}
 
 	if (public_ifa6 != NULL) {
@@ -934,7 +951,7 @@ nd6_is_new_addr_neighbor(const struct sockaddr_in6 *addr, struct ifnet *ifp)
 		if (!(pr->ndpr_stateflags & NDPRF_ONLINK)) {
 			struct rtentry *rt;
 
-			rt = rtalloc1((struct sockaddr *)&pr->ndpr_prefix, 0);
+			rt = rtalloc1(sin6tosa(&pr->ndpr_prefix), 0);
 			if (rt == NULL)
 				continue;
 			/*
@@ -962,7 +979,7 @@ nd6_is_new_addr_neighbor(const struct sockaddr_in6 *addr, struct ifnet *ifp)
 	 * If the address is assigned on the node of the other side of
 	 * a p2p interface, the address should be a neighbor.
 	 */
-	dstaddr = ifa_ifwithdstaddr((const struct sockaddr *)addr);
+	dstaddr = ifa_ifwithdstaddr(sin6tocsa(addr));
 	if (dstaddr != NULL) {
 		if (dstaddr->ifa_ifp == ifp) {
 #ifdef __FreeBSD__
@@ -1450,6 +1467,17 @@ nd6_rtrequest(int req, struct rtentry *rt, const struct rt_addrinfo *info)
 		RT_DPRINTF("rt_getkey(rt) = %p\n", rt_getkey(rt));
 
 		/*
+		 * When called from rt_ifa_addlocal, we cannot depend on that
+		 * the address (rt_getkey(rt)) exits in the address list of the
+		 * interface. So check RTF_LOCAL instead.
+		 */
+		if (rt->rt_flags & RTF_LOCAL) {
+			if (nd6_useloopback)
+				rt->rt_ifp = lo0ifp;	/* XXX */
+			break;
+		}
+
+		/*
 		 * check if rt_getkey(rt) is an address assigned
 		 * to the interface.
 		 */
@@ -1457,7 +1485,7 @@ nd6_rtrequest(int req, struct rtentry *rt, const struct rt_addrinfo *info)
 		    &satocsin6(rt_getkey(rt))->sin6_addr);
 		if (ifa != NULL) {
 			if (nd6_useloopback) {
-				ifp = rt->rt_ifp = lo0ifp;	/* XXX */
+				rt->rt_ifp = lo0ifp;	/* XXX */
 				/*
 				 * Make sure rt_ifa be equal to the ifaddr
 				 * corresponding to the address.
@@ -1681,7 +1709,7 @@ nd6_ioctl(u_long cmd, void *data, struct ifnet *ifp)
 			 */
 			int duplicated_linklocal = 0;
 
-			IFADDR_FOREACH(ifa, ifp) {
+			IFADDR_READER_FOREACH(ifa, ifp) {
 				if (ifa->ifa_addr->sa_family != AF_INET6)
 					continue;
 				ia = (struct in6_ifaddr *)ifa;
@@ -1709,7 +1737,7 @@ nd6_ioctl(u_long cmd, void *data, struct ifnet *ifp)
 			/* Mark all IPv6 addresses as tentative. */
 
 			ND_IFINFO(ifp)->flags |= ND6_IFF_IFDISABLED;
-			IFADDR_FOREACH(ifa, ifp) {
+			IFADDR_READER_FOREACH(ifa, ifp) {
 				if (ifa->ifa_addr->sa_family != AF_INET6)
 					continue;
 				nd6_dad_stop(ifa);
@@ -1735,7 +1763,7 @@ nd6_ioctl(u_long cmd, void *data, struct ifnet *ifp)
 				 */
 				 int haslinklocal = 0;
 
-				 IFADDR_FOREACH(ifa, ifp) {
+				 IFADDR_READER_FOREACH(ifa, ifp) {
 					if (ifa->ifa_addr->sa_family !=AF_INET6)
 						continue;
 					ia = (struct in6_ifaddr *)ifa;
@@ -1770,9 +1798,10 @@ nd6_ioctl(u_long cmd, void *data, struct ifnet *ifp)
 				continue; /* XXX */
 
 			/* do we really have to remove addresses as well? */
-			for (ia = in6_ifaddr; ia; ia = ia_next) {
+			for (ia = IN6_ADDRLIST_WRITER_FIRST(); ia;
+			     ia = ia_next) {
 				/* ia might be removed.  keep the next ptr. */
-				ia_next = ia->ia_next;
+				ia_next = IN6_ADDRLIST_WRITER_NEXT(ia);
 
 				if ((ia->ia6_flags & IN6_IFF_AUTOCONF) == 0)
 					continue;
@@ -2090,12 +2119,15 @@ nd6_slowtimo(void *ignored_arg)
 {
 	struct nd_ifinfo *nd6if;
 	struct ifnet *ifp;
+	int s;
 
 	mutex_enter(softnet_lock);
 	KERNEL_LOCK(1, NULL);
 	callout_reset(&nd6_slowtimo_ch, ND6_SLOWTIMER_INTERVAL * hz,
 	    nd6_slowtimo, NULL);
-	IFNET_FOREACH(ifp) {
+
+	s = pserialize_read_enter();
+	IFNET_READER_FOREACH(ifp) {
 		nd6if = ND_IFINFO(ifp);
 		if (nd6if->basereachable && /* already initialized */
 		    (nd6if->recalctm -= ND6_SLOWTIMER_INTERVAL) <= 0) {
@@ -2109,6 +2141,8 @@ nd6_slowtimo(void *ignored_arg)
 			nd6if->reachable = ND_COMPUTE_RTIME(nd6if->basereachable);
 		}
 	}
+	pserialize_read_exit(s);
+
 	KERNEL_UNLOCK_ONE(NULL);
 	mutex_exit(softnet_lock);
 }
@@ -2286,16 +2320,10 @@ nd6_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m,
 	if (ln != NULL)
 		LLE_WUNLOCK(ln);
 
-#ifndef NET_MPSAFE
-	KERNEL_LOCK(1, NULL);
-#endif
 	if ((ifp->if_flags & IFF_LOOPBACK) != 0)
-		error = (*ifp->if_output)(origifp, m, sin6tocsa(dst), rt);
+		error = if_output_lock(ifp, origifp, m, sin6tocsa(dst), rt);
 	else
-		error = (*ifp->if_output)(ifp, m, sin6tocsa(dst), rt);
-#ifndef NET_MPSAFE
-	KERNEL_UNLOCK_ONE(NULL);
-#endif
+		error = if_output_lock(ifp, ifp, m, sin6tocsa(dst), rt);
 	goto exit;
 
   bad:
@@ -2359,7 +2387,7 @@ nd6_add_ifa_lle(struct in6_ifaddr *ia)
 
 	IF_AFDATA_WLOCK(ifp);
 	ln = lla_create(LLTABLE6(ifp), LLE_IFADDR | LLE_EXCLUSIVE,
-	    (struct sockaddr *)&ia->ia_addr);
+	    sin6tosa(&ia->ia_addr));
 	IF_AFDATA_WUNLOCK(ifp);
 	if (ln == NULL)
 		return ENOBUFS;
@@ -2385,8 +2413,8 @@ nd6_rem_ifa_lle(struct in6_ifaddr *ia)
 
 	memcpy(&addr, &ia->ia_addr, sizeof(ia->ia_addr));
 	memcpy(&mask, &ia->ia_prefixmask, sizeof(ia->ia_prefixmask));
-	lltable_prefix_free(AF_INET6, (struct sockaddr *)&addr,
-	    (struct sockaddr *)&mask, LLE_STATIC);
+	lltable_prefix_free(AF_INET6, sin6tosa(&addr), sin6tosa(&mask),
+	    LLE_STATIC);
 }
 
 int

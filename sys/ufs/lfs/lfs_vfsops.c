@@ -1,4 +1,4 @@
-/*	$NetBSD: lfs_vfsops.c,v 1.349 2015/10/19 04:22:18 dholland Exp $	*/
+/*	$NetBSD: lfs_vfsops.c,v 1.351 2016/07/07 06:55:44 msaitoh Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001, 2002, 2003, 2007, 2007
@@ -61,7 +61,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lfs_vfsops.c,v 1.349 2015/10/19 04:22:18 dholland Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lfs_vfsops.c,v 1.351 2016/07/07 06:55:44 msaitoh Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_lfs.h"
@@ -1248,18 +1248,6 @@ lfs_mountfs(struct vnode *devvp, struct mount *mp, struct lwp *l)
 		}
 	}
 
-#ifdef LFS_EXTATTR
-	/*
-	 * Initialize file-backed extended attributes for ULFS1 file
-	 * systems.
-	 *
-	 * XXX: why is this limited to ULFS1?
-	 */
-	if (ump->um_fstype == ULFS1) {
-		ulfs_extattr_uepm_init(&ump->um_extattr);
-	}
-#endif
-
 #ifdef LFS_KERNEL_RFW
 	lfs_roll_forward(fs, mp, l);
 #endif
@@ -1372,6 +1360,7 @@ lfs_unmount(struct mount *mp, int mntflags)
 		}
 		if (ump->um_extattr.uepm_flags & ULFS_EXTATTR_UEPM_INITIALIZED) {
 			ulfs_extattr_uepm_destroy(&ump->um_extattr);
+			mp->mnt_flag &= ~MNT_EXTATTR;
 		}
 	}
 #endif
@@ -2450,7 +2439,7 @@ lfs_resize_fs(struct lfs *fs, int newnsegs)
 	}
 
 	/* Register new ifile size */
-	ip->i_size += noff * lfs_sb_getbsize(fs); 
+	ip->i_size += noff * lfs_sb_getbsize(fs);
 	lfs_dino_setsize(fs, ip->i_din, ip->i_size);
 	uvm_vnp_setsize(ivp, ip->i_size);
 

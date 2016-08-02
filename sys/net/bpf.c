@@ -1,4 +1,4 @@
-/*	$NetBSD: bpf.c,v 1.195 2016/02/09 08:32:12 ozaki-r Exp $	*/
+/*	$NetBSD: bpf.c,v 1.203 2016/07/19 02:47:45 pgoyette Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1993
@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bpf.c,v 1.195 2016/02/09 08:32:12 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bpf.c,v 1.203 2016/07/19 02:47:45 pgoyette Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_bpf.h"
@@ -59,7 +59,6 @@ __KERNEL_RCSID(0, "$NetBSD: bpf.c,v 1.195 2016/02/09 08:32:12 ozaki-r Exp $");
 #include <sys/queue.h>
 #include <sys/stat.h>
 #include <sys/module.h>
-#include <sys/once.h>
 #include <sys/atomic.h>
 
 #include <sys/file.h>
@@ -300,7 +299,7 @@ bpf_movein(struct uio *uio, int linktype, uint64_t mtu, struct mbuf **mp,
 		return (EIO);
 
 	m = m_gethdr(M_WAIT, MT_DATA);
-	m->m_pkthdr.rcvif = NULL;
+	m_reset_rcvif(m);
 	m->m_pkthdr.len = (int)(len - hlen);
 	if (len + align > MHLEN) {
 		m_clget(m, M_WAIT);
@@ -402,8 +401,8 @@ bpf_detachd(struct bpf_d *d)
 	d->bd_bif = NULL;
 }
 
-static int
-doinit(void)
+static void
+bpf_init(void)
 {
 
 	mutex_init(&bpf_mtx, MUTEX_DEFAULT, IPL_NONE);
@@ -414,19 +413,18 @@ doinit(void)
 	bpf_gstats.bs_drop = 0;
 	bpf_gstats.bs_capt = 0;
 
-	return 0;
+	return;
 }
 
 /*
- * bpfilterattach() is called at boot time.
+ * bpfilterattach() is called at boot time.  We don't need to do anything
+ * here, since any initialization will happen as part of module init code.
  */
 /* ARGSUSED */
 void
 bpfilterattach(int n)
 {
-	static ONCE_DECL(control);
 
-	RUN_ONCE(&control, doinit);
 }
 
 /*
@@ -715,7 +713,7 @@ bpf_write(struct file *fp, off_t *offp, struct uio *uio,
 	if (d->bd_feedback) {
 		mc = m_dup(m, 0, M_COPYALL, M_NOWAIT);
 		if (mc != NULL)
-			mc->m_pkthdr.rcvif = ifp;
+			m_set_rcvif(mc, ifp);
 		/* Set M_PROMISC for outgoing packets to be discarded. */
 		if (1 /*d->bd_direction == BPF_D_INOUT*/)
 			m->m_flags |= M_PROMISC;
@@ -723,7 +721,7 @@ bpf_write(struct file *fp, off_t *offp, struct uio *uio,
 		mc = NULL;
 
 	s = splsoftnet();
-	error = (*ifp->if_output)(ifp, m, (struct sockaddr *) &dst, NULL);
+	error = if_output_lock(ifp, ifp, m, (struct sockaddr *) &dst, NULL);
 
 	if (mc != NULL) {
 		if (error == 0)
@@ -1469,7 +1467,7 @@ _bpf_mtap2(struct bpf_if *bp, void *data, u_int dlen, struct mbuf *m)
 	struct mbuf mb;
 
 	/* Skip outgoing duplicate packets. */
-	if ((m->m_flags & M_PROMISC) != 0 && m->m_pkthdr.rcvif == NULL) {
+	if ((m->m_flags & M_PROMISC) != 0 && m->m_pkthdr.rcvif_index == 0) {
 		m->m_flags &= ~M_PROMISC;
 		return;
 	}
@@ -1486,7 +1484,7 @@ _bpf_mtap2(struct bpf_if *bp, void *data, u_int dlen, struct mbuf *m)
 	mb.m_data = data;
 	mb.m_len = dlen;
 
-	bpf_deliver(bp, bpf_mcpy, &mb, pktlen, 0, m->m_pkthdr.rcvif != NULL);
+	bpf_deliver(bp, bpf_mcpy, &mb, pktlen, 0, m->m_pkthdr.rcvif_index != 0);
 }
 
 /*
@@ -1500,7 +1498,7 @@ _bpf_mtap(struct bpf_if *bp, struct mbuf *m)
 	void *marg;
 
 	/* Skip outgoing duplicate packets. */
-	if ((m->m_flags & M_PROMISC) != 0 && m->m_pkthdr.rcvif == NULL) {
+	if ((m->m_flags & M_PROMISC) != 0 && m->m_pkthdr.rcvif_index == 0) {
 		m->m_flags &= ~M_PROMISC;
 		return;
 	}
@@ -1517,7 +1515,7 @@ _bpf_mtap(struct bpf_if *bp, struct mbuf *m)
 		buflen = 0;
 	}
 
-	bpf_deliver(bp, cpfn, marg, pktlen, buflen, m->m_pkthdr.rcvif != NULL);
+	bpf_deliver(bp, cpfn, marg, pktlen, buflen, m->m_pkthdr.rcvif_index != 0);
 }
 
 /*
@@ -2107,25 +2105,26 @@ struct bpf_ops bpf_ops_kernel = {
 	.bpf_mtap_sl_out =	_bpf_mtap_sl_out,
 };
 
-MODULE(MODULE_CLASS_DRIVER, bpf, NULL);
+MODULE(MODULE_CLASS_DRIVER, bpf, "bpf_filter");
 
 static int
 bpf_modcmd(modcmd_t cmd, void *arg)
 {
+#ifdef _MODULE
 	devmajor_t bmajor, cmajor;
-	int error;
-
-	bmajor = cmajor = NODEVMAJOR;
+#endif
+	int error = 0;
 
 	switch (cmd) {
 	case MODULE_CMD_INIT:
-		bpfilterattach(0);
+		bpf_init();
+#ifdef _MODULE
+		bmajor = cmajor = NODEVMAJOR;
 		error = devsw_attach("bpf", NULL, &bmajor,
 		    &bpf_cdevsw, &cmajor);
-		if (error == EEXIST)
-			error = 0; /* maybe built-in ... improve eventually */
 		if (error)
 			break;
+#endif
 
 		bpf_ops_handover_enter(&bpf_ops_kernel);
 		atomic_swap_ptr(&bpf_ops, &bpf_ops_kernel);

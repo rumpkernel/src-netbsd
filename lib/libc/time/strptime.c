@@ -1,4 +1,4 @@
-/*	$NetBSD: strptime.c,v 1.58 2015/10/31 03:42:00 ginsbach Exp $	*/
+/*	$NetBSD: strptime.c,v 1.60 2016/05/15 20:37:48 christos Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998, 2005, 2008 The NetBSD Foundation, Inc.
@@ -31,7 +31,7 @@
 
 #include <sys/cdefs.h>
 #if defined(LIBC_SCCS) && !defined(lint)
-__RCSID("$NetBSD: strptime.c,v 1.58 2015/10/31 03:42:00 ginsbach Exp $");
+__RCSID("$NetBSD: strptime.c,v 1.60 2016/05/15 20:37:48 christos Exp $");
 #endif
 
 #include "namespace.h"
@@ -128,6 +128,8 @@ fromzone(const unsigned char **bp, struct tm *tm, int mandatory)
 
 	if (mandatory)
 		*bp = rp;
+	if (!isalnum((unsigned char)*buf))
+		return 0;
 	tz = tzalloc(buf);
 	if (tz == NULL)
 		return 0;

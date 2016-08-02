@@ -1,4 +1,4 @@
-/* $NetBSD: cgd.c,v 1.106 2015/11/28 21:06:30 mlelstv Exp $ */
+/* $NetBSD: cgd.c,v 1.109 2016/07/25 12:45:13 pgoyette Exp $ */
 
 /*-
  * Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cgd.c,v 1.106 2015/11/28 21:06:30 mlelstv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cgd.c,v 1.109 2016/07/25 12:45:13 pgoyette Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -106,6 +106,7 @@ static int cgd_destroy(device_t);
 
 static int	cgd_diskstart(device_t, struct buf *);
 static void	cgdiodone(struct buf *);
+static int	cgd_dumpblocks(device_t, void *, daddr_t, int);
 
 static int	cgd_ioctl_set(struct cgd_softc *, void *, struct lwp *);
 static int	cgd_ioctl_clr(struct cgd_softc *, struct lwp *);
@@ -122,7 +123,7 @@ static struct dkdriver cgddkdriver = {
         .d_strategy = cgdstrategy,
         .d_iosize = NULL,
         .d_diskstart = cgd_diskstart,
-        .d_dumpblocks = NULL,
+        .d_dumpblocks = cgd_dumpblocks,
         .d_lastclose = NULL
 };
 
@@ -203,7 +204,8 @@ cgd_attach(device_t parent, device_t self, void *aux)
 	disk_init(&sc->sc_dksc.sc_dkdev, sc->sc_dksc.sc_xname, &cgddkdriver);
 
 	if (!pmf_device_register(self, NULL, NULL))
-		aprint_error_dev(self, "unable to register power management hooks\n");
+		aprint_error_dev(self,
+		    "unable to register power management hooks\n");
 }
 
 
@@ -457,9 +459,9 @@ cgdiodone(struct buf *nbp)
 	DPRINTF_FOLLOW(("cgdiodone(%p)\n", nbp));
 	DPRINTF(CGDB_IO, ("cgdiodone: bp %p bcount %d resid %d\n",
 	    obp, obp->b_bcount, obp->b_resid));
-	DPRINTF(CGDB_IO, (" dev 0x%"PRIx64", nbp %p bn %" PRId64 " addr %p bcnt %d\n",
-	    nbp->b_dev, nbp, nbp->b_blkno, nbp->b_data,
-	    nbp->b_bcount));
+	DPRINTF(CGDB_IO, (" dev 0x%"PRIx64", nbp %p bn %" PRId64
+	    " addr %p bcnt %d\n", nbp->b_dev, nbp, nbp->b_blkno, nbp->b_data,
+		nbp->b_bcount));
 	if (nbp->b_error != 0) {
 		obp->b_error = nbp->b_error;
 		DPRINTF(CGDB_IO, ("%s: error %d\n", dksc->sc_xname,
@@ -491,6 +493,52 @@ cgdiodone(struct buf *nbp)
 
 	dk_done(dksc, obp);
 	dk_start(dksc, NULL);
+}
+
+static int
+cgd_dumpblocks(device_t dev, void *va, daddr_t blkno, int nblk)
+{
+	struct cgd_softc *sc = device_private(dev);
+	struct dk_softc *dksc = &sc->sc_dksc;
+	struct disk_geom *dg = &dksc->sc_dkdev.dk_geom;
+	size_t nbytes, blksize;
+	void *buf;
+	int error;
+
+	/*
+	 * dk_dump gives us units of disklabel sectors.  Everything
+	 * else in cgd uses units of diskgeom sectors.  These had
+	 * better agree; otherwise we need to figure out how to convert
+	 * between them.
+	 */
+	KASSERTMSG((dg->dg_secsize == dksc->sc_dkdev.dk_label->d_secsize),
+	    "diskgeom secsize %"PRIu32" != disklabel secsize %"PRIu32,
+	    dg->dg_secsize, dksc->sc_dkdev.dk_label->d_secsize);
+	blksize = dg->dg_secsize;
+
+	/*
+	 * Compute the number of bytes in this request, which dk_dump
+	 * has `helpfully' converted to a number of blocks for us.
+	 */
+	nbytes = nblk*blksize;
+
+	/* Try to acquire a buffer to store the ciphertext.  */
+	buf = cgd_getdata(dksc, nbytes);
+	if (buf == NULL)
+		/* Out of memory: give up.  */
+		return ENOMEM;
+
+	/* Encrypt the caller's data into the temporary buffer.  */
+	cgd_cipher(sc, buf, va, nbytes, blkno, blksize, CGD_CIPHER_ENCRYPT);
+
+	/* Pass it on to the underlying disk device.  */
+	error = bdev_dump(sc->sc_tdev, blkno, buf, nbytes);
+
+	/* Release the buffer.  */
+	cgd_putdata(dksc, buf);
+
+	/* Return any error from the underlying disk device.  */
+	return error;
 }
 
 /* XXX: we should probably put these into dksubr.c, mostly */
@@ -980,16 +1028,14 @@ MODULE(MODULE_CLASS_DRIVER, cgd, "dk_subr");
 
 #ifdef _MODULE
 CFDRIVER_DECL(cgd, DV_DISK, NULL);
+
+devmajor_t cgd_bmajor = -1, cgd_cmajor = -1;
 #endif
 
 static int
 cgd_modcmd(modcmd_t cmd, void *arg)
 {
 	int error = 0;
-
-#ifdef _MODULE
-	devmajor_t bmajor = -1, cmajor = -1;
-#endif
 
 	switch (cmd) {
 	case MODULE_CMD_INIT:
@@ -1001,16 +1047,24 @@ cgd_modcmd(modcmd_t cmd, void *arg)
 		error = config_cfattach_attach(cgd_cd.cd_name, &cgd_ca);
 	        if (error) {
 			config_cfdriver_detach(&cgd_cd);
-			aprint_error("%s: unable to register cfattach\n",
-			    cgd_cd.cd_name);
+			aprint_error("%s: unable to register cfattach for"
+			    "%s, error %d\n", __func__, cgd_cd.cd_name, error);
 			break;
 		}
+		/*
+		 * Attach the {b,c}devsw's
+		 */
+		error = devsw_attach("cgd", &cgd_bdevsw, &cgd_bmajor,
+		    &cgd_cdevsw, &cgd_cmajor);
 
-		error = devsw_attach("cgd", &cgd_bdevsw, &bmajor,
-		    &cgd_cdevsw, &cmajor);
+		/*
+		 * If devsw_attach fails, remove from autoconf database
+		 */
 		if (error) {
 			config_cfattach_detach(cgd_cd.cd_name, &cgd_ca);
 			config_cfdriver_detach(&cgd_cd);
+			aprint_error("%s: unable to attach %s devsw, "
+			    "error %d", __func__, cgd_cd.cd_name, error);
 			break;
 		}
 #endif
@@ -1018,19 +1072,40 @@ cgd_modcmd(modcmd_t cmd, void *arg)
 
 	case MODULE_CMD_FINI:
 #ifdef _MODULE
-		error = config_cfattach_detach(cgd_cd.cd_name, &cgd_ca);
-		if (error)
-			break;
-		config_cfdriver_detach(&cgd_cd);
+		/*
+		 * Remove {b,c}devsw's
+		 */
 		devsw_detach(&cgd_bdevsw, &cgd_cdevsw);
+
+		/*
+		 * Now remove device from autoconf database
+		 */
+		error = config_cfattach_detach(cgd_cd.cd_name, &cgd_ca);
+		if (error) {
+			error = devsw_attach("cgd", &cgd_bdevsw, &cgd_bmajor,
+			    &cgd_cdevsw, &cgd_cmajor);
+			aprint_error("%s: failed to detach %s cfattach, "
+			    "error %d\n", __func__, cgd_cd.cd_name, error);
+ 			break;
+		}
+		error = config_cfdriver_detach(&cgd_cd);
+		if (error) {
+			config_cfattach_attach(cgd_cd.cd_name, &cgd_ca);
+			devsw_attach("cgd", &cgd_bdevsw, &cgd_bmajor,
+			    &cgd_cdevsw, &cgd_cmajor);
+			aprint_error("%s: failed to detach %s cfdriver, "
+			    "error %d\n", __func__, cgd_cd.cd_name, error);
+			break;
+		}
 #endif
 		break;
 
 	case MODULE_CMD_STAT:
-		return ENOTTY;
-
+		error = ENOTTY;
+		break;
 	default:
-		return ENOTTY;
+		error = ENOTTY;
+		break;
 	}
 
 	return error;

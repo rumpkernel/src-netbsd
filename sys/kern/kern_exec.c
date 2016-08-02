@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_exec.c,v 1.428 2016/05/08 20:00:21 christos Exp $	*/
+/*	$NetBSD: kern_exec.c,v 1.435 2016/07/07 06:55:43 msaitoh Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -59,7 +59,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_exec.c,v 1.428 2016/05/08 20:00:21 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_exec.c,v 1.435 2016/07/07 06:55:43 msaitoh Exp $");
 
 #include "opt_exec.h"
 #include "opt_execfmt.h"
@@ -133,7 +133,7 @@ static int copyinargstrs(struct execve_data * restrict, char * const *,
     execve_fetch_element_t, char **, size_t *, void (*)(const void *, size_t));
 static int exec_sigcode_map(struct proc *, const struct emul *);
 
-#ifdef DEBUG
+#if defined(DEBUG) && !defined(DEBUG_EXEC)
 #define DEBUG_EXEC
 #endif
 #ifdef DEBUG_EXEC
@@ -631,7 +631,7 @@ makepathbuf(struct lwp *l, const char *upath, struct pathbuf **pbp,
 	memmove(bp, path, len);
 	*(--bp) = '/';
 
-	cwdi = l->l_proc->p_cwdi; 
+	cwdi = l->l_proc->p_cwdi;
 	rw_enter(&cwdi->cwdi_lock, RW_READER);
 	error = getcwd_common(cwdi->cwdi_cdir, NULL, &bp, path, MAXPATHLEN / 2,
 	    GETCWD_CHECK_ACCESS, l);
@@ -741,7 +741,7 @@ execve_loadvm(struct lwp *l, const char *path, char * const *args,
 
 	/* see if we can run it. */
 	if ((error = check_exec(l, epp, data->ed_pathbuf)) != 0) {
-		if (error != ENOENT) {
+		if (error != ENOENT && error != EACCES) {
 			DPRINTF(("%s: check exec failed %d\n",
 			    __func__, error));
 		}
@@ -761,12 +761,6 @@ execve_loadvm(struct lwp *l, const char *path, char * const *args,
 	 * Calculate the new stack size.
 	 */
 
-#ifdef PAX_ASLR
-#define	ASLR_GAP(epp)	pax_aslr_stack_gap(epp)
-#else
-#define	ASLR_GAP(epp)	0
-#endif
-
 #ifdef __MACHINE_STACK_GROWS_UP
 /*
  * copyargs() fills argc/argv/envp from the lower address even on
@@ -782,7 +776,7 @@ execve_loadvm(struct lwp *l, const char *path, char * const *args,
 
 	data->ed_argslen = calcargs(data, argenvstrlen);
 
-	const size_t len = calcstack(data, ASLR_GAP(epp) + RTLD_GAP);
+	const size_t len = calcstack(data, pax_aslr_stack_gap(epp) + RTLD_GAP);
 
 	if (len > epp->ep_ssize) {
 		/* in effect, compare to initial limit */
@@ -922,11 +916,12 @@ execve_free_data(struct execve_data *data)
 }
 
 static void
-pathexec(struct exec_package *epp, struct proc *p, const char *pathstring)
+pathexec(struct exec_package *epp, struct lwp *l, const char *pathstring)
 {
 	const char		*commandname;
 	size_t			commandlen;
 	char			*path;
+	struct proc 		*p = l->l_proc;
 
 	/* set command name & other accounting info */
 	commandname = strrchr(epp->ep_resolvedname, '/');
@@ -945,12 +940,31 @@ pathexec(struct exec_package *epp, struct proc *p, const char *pathstring)
 	 * This handles the majority of the cases.
 	 * In the future perhaps we could canonicalize it?
 	 */
+	path = PNBUF_GET();
 	if (pathstring[0] == '/') {
-		path = PNBUF_GET();
 		(void)strlcpy(path, pathstring, MAXPATHLEN);
 		epp->ep_path = path;
-	} else
-		epp->ep_path = NULL;
+	}
+#ifdef notyet
+	/*
+	 * Although this works most of the time [since the entry was just
+	 * entered in the cache] we don't use it because it will fail for
+	 * entries that are not placed in the cache because their name is
+	 * longer than NCHNAMLEN and it is not the cleanest interface,
+	 * because there could be races. When the namei cache is re-written,
+	 * this can be changed to use the appropriate function.
+	 */
+	else if (!(error = vnode_to_path(path, MAXPATHLEN, p->p_textvp, l, p)))
+		epp->ep_path = path;
+#endif
+	else {
+#ifdef notyet
+		printf("Cannot get path for pid %d [%s] (error %d)\n",
+		    (int)p->p_pid, p->p_comm, error);
+#endif
+		PNBUF_PUT(path);
+ 		epp->ep_path = NULL;
+	}
 }
 
 /* XXX elsewhere */
@@ -1137,7 +1151,7 @@ execve_runproc(struct lwp *l, struct execve_data * restrict data,
 	timers_free(p, TIMERS_POSIX);
 
 	/* Set the PaX flags. */
-	p->p_pax = epp->ep_pax_flags;
+	pax_set_flags(epp, p);
 
 	/*
 	 * Do whatever is necessary to prepare the address space
@@ -1164,16 +1178,14 @@ execve_runproc(struct lwp *l, struct execve_data * restrict data,
 	vm->vm_maxsaddr = (void *)epp->ep_maxsaddr;
 	vm->vm_minsaddr = (void *)epp->ep_minsaddr;
 
-#ifdef PAX_ASLR
 	pax_aslr_init_vm(l, vm, epp);
-#endif /* PAX_ASLR */
 
 	/* Now map address space. */
 	error = execve_dovmcmds(l, data);
 	if (error != 0)
 		goto exec_abort;
 
-	pathexec(epp, p, data->ed_pathstring);
+	pathexec(epp, l, data->ed_pathstring);
 
 	char * const newstack = STACK_GROW(vm->vm_minsaddr, epp->ep_ssize);
 

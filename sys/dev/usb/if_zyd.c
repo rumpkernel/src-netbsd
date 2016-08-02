@@ -1,5 +1,5 @@
 /*	$OpenBSD: if_zyd.c,v 1.52 2007/02/11 00:08:04 jsg Exp $	*/
-/*	$NetBSD: if_zyd.c,v 1.38 2016/04/23 10:15:32 skrll Exp $	*/
+/*	$NetBSD: if_zyd.c,v 1.42 2016/07/07 06:55:42 msaitoh Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_zyd.c,v 1.38 2016/04/23 10:15:32 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_zyd.c,v 1.42 2016/07/07 06:55:42 msaitoh Exp $");
 
 #include <sys/param.h>
 #include <sys/sockio.h>
@@ -485,8 +485,7 @@ zyd_detach(device_t self, int flags)
 
 	splx(s);
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-	    sc->sc_dev);
+	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev, sc->sc_dev);
 
 	return 0;
 }
@@ -1948,7 +1947,7 @@ zyd_rx_data(struct zyd_softc *sc, const uint8_t *buf, uint16_t len)
 			return;
 		}
 	}
-	m->m_pkthdr.rcvif = ifp;
+	m_set_rcvif(m, ifp);
 	m->m_pkthdr.len = m->m_len = rlen;
 	memcpy(mtod(m, uint8_t *), (const uint8_t *)(plcp + 1), rlen);
 
@@ -2326,8 +2325,8 @@ zyd_start(struct ifnet *ifp)
 			}
 			IF_DEQUEUE(&ic->ic_mgtq, m0);
 
-			ni = (struct ieee80211_node *)m0->m_pkthdr.rcvif;
-			m0->m_pkthdr.rcvif = NULL;
+			ni = M_GETCTX(m0, struct ieee80211_node *);
+			M_CLEARCTX(m0);
 			bpf_mtap3(ic->ic_rawbpf, m0);
 			if (zyd_tx_mgt(sc, m0, ni) != 0)
 				break;
