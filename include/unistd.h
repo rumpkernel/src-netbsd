@@ -1,4 +1,4 @@
-/*	$NetBSD: unistd.h,v 1.145 2015/03/24 07:44:52 wiz Exp $	*/
+/*	$NetBSD: unistd.h,v 1.147 2016/06/30 15:29:20 dholland Exp $	*/
 
 /*-
  * Copyright (c) 1998, 1999, 2008 The NetBSD Foundation, Inc.
@@ -173,7 +173,6 @@ ssize_t	 readlink(const char * __restrict, char * __restrict, size_t);
  */
 #if (_POSIX_C_SOURCE - 0) >= 200112L || (_XOPEN_SOURCE - 0) >= 600 || \
     defined(_NETBSD_SOURCE)
-int	 posix_fallocate(int, off_t, off_t);
 int	 setegid(gid_t);
 int	 seteuid(uid_t);
 #endif
@@ -361,7 +360,7 @@ int      issetugid(void);
 int	 mkstemps(char *, int);
 int	 nfssvc(int, void *);
 int	 pipe2(int *, int);
-int	 profil(char *, size_t, u_long, u_int);
+int	 profil(char *, size_t, unsigned long, unsigned int);
 #ifndef __PSIGNAL_DECLARED
 #define __PSIGNAL_DECLARED
 /* also in signal.h */

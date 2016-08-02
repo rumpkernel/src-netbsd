@@ -1,9 +1,9 @@
-/*	$NetBSD: uipc_syscalls_40.c,v 1.8 2014/11/26 09:53:53 ozaki-r Exp $	*/
+/*	$NetBSD: uipc_syscalls_40.c,v 1.11 2016/07/07 09:32:02 ozaki-r Exp $	*/
 
 /* written by Pavel Cahyna, 2006. Public domain. */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uipc_syscalls_40.c,v 1.8 2014/11/26 09:53:53 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uipc_syscalls_40.c,v 1.11 2016/07/07 09:32:02 ozaki-r Exp $");
 
 /*
  * System call interface to the socket abstraction.
@@ -39,30 +39,40 @@ compat_ifconf(u_long cmd, void *data)
 	int space = 0, error = 0;
 	const int sz = (int)sizeof(ifr);
 	const bool docopy = ifc->ifc_req != NULL;
+	int s;
+	int bound;
+	struct psref psref;
 
 	if (docopy) {
 		space = ifc->ifc_len;
 		ifrp = ifc->ifc_req;
 	}
 
-	IFNET_FOREACH(ifp) {
+	bound = curlwp_bind();
+	s = pserialize_read_enter();
+	IFNET_READER_FOREACH(ifp) {
+		psref_acquire(&psref, &ifp->if_psref, ifnet_psref_class);
+		pserialize_read_exit(s);
+
 		(void)strncpy(ifr.ifr_name, ifp->if_xname,
 		    sizeof(ifr.ifr_name));
-		if (ifr.ifr_name[sizeof(ifr.ifr_name) - 1] != '\0')
-			return ENAMETOOLONG;
-		if (IFADDR_EMPTY(ifp)) {
+		if (ifr.ifr_name[sizeof(ifr.ifr_name) - 1] != '\0') {
+			error = ENAMETOOLONG;
+			goto release_exit;
+		}
+		if (IFADDR_READER_EMPTY(ifp)) {
 			memset(&ifr.ifr_addr, 0, sizeof(ifr.ifr_addr));
 			if (space >= sz) {
 				error = copyout(&ifr, ifrp, sz);
 				if (error != 0)
-					return (error);
+					goto release_exit;
 				ifrp++;
 			}
 			space -= sizeof(ifr);
 			continue;
 		}
 
-		IFADDR_FOREACH(ifa, ifp) {
+		IFADDR_READER_FOREACH(ifa, ifp) {
 			struct sockaddr *sa = ifa->ifa_addr;
 #ifdef COMPAT_OSOCK
 			if (cmd == OOSIOCGIFCONF) {
@@ -103,14 +113,25 @@ compat_ifconf(u_long cmd, void *data)
 				}
 			}
 			if (error != 0)
-				return (error);
+				goto release_exit;
 			space -= sz;
 		}
+
+		s = pserialize_read_enter();
+		psref_release(&psref, &ifp->if_psref, ifnet_psref_class);
 	}
+	pserialize_read_exit(s);
+	curlwp_bindx(bound);
+
 	if (docopy)
 		ifc->ifc_len -= space;
 	else
 		ifc->ifc_len = -space;
 	return (0);
+
+release_exit:
+	psref_release(&psref, &ifp->if_psref, ifnet_psref_class);
+	curlwp_bindx(bound);
+	return error;
 }
 #endif

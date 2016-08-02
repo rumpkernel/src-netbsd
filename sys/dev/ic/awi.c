@@ -1,4 +1,4 @@
-/*	$NetBSD: awi.c,v 1.88 2012/10/27 17:18:19 chs Exp $	*/
+/*	$NetBSD: awi.c,v 1.90 2016/06/10 13:27:13 ozaki-r Exp $	*/
 
 /*-
  * Copyright (c) 1999,2000,2001 The NetBSD Foundation, Inc.
@@ -78,7 +78,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: awi.c,v 1.88 2012/10/27 17:18:19 chs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: awi.c,v 1.90 2016/06/10 13:27:13 ozaki-r Exp $");
 
 #include "opt_inet.h"
 
@@ -668,7 +668,7 @@ awi_start(struct ifnet *ifp)
 				break;
 			}
 			IF_DEQUEUE(&ic->ic_mgtq, m0);
-			ni = (struct ieee80211_node *)m0->m_pkthdr.rcvif;
+			ni = M_GETCTX(m0, struct ieee80211_node *);
 		} else {
 			if (ic->ic_state != IEEE80211_S_RUN)
 				break;
@@ -1194,7 +1194,7 @@ awi_devget(struct awi_softc *sc, u_int32_t off, u_int16_t len)
 			MGETHDR(m, M_DONTWAIT, MT_DATA);
 			if (m == NULL)
 				return NULL;
-			m->m_pkthdr.rcvif = ifp;
+			m_set_rcvif(m, ifp);
 			m->m_pkthdr.len = len;
 			m->m_len = MHLEN;
 			m->m_flags |= M_HASFCS;

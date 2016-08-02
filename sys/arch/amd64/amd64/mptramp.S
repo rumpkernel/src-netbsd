@@ -1,6 +1,6 @@
-/*	$NetBSD: mptramp.S,v 1.20 2016/05/07 13:08:30 maxv Exp $	*/
+/*	$NetBSD: mptramp.S,v 1.23 2016/07/25 15:29:06 maxv Exp $	*/
 
-/*-
+/*
  * Copyright (c) 2000, 2016 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -71,7 +71,7 @@
  *     1) Get the processors running kernel-code from a special
  *        page-table and stack page, do chip identification.
  *     2) halt the processors waiting for them to be enabled
- *        by a idle-thread 
+ *        by a idle-thread
  */
 
 #include "opt_mpbios.h"		/* for MPDEBUG */
@@ -84,10 +84,10 @@
 #include <machine/i82489reg.h>
 #include <machine/gdt.h>
 
-#define _RELOC(x)       ((x) - KERNBASE)
-#define RELOC(x)        _RELOC(_C_LABEL(x))
+#define _RELOC(x)	((x) - KERNBASE)
+#define RELOC(x)	_RELOC(_C_LABEL(x))
 
-#define _TRMP_LABEL(a)  a = . - _C_LABEL(cpu_spinup_trampoline) + MP_TRAMPOLINE
+#define _TRMP_LABEL(a)	a = . - _C_LABEL(cpu_spinup_trampoline) + MP_TRAMPOLINE
 
 #ifdef MPDEBUG
 /*
@@ -116,7 +116,6 @@
 	.global _C_LABEL(cpu_spinup_trampoline_end)
 	.global _C_LABEL(cpu_hatch)
 	.global _C_LABEL(mp_pdirpa)
-	.global _C_LABEL(local_apic)
 
 	.text
 	.align 4,0x0
@@ -131,10 +130,10 @@ LABEL(cpu_spinup_trampoline)
 #ifdef __clang__
 	lgdt (mptramp_gdt32_desc)	/* load flat descriptor table */
 #else
-	data32 addr32 lgdt (mptramp_gdt32_desc)   /* load flat descriptor table */
+	data32 addr32 lgdt (mptramp_gdt32_desc) /* load flat descriptor table */
 #endif
 	movl	%cr0, %eax	/* get cr0 */
-	orl	$0x1, %eax	/* enable protected mode */
+	orl	$CR0_PE, %eax	/* enable protected mode */
 	movl	%eax, %cr0	/* doit */
 	ljmpl	$0x8, $mp_startup
 
@@ -149,7 +148,7 @@ _TRMP_LABEL(mp_startup)
 	movw	%ax, %gs
 
 	/* bootstrap stack end, with scratch space.. */
-	movl	$(MP_TRAMPOLINE+NBPG-16),%esp
+	movl	$(MP_TRAMPOLINE+PAGE_SIZE-16),%esp
 
 #ifdef MPDEBUG
 	leal	RELOC(cpu_trace),%edi
@@ -170,10 +169,19 @@ _TRMP_LABEL(mp_startup)
 no_PSE:
 	movl	%eax,%cr4
 
+	/*
+	 * Set Long Mode Enable in EFER. Also enable the syscall extensions,
+	 * and NOX if available.
+	 */
 	movl	$MSR_EFER,%ecx
 	rdmsr
 	xorl	%eax,%eax
 	orl	$(EFER_LME|EFER_SCE),%eax
+	movl	RELOC(nox_flag),%ebx
+	cmpl	$0,%ebx
+	je 	no_NOX
+	orl	$(EFER_NXE),%eax
+no_NOX:
 	wrmsr
 
 	/* Load %cr3. */
@@ -199,8 +207,8 @@ mptramp_compat:
 	ljmp	*(%eax)
 
 _TRMP_LABEL(mptramp_jmp64)
-	.long   mptramp_longmode
-	.word   GSEL(GCODE_SEL, SEL_KPL)
+	.long	mptramp_longmode
+	.word	GSEL(GCODE_SEL, SEL_KPL)
 
 #define GDT_LIMIT	0x17	/* 23 = 3 * 8 - 1 */
 _TRMP_LABEL(mptramp_gdt32)
@@ -227,20 +235,9 @@ _TRMP_LABEL(mptramp_longmode)
 
 
 _C_LABEL(cpu_spinup_trampoline_end):	/* end of code copied to MP_TRAMPOLINE */
-	/*
-	 * If EFER_NXE is not enabled, fetching a page with a NX bit set
-	 * will raise a #GP. Avoid that by setting the NXE feature now.
-	 */
-	movl	_C_LABEL(cpu_feature)+2*4,%eax	/* cpu_feature[2] */
-	andl	$CPUID_NOX,%eax
-	jz	1f
-	movl	$MSR_EFER,%ecx
-	rdmsr
-	orl	$EFER_NXE,%eax	/* enable No-Execute feature */
-	wrmsr
 
-1:
 	/* Don't touch lapic until BP has done init sequence. */
+1:
 	movq	_C_LABEL(cpu_starting),%rdi
 	pause
 	testq	%rdi, %rdi

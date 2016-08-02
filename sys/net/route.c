@@ -1,4 +1,4 @@
-/*	$NetBSD: route.c,v 1.167 2016/04/28 00:16:56 ozaki-r Exp $	*/
+/*	$NetBSD: route.c,v 1.172 2016/07/15 09:25:47 martin Exp $	*/
 
 /*-
  * Copyright (c) 1998, 2008 The NetBSD Foundation, Inc.
@@ -96,7 +96,7 @@
 #endif
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: route.c,v 1.167 2016/04/28 00:16:56 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: route.c,v 1.172 2016/07/15 09:25:47 martin Exp $");
 
 #include <sys/param.h>
 #ifdef RTFLUSH_DEBUG
@@ -114,6 +114,7 @@ __KERNEL_RCSID(0, "$NetBSD: route.c,v 1.167 2016/04/28 00:16:56 ozaki-r Exp $");
 #include <sys/ioctl.h>
 #include <sys/pool.h>
 #include <sys/kauth.h>
+#include <sys/workqueue.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -136,6 +137,8 @@ static struct pool	rtentry_pool;
 static struct pool	rttimer_pool;
 
 static struct callout	rt_timer_ch; /* callout for rt_timer_timer() */
+struct workqueue	*rt_timer_wq;
+struct work		rt_timer_wk;
 
 #ifdef RTFLUSH_DEBUG
 static int _rtcache_debug = 0;
@@ -150,6 +153,7 @@ static void rt_maskedcopy(const struct sockaddr *,
     struct sockaddr *, const struct sockaddr *);
 
 static void rtcache_clear(struct route *);
+static void rtcache_clear_rtentry(int, struct rtentry *);
 static void rtcache_invalidate(struct dom_rtlist *);
 
 #ifdef DDB
@@ -794,6 +798,7 @@ rtrequest1(int req, struct rt_addrinfo *info, struct rtentry **ret_nrt)
 			rt->rt_refcnt++;
 			rtfree(rt);
 		}
+		rtcache_clear_rtentry(dst->sa_family, rt);
 		break;
 
 	case RTM_ADD:
@@ -1145,13 +1150,21 @@ static int rt_init_done = 0;
  * that this is run when the first queue is added...
  */
 
+static void rt_timer_work(struct work *, void *);
+
 void
 rt_timer_init(void)
 {
+	int error;
+
 	assert(rt_init_done == 0);
 
 	LIST_INIT(&rttimer_queue_head);
-	callout_init(&rt_timer_ch, 0);
+	callout_init(&rt_timer_ch, CALLOUT_MPSAFE);
+	error = workqueue_create(&rt_timer_wq, "rt_timer",
+	    rt_timer_work, NULL, PRI_SOFTNET, IPL_SOFTNET, WQ_MPSAFE);
+	if (error)
+		panic("%s: workqueue_create failed (%d)\n", __func__, error);
 	callout_reset(&rt_timer_ch, hz, rt_timer_timer, NULL);
 	rt_init_done = 1;
 }
@@ -1285,9 +1298,8 @@ rt_timer_add(struct rtentry *rt,
 	return 0;
 }
 
-/* ARGSUSED */
-void
-rt_timer_timer(void *arg)
+static void
+rt_timer_work(struct work *wk, void *arg)
 {
 	struct rttimer_queue *rtq;
 	struct rttimer *r;
@@ -1311,6 +1323,13 @@ rt_timer_timer(void *arg)
 	splx(s);
 
 	callout_reset(&rt_timer_ch, hz, rt_timer_timer, NULL);
+}
+
+void
+rt_timer_timer(void *arg)
+{
+
+	workqueue_enqueue(rt_timer_wq, &rt_timer_wk, NULL);
 }
 
 static struct rtentry *
@@ -1384,6 +1403,21 @@ rtcache_invalidate(struct dom_rtlist *rtlist)
 		LIST_REMOVE(ro, ro_rtcache_next);
 		LIST_INSERT_HEAD(&invalid_routes, ro, ro_rtcache_next);
 		rtcache_invariants(ro);
+	}
+}
+
+static void
+rtcache_clear_rtentry(int family, struct rtentry *rt)
+{
+	struct domain *dom;
+	struct route *ro, *nro;
+
+	if ((dom = pffinddomain(family)) == NULL)
+		return;
+
+	LIST_FOREACH_SAFE(ro, &dom->dom_rtcache, ro_rtcache_next, nro) {
+		if (ro->_ro_rt == rt)
+			rtcache_clear(ro);
 	}
 }
 
@@ -1484,7 +1518,7 @@ rt_settag(struct rtentry *rt, const struct sockaddr *tag)
 			sockaddr_free(rt->rt_tag);
 		rt->rt_tag = sockaddr_dup(tag, M_ZERO | M_NOWAIT);
 	}
-	return rt->rt_tag; 
+	return rt->rt_tag;
 }
 
 struct sockaddr *

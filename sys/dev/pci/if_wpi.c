@@ -1,4 +1,4 @@
-/*	$NetBSD: if_wpi.c,v 1.71 2015/01/09 15:25:23 bouyer Exp $	*/
+/*	$NetBSD: if_wpi.c,v 1.74 2016/06/10 13:27:14 ozaki-r Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007
@@ -18,7 +18,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_wpi.c,v 1.71 2015/01/09 15:25:23 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_wpi.c,v 1.74 2016/06/10 13:27:14 ozaki-r Exp $");
 
 /*
  * Driver for Intel PRO/Wireless 3945ABG 802.11 network adapters.
@@ -1541,7 +1541,7 @@ wpi_rx_intr(struct wpi_softc *sc, struct wpi_rx_desc *desc,
 	m->m_pkthdr.len = m->m_len = le16toh(head->len);
 
 	/* finalize mbuf */
-	m->m_pkthdr.rcvif = ifp;
+	m_set_rcvif(m, ifp);
 
 	if (sc->sc_drvbpf != NULL) {
 		struct wpi_rx_radiotap_header *tap = &sc->sc_rxtap;
@@ -2058,8 +2058,8 @@ wpi_start(struct ifnet *ifp)
 		IF_DEQUEUE(&ic->ic_mgtq, m0);
 		if (m0 != NULL) {
 
-			ni = (struct ieee80211_node *)m0->m_pkthdr.rcvif;
-			m0->m_pkthdr.rcvif = NULL;
+			ni = M_GETCTX(m0, struct ieee80211_node *);
+			M_CLEARCTX(m0);
 
 			/* management frames go into ring 0 */
 			if (sc->txq[0].queued > sc->txq[0].count - 8) {

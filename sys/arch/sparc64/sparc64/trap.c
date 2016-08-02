@@ -1,4 +1,4 @@
-/*	$NetBSD: trap.c,v 1.182 2016/05/01 19:57:55 palle Exp $ */
+/*	$NetBSD: trap.c,v 1.184 2016/07/07 06:55:38 msaitoh Exp $ */
 
 /*
  * Copyright (c) 1996-2002 Eduardo Horvath.  All rights reserved.
@@ -50,7 +50,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: trap.c,v 1.182 2016/05/01 19:57:55 palle Exp $");
+__KERNEL_RCSID(0, "$NetBSD: trap.c,v 1.184 2016/07/07 06:55:38 msaitoh Exp $");
 
 #include "opt_ddb.h"
 #include "opt_multiprocessor.h"
@@ -104,11 +104,11 @@ __KERNEL_RCSID(0, "$NetBSD: trap.c,v 1.182 2016/05/01 19:57:55 palle Exp $");
 /* trapstats */
 int protfix = 0;
 int udmiss = 0;	/* Number of normal/nucleus data/text miss/protection faults */
-int udhit = 0;	
+int udhit = 0;
 int udprot = 0;
 int utmiss = 0;
 int kdmiss = 0;
-int kdhit = 0;	
+int kdhit = 0;
 int kdprot = 0;
 int ktmiss = 0;
 int iveccnt = 0; /* number if normal/nucleus interrupt/interrupt vector faults */
@@ -438,7 +438,7 @@ print_trapframe(struct trapframe64 *tf)
 
 /*
  * Called from locore.s trap handling, for non-MMU-related traps.
- * (MMU-related traps go through mem_access_fault, below.)
+ * (MMU-related traps go through data_access_fault, below.)
  */
 void
 trap(struct trapframe64 *tf, unsigned int type, vaddr_t pc, long tstate)
@@ -592,7 +592,7 @@ dopanic:
 				char sb[sizeof(PSTATE_BITS) + 64];
 
 				printf("trap type 0x%x: cpu %d, pc=%lx",
-				       type, cpu_number(), pc); 
+				       type, cpu_number(), pc);
 				snprintb(sb, sizeof(sb), PSTATE_BITS, pstate);
 				printf(" npc=%lx pstate=%s\n",
 				       (long)tf->tf_npc, sb);
@@ -1053,7 +1053,7 @@ data_access_fault(struct trapframe64 *tf, unsigned int type, vaddr_t pc,
 		printf("%ld: data_access_fault(%p, %x, %p, %p, %lx, %lx) "
 			"nsaved=%d\n",
 			(long)(curproc?curproc->p_pid:-1), tf, type,
-			(void *)addr, (void *)pc,
+			(void *)pc, (void *)addr, 
 			sfva, sfsr, (int)curpcb->pcb_nsaved);
 #ifdef DDB
 		if ((trapdebug & TDB_NSAVED && curpcb->pcb_nsaved))
@@ -1453,13 +1453,13 @@ text_access_fault(struct trapframe64 *tf, unsigned int type, vaddr_t pc,
 	if (((trapdebug & TDB_NSAVED) && curpcb->pcb_nsaved) || 
 	    (trapdebug & (TDB_TXTFLT | TDB_FOLLOW)))
 		printf("%d text_access_fault(%x, %lx, %p)\n",
-		       curproc?curproc->p_pid:-1, type, pc, tf); 
+		       curproc?curproc->p_pid:-1, type, pc, tf);
 	if (trapdebug & TDB_FRAME) {
 		print_trapframe(tf);
 	}
 	if ((trapdebug & TDB_TL) && gettl()) {
 		printf("%d tl %d text_access_fault(%x, %lx, %p)\n",
-		       curproc?curproc->p_pid:-1, gettl(), type, pc, tf); 
+		       curproc?curproc->p_pid:-1, gettl(), type, pc, tf);
 		Debugger();
 	}
 	if (trapdebug & TDB_STOPCALL) { 
@@ -1569,7 +1569,7 @@ text_access_error(struct trapframe64 *tf, unsigned int type, vaddr_t pc,
 		printf("%ld text_access_error(%lx, %lx, %lx, %p)=%lx @ %lx %s\n",
 		       (long)(curproc?curproc->p_pid:-1), 
 		       (long)type, pc, (long)afva, tf, (long)tf->tf_tstate, 
-		       (long)tf->tf_pc, buf); 
+		       (long)tf->tf_pc, buf);
 	}
 	if (trapdebug & TDB_FRAME) {
 		print_trapframe(tf);
@@ -1579,7 +1579,7 @@ text_access_error(struct trapframe64 *tf, unsigned int type, vaddr_t pc,
 		printf("%d tl %d text_access_error(%lx, %lx, %lx, %p)=%lx @ %lx %s\n",
 		       curproc?curproc->p_pid:-1, gettl(),
 		       (long)type, (long)pc, (long)afva, tf, 
-		       (long)tf->tf_tstate, (long)tf->tf_pc, buf); 
+		       (long)tf->tf_tstate, (long)tf->tf_pc, buf);
 		Debugger();
 	}
 	if (trapdebug & TDB_STOPCALL) { 

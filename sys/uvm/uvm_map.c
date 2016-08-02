@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_map.c,v 1.336 2015/11/05 00:10:48 pgoyette Exp $	*/
+/*	$NetBSD: uvm_map.c,v 1.340 2016/07/07 06:55:44 msaitoh Exp $	*/
 
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -66,7 +66,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_map.c,v 1.336 2015/11/05 00:10:48 pgoyette Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_map.c,v 1.340 2016/07/07 06:55:44 msaitoh Exp $");
 
 #include "opt_ddb.h"
 #include "opt_uvmhist.h"
@@ -509,7 +509,7 @@ _uvm_map_sanity(struct vm_map *map)
 	const struct vm_map_entry *e;
 	struct vm_map_entry *hint = map->hint;
 
-	e = &map->header; 
+	e = &map->header;
 	for (;;) {
 		if (map->first_free == e) {
 			first_free_found = true;
@@ -2110,8 +2110,10 @@ nextgap:
 	SAVE_HINT(map, map->hint, entry);
 	*result = hint;
 	UVMHIST_LOG(maphist,"<- got it!  (result=%#lx)", hint, 0,0,0);
-	KASSERT( topdown || hint >= orig_hint);
-	KASSERT(!topdown || hint <= orig_hint);
+	KASSERTMSG( topdown || hint >= orig_hint, "hint: %jx, orig_hint: %jx",
+	    (uintmax_t)hint, (uintmax_t)orig_hint);
+	KASSERTMSG(!topdown || hint <= orig_hint, "hint: %jx, orig_hint: %jx",
+	    (uintmax_t)hint, (uintmax_t)orig_hint);
 	KASSERT(entry->end <= hint);
 	KASSERT(hint + length <= entry->next->start);
 	return (entry);
@@ -2546,6 +2548,7 @@ uvm_map_replace(struct vm_map *map, vaddr_t start, vaddr_t end,
  *      UVM_EXTRACT_CONTIG: abort if unmapped area (advisory only)
  *      UVM_EXTRACT_QREF: for a temporary extraction do quick obj refs
  *      UVM_EXTRACT_FIXPROT: set prot to maxprot as we go
+ *      UVM_EXTRACT_PROT_ALL: set prot to UVM_PROT_ALL as we go
  *    >>>NOTE: if you set REMOVE, you are not allowed to use CONTIG or QREF!<<<
  *    >>>NOTE: QREF's must be unmapped via the QREF path, thus should only
  *             be used from within the kernel in a kernel level map <<<
@@ -2704,9 +2707,14 @@ uvm_map_extract(struct vm_map *srcmap, vaddr_t start, vsize_t len,
 			newentry->offset = 0;
 		}
 		newentry->etype = entry->etype;
-		newentry->protection = (flags & UVM_EXTRACT_FIXPROT) ?
-			entry->max_protection : entry->protection;
-		newentry->max_protection = entry->max_protection;
+		if (flags & UVM_EXTRACT_PROT_ALL) {
+			newentry->protection = newentry->max_protection =
+			    UVM_PROT_ALL;
+		} else {
+			newentry->protection = (flags & UVM_EXTRACT_FIXPROT) ?
+			    entry->max_protection : entry->protection;
+			newentry->max_protection = entry->max_protection;
+		}
 		newentry->inheritance = entry->inheritance;
 		newentry->wired_count = 0;
 		newentry->aref.ar_amap = entry->aref.ar_amap;
@@ -4871,14 +4879,18 @@ fill_vmentries(struct lwp *l, pid_t pid, u_int elem_size, void *oldp,
 {
 	int error;
 	struct proc *p;
-	struct kinfo_vmentry vme;
+	struct kinfo_vmentry *vme;
 	struct vmspace *vm;
 	struct vm_map *map;
 	struct vm_map_entry *entry;
 	char *dp;
-	size_t count;
+	size_t count, vmesize;
 
+	vme = NULL;
+	vmesize = *oldlenp;
 	count = 0;
+	if (oldp && *oldlenp > 1024 * 1024)
+		return E2BIG;
 
 	if ((error = proc_find_locked(l, &p, pid)) != 0)
 		return error;
@@ -4890,31 +4902,44 @@ fill_vmentries(struct lwp *l, pid_t pid, u_int elem_size, void *oldp,
 	vm_map_lock_read(map);
 
 	dp = oldp;
+	if (oldp)
+		vme = kmem_alloc(vmesize, KM_SLEEP);
 	for (entry = map->header.next; entry != &map->header;
 	    entry = entry->next) {
 		if (oldp && (dp - (char *)oldp) < *oldlenp + elem_size) {
-			error = fill_vmentry(l, p, &vme, map, entry);
+			error = fill_vmentry(l, p, &vme[count], map, entry);
 			if (error)
-				break;
-			error = sysctl_copyout(l, &vme, dp,
-			    min(elem_size, sizeof(vme)));
-			if (error)
-				break;
+				goto out;
 			dp += elem_size;
 		}
 		count++;
 	}
 	vm_map_unlock_read(map);
 	uvmspace_free(vm);
+
 out:
 	if (pid != -1)
 		mutex_exit(p->p_lock);
 	if (error == 0) {
+		const u_int esize = min(sizeof(*vme), elem_size);
+		dp = oldp;
+		for (size_t i = 0; i < count; i++) {
+			if (oldp && (dp - (char *)oldp) < *oldlenp + elem_size)
+			{
+				error = sysctl_copyout(l, &vme[i], dp, esize);
+				if (error)
+					break;
+				dp += elem_size;
+			} else
+				break;
+		}
 		count *= elem_size;
 		if (oldp != NULL && *oldlenp < count)
 			error = ENOSPC;
 		*oldlenp = count;
 	}
+	if (vme)
+		kmem_free(vme, vmesize);
 	return error;
 }
 

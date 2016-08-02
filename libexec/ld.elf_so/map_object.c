@@ -1,4 +1,4 @@
-/*	$NetBSD: map_object.c,v 1.53 2014/10/30 07:53:41 martin Exp $	 */
+/*	$NetBSD: map_object.c,v 1.55 2016/06/16 11:34:13 christos Exp $	 */
 
 /*
  * Copyright 1996 John D. Polstra.
@@ -34,7 +34,7 @@
 
 #include <sys/cdefs.h>
 #ifndef lint
-__RCSID("$NetBSD: map_object.c,v 1.53 2014/10/30 07:53:41 martin Exp $");
+__RCSID("$NetBSD: map_object.c,v 1.55 2016/06/16 11:34:13 christos Exp $");
 #endif /* not lint */
 
 #include <errno.h>
@@ -102,6 +102,10 @@ _rtld_map_object(const char *path, int fd, const struct stat *sb)
 	Elf_Addr	 clear_vaddr;
 	caddr_t		 clear_addr;
 	size_t		 nclear;
+#endif
+#ifdef GNU_RELRO
+	Elf_Addr 	 relro_page;
+	size_t		 relro_size;
 #endif
 
 	if (sb != NULL && sb->st_size < (off_t)sizeof (Elf_Ehdr)) {
@@ -173,6 +177,10 @@ _rtld_map_object(const char *path, int fd, const struct stat *sb)
 #endif
 	phsize = ehdr->e_phnum * sizeof(phdr[0]);
 	obj->phdr = NULL;
+#ifdef GNU_RELRO
+	relro_page = 0;
+	relro_size = 0;
+#endif
 	phdr_vaddr = EA_UNDEF;
 	phdr_memsz = 0;
 	phlimit = phdr + ehdr->e_phnum;
@@ -199,6 +207,13 @@ _rtld_map_object(const char *path, int fd, const struct stat *sb)
 			dbg(("%s: %s %p phsize %" PRImemsz, obj->path, "PT_PHDR",
 			    (void *)(uintptr_t)phdr->p_vaddr, phdr->p_memsz));
 			break;
+
+#ifdef GNU_RELRO
+		case PT_GNU_RELRO:
+			relro_page = phdr->p_vaddr;
+			relro_size = phdr->p_memsz;
+			break;
+#endif
 
 		case PT_DYNAMIC:
 			obj->dynamic = (void *)(uintptr_t)phdr->p_vaddr;
@@ -387,6 +402,11 @@ _rtld_map_object(const char *path, int fd, const struct stat *sb)
 	obj->mapbase = mapbase;
 	obj->mapsize = mapsize;
 	obj->relocbase = mapbase - base_vaddr;
+
+#ifdef GNU_RELRO
+	obj->relro_page = obj->relocbase + round_down(relro_page);
+	obj->relro_size = round_up(relro_size);
+#endif
 
 	if (obj->dynamic)
 		obj->dynamic = (void *)(obj->relocbase + (Elf_Addr)(uintptr_t)obj->dynamic);

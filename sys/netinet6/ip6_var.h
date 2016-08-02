@@ -1,4 +1,4 @@
-/*	$NetBSD: ip6_var.h,v 1.64 2015/01/20 21:27:36 roy Exp $	*/
+/*	$NetBSD: ip6_var.h,v 1.67 2016/06/21 10:25:27 ozaki-r Exp $	*/
 /*	$KAME: ip6_var.h,v 1.33 2000/06/11 14:59:20 jinmei Exp $	*/
 
 /*
@@ -109,7 +109,7 @@ struct	ip6asfrag {
 #define IP6_REASS_MBUF(ip6af) ((ip6af)->ip6af_m)
 
 struct	ip6_moptions {
-	struct	ifnet *im6o_multicast_ifp; /* ifp for outgoing multicasts */
+	if_index_t im6o_multicast_if_index; /* I/F for outgoing multicasts */
 	u_char	im6o_multicast_hlim;	/* hoplimit for outgoing multicasts */
 	u_char	im6o_multicast_loop;	/* 1 >= hear sends if a member */
 	LIST_HEAD(, in6_multi_mship) im6o_memberships;
@@ -323,7 +323,7 @@ int	icmp6_ctloutput(int, struct socket *, struct sockopt *);
 
 struct mbuf;
 void	ip6_init(void);
-void	ip6_input(struct mbuf *);
+void	ip6_input(struct mbuf *, struct ifnet *);
 const struct ip6aux *ip6_getdstifaddr(struct mbuf *);
 void	ip6_freepcbopts(struct ip6_pktopts *);
 void	ip6_freemoptions(struct ip6_moptions *);
@@ -397,10 +397,10 @@ struct route;
 
 struct 	in6_addr *in6_selectsrc(struct sockaddr_in6 *,
 	struct ip6_pktopts *, struct ip6_moptions *, struct route *,
-	struct in6_addr *, struct ifnet **, int *);
+	struct in6_addr *, struct ifnet **, struct psref *, int *);
 int in6_selectroute(struct sockaddr_in6 *, struct ip6_pktopts *,
 	struct ip6_moptions *, struct route *, struct ifnet **,
-	struct rtentry **, int);
+	struct psref *, struct rtentry **, int);
 int	ip6_get_membership(const struct sockopt *, struct ifnet **, void *,
 	size_t);
 

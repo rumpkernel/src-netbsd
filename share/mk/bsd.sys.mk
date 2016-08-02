@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.sys.mk,v 1.258 2016/04/12 18:50:45 christos Exp $
+#	$NetBSD: bsd.sys.mk,v 1.260 2016/07/07 20:52:53 matt Exp $
 #
 # Build definitions used for NetBSD source tree builds.
 
@@ -56,6 +56,14 @@ CFLAGS+=	${${ACTIVE_CC} == "gcc" :? -Wno-traditional :}
 # Set assembler warnings to be fatal
 CFLAGS+=	-Wa,--fatal-warnings
 .endif
+
+.if ${MKRELRO:Uno} != "no"
+LDFLAGS+=	-Wl,-z,relro
+.endif
+.if ${MKRELRO:Uno} == "full"
+LDFLAGS+=	-Wl,-z,now
+.endif
+
 # Set linker warnings to be fatal
 # XXX no proper way to avoid "FOO is a patented algorithm" warnings
 # XXX on linking static libs
@@ -150,6 +158,11 @@ FOPTS+=		-msoft-float
 COPTS+=		-mhard-float
 FOPTS+=		-mhard-float
 .endif
+
+#.if !empty(MACHINE_ARCH:Mearmv7*)
+#COPTS+=		-mthumb
+#FOPTS+=		-mthumb
+#.endif
 
 .if ${MKIEEEFP:Uno} != "no"
 .if ${MACHINE_ARCH} == "alpha"
@@ -281,7 +294,7 @@ YFLAGS+=	${YPREFIX:D-p${YPREFIX}} ${YHEADER:D-d}
 .if ${MACHINE_ARCH} == aarch64eb
 # AARCH64 big endian needs to preserve $x/$d symbols for the linker.
 OBJCOPYLIBFLAGS_EXTRA=-w -K '[$$][dx]' -K '[$$][dx]\.*'
-.elif !empty(MACHINE_ARCH:M*arm*eb)
+.elif ${MACHINE_CPU} == "arm"
 # ARM big endian needs to preserve $a/$d/$t symbols for the linker.
 OBJCOPYLIBFLAGS_EXTRA=-w -K '[$$][adt]' -K '[$$][adt]\.*'
 .endif

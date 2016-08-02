@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.119 2016/05/10 19:24:00 palle Exp $ */
+/*	$NetBSD: cpu.h,v 1.122 2016/06/25 13:52:04 palle Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -68,6 +68,7 @@
 #include <machine/pte.h>
 #include <machine/intr.h>
 #if defined(_KERNEL)
+#include <machine/bus_defs.h>
 #include <machine/cpuset.h>
 #include <sparc64/sparc64/intreg.h>
 #endif
@@ -341,6 +342,7 @@ struct clockframe {
  */
 void cpu_signotify(struct lwp *);
 
+
 /*
  * Interrupt handler chains.  Interrupt handlers should return 0 for
  * ``not me'' or 1 (``I took care of it'').  intr_establish() inserts a
@@ -362,6 +364,7 @@ struct intrhand {
 	volatile uint64_t	*ih_map;	/* Interrupt map reg */
 	volatile uint64_t	*ih_clr;	/* clear interrupt reg */
 	void			(*ih_ack)(struct intrhand *); /* ack interrupt function */
+	bus_space_tag_t		ih_bus;		/* parent bus */
 	struct evcnt		ih_cnt;		/* counter for vmstat */
 	uint32_t		ih_ivec;
 	char			ih_name[32];	/* name for the above */

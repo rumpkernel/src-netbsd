@@ -1,4 +1,4 @@
-/*	$NetBSD: intr.c,v 1.91 2015/11/17 10:34:04 hannken Exp $	*/
+/*	$NetBSD: intr.c,v 1.94 2016/07/11 23:09:34 knakahara Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008, 2009 The NetBSD Foundation, Inc.
@@ -133,7 +133,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.91 2015/11/17 10:34:04 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: intr.c,v 1.94 2016/07/11 23:09:34 knakahara Exp $");
 
 #include "opt_intrdebug.h"
 #include "opt_multiprocessor.h"
@@ -609,6 +609,11 @@ intr_free_io_intrsource(const char *intrid)
 		return;
 
 	if ((isp = intr_get_io_intrsource(intrid)) == NULL) {
+		return;
+	}
+
+	/* If the interrupt uses shared IRQ, don't free yet. */
+	if (isp->is_handlers != NULL) {
 		return;
 	}
 
@@ -2098,7 +2103,7 @@ interrupt_get_devname(const char *intrid, char *buf, size_t len)
 	}
 	slot = ih->ih_slot;
 	isp = ih->ih_cpu->ci_isources[slot];
-	strncpy(buf, isp->is_xname, INTRDEVNAMEBUF);
+	strlcpy(buf, isp->is_xname, len);
 
  out:
 	mutex_exit(&cpu_lock);

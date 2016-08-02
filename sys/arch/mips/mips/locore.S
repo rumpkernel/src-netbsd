@@ -1,4 +1,4 @@
-/*	$NetBSD: locore.S,v 1.197 2015/06/11 07:30:10 matt Exp $	*/
+/*	$NetBSD: locore.S,v 1.204 2016/07/27 09:32:35 skrll Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -62,12 +62,20 @@
 #include <mips/cpuregs.h>
 #include <mips/trap.h>
 
+RCSID("$NetBSD: locore.S,v 1.204 2016/07/27 09:32:35 skrll Exp $")
+
 #include "assym.h"
 
 #if defined(MIPS1) || defined(MIPS2)
 #define	NOP_L		nop
 #else
 #define	NOP_L		/* nothing */
+#endif
+
+#if defined(MIPS1) || defined(MIPS2) || defined(MIPS3)
+#define MFC0_HAZARD	nop
+#else
+#define MFC0_HAZARD	/* nothing */
 #endif
 
 	.set	noreorder
@@ -79,6 +87,7 @@ _C_LABEL(kernel_text):
 #if (defined(MIPS3_PLUS) && !defined(MIPS1)) || defined(emips)
 	/* keep firmware exception handler until we hook. */
 	mfc0	v0, MIPS_COP_0_STATUS
+	MFC0_HAZARD
 #if defined(emips)
 	and	v0, MIPS_SR_TS | MIPS3_SR_RE
 #else
@@ -90,6 +99,8 @@ _C_LABEL(kernel_text):
 	mtc0	zero, MIPS_COP_0_STATUS		# Disable interrupts
 	COP0_SYNC
 #endif
+	mtc0	zero, MIPS_COP_0_CAUSE
+	COP0_SYNC
 #ifdef MIPS64_OCTEON
 	//
 	// U-boot on the erlite starts all cpus at the kernel entry point.
@@ -132,7 +143,9 @@ _C_LABEL(kernel_text):
 
 #ifdef NOFPU /* No FPU; avoid touching FPU registers */
 #if !defined(emips)   /*  XXX??? we have already disabled interrupts! */
-#ifdef _LP64
+#ifdef __mips_n32
+	li	t0, MIPS_SR_KX			# turn on XKSEG and XKPHYS
+#elif defined(_LP64)
 	li	t0, MIPS_SR_KX | MIPS_SR_UX	# turn on XKSEG and XKPHYS
 #else
 	li	t0, 0				# Disable interrupts and
@@ -150,7 +163,8 @@ _C_LABEL(kernel_text):
 #endif /* HPCMIPS_L1CACHE_DISABLE */
 #else
 	mfc0	t0, MIPS_COP_0_STATUS
-#ifdef _LP64
+	MFC0_HAZARD
+#if defined(_LP64) || defined(__mips_n32)
 	or	t0, MIPS_SR_KX			# turn on XKSEG and XKPHYS
 #endif
 	or	t0, MIPS_SR_COP_1_BIT		# Disable interrupts, and
@@ -187,6 +201,7 @@ _C_LABEL(kernel_text):
 	ei
 #else
 	mfc0	v0, MIPS_COP_0_STATUS
+	MFC0_HAZARD
 	or	v0, MIPS_SR_INT_IE
 	mtc0	v0, MIPS_COP_0_STATUS
 #endif
@@ -226,6 +241,7 @@ NESTED(cpu_switchto, CALLFRAME_SIZ, ra)
 #endif
 
 	mfc0	t0, MIPS_COP_0_STATUS
+	MFC0_HAZARD
 	and	t0, MIPS_SR_INT_IE
 #if __mips >= 32
 	teqi	t0, 0
@@ -350,6 +366,7 @@ END(cpu_switchto)
 softint_cleanup:
 #ifdef PARANOIA
 	mfc0	t1, MIPS_COP_0_STATUS
+	MFC0_HAZARD
 	and	v0, t1, MIPS_SR_INT_IE
 #if __mips >= 32
 	teqi	v0, 0
@@ -393,9 +410,11 @@ NESTED(softint_fast_dispatch, CALLFRAME_SIZ, ra)
  	 */
 	mfc0	t1, MIPS_COP_0_STATUS
 #if defined(PARANOIA) && __mips >= 32
+	MFC0_HAZARD
 	and	v0, t1, MIPS_SR_INT_IE		# assert interrupts are on
 	teqi	v0, 0
 #elif defined(PARANOID_LOOP)
+	MFC0_HAZARD
 	and	v0, t1, MIPS_SR_INT_IE		# assert interrupts are on
 1:	beqz	v0, 1b
 	 nop
@@ -486,8 +505,9 @@ END(lwp_oncpu)
  * void savectx(struct pcb *)
  */
 LEAF(savectx)
-#ifdef PARANOIA
 	mfc0	v0, MIPS_COP_0_STATUS
+#ifdef PARANOIA
+	MFC0_HAZARD
 	and	t0, v0, MIPS_SR_INT_IE
 #if __mips >= 32
 	teqi	t0, 0
@@ -866,6 +886,14 @@ XNESTED(logstacktrace)
 END(stacktrace)
 #endif	/* DEBUG || DDB */
 #endif	/* DDB_TRACE */
+
+	.section .stub, "ax"
+NESTED_NOPROFILE(tlb_update_addr, 0, ra)
+	lui	v0,%hi(_C_LABEL(mips_locore_jumpvec)+LJV_TLB_UPDATE_ADDR)
+	PTR_L	t9,%lo(_C_LABEL(mips_locore_jumpvec)+LJV_TLB_UPDATE_ADDR)(v0)
+	jr	t9
+	 nop
+END(tlb_update_addr)
 
 	.sdata
 	.globl	_C_LABEL(esym)
