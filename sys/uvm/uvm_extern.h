@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_extern.h,v 1.196 2016/02/05 04:18:55 christos Exp $	*/
+/*	$NetBSD: uvm_extern.h,v 1.198 2016/07/20 12:38:43 maxv Exp $	*/
 
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -622,11 +622,13 @@ void			uvm_cpu_attach(struct cpu_info *);
 void			uvm_init(void);
 
 /* uvm_io.c */
-int			uvm_io(struct vm_map *, struct uio *);
+int			uvm_io(struct vm_map *, struct uio *, int);
 
 /* uvm_km.c */
 vaddr_t			uvm_km_alloc(struct vm_map *, vsize_t, vsize_t,
 			    uvm_flag_t);
+int			uvm_km_protect(struct vm_map *, vaddr_t, vsize_t,
+			    vm_prot_t);
 void			uvm_km_free(struct vm_map *, vaddr_t, vsize_t,
 			    uvm_flag_t);
 

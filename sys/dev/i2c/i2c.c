@@ -1,4 +1,4 @@
-/*	$NetBSD: i2c.c,v 1.51 2015/12/13 17:14:56 jmcneill Exp $	*/
+/*	$NetBSD: i2c.c,v 1.54 2016/07/23 18:00:01 jakllsch Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -40,7 +40,7 @@
 #endif
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: i2c.c,v 1.51 2015/12/13 17:14:56 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: i2c.c,v 1.54 2016/07/23 18:00:01 jakllsch Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -236,7 +236,7 @@ iic_attach(device_t parent, device_t self, void *aux)
 		uint64_t cookie;
 		const char *name;
 		struct i2c_attach_args ia;
-		int loc[2];
+		int loc[IICCF_NLOCS];
 
 		memset(loc, 0, sizeof loc);
 		count = prop_array_count(child_devices);
@@ -250,11 +250,11 @@ iic_attach(device_t parent, device_t self, void *aux)
 				continue;
 			if (!prop_dictionary_get_uint64(dev, "cookie", &cookie))
 				cookie = 0;
-			loc[0] = addr;
+			loc[IICCF_ADDR] = addr;
 			if (prop_dictionary_get_uint32(dev, "size", &size))
-				loc[1] = size;
+				loc[IICCF_SIZE] = size;
 			else
-				loc[1] = -1;
+				size = loc[IICCF_SIZE] = IICCF_SIZE_DEFAULT;
 
 			memset(&ia, 0, sizeof ia);
 			ia.ia_addr = addr;
@@ -598,7 +598,7 @@ iic_ioctl(dev_t dev, u_long cmd, void *data, int flag, lwp_t *l)
 CFATTACH_DECL2_NEW(iic, sizeof(struct iic_softc),
     iic_match, iic_attach, iic_detach, NULL, iic_rescan, iic_child_detach);
 
-MODULE(MODULE_CLASS_DRIVER, iic, "i2cexec");
+MODULE(MODULE_CLASS_DRIVER, iic, "i2cexec,i2c_bitbang");
 
 #ifdef _MODULE
 #include "ioconf.c"

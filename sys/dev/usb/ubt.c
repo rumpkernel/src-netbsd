@@ -1,4 +1,4 @@
-/*	$NetBSD: ubt.c,v 1.54 2016/04/23 10:15:32 skrll Exp $	*/
+/*	$NetBSD: ubt.c,v 1.56 2016/07/14 04:19:27 msaitoh Exp $	*/
 
 /*-
  * Copyright (c) 2006 Itronix Inc.
@@ -67,7 +67,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ubt.c,v 1.54 2016/04/23 10:15:32 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ubt.c,v 1.56 2016/07/14 04:19:27 msaitoh Exp $");
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -285,12 +285,13 @@ static const struct hci_if ubt_hci = {
  *
  */
 
-int             ubt_match(device_t, cfdata_t, void *);
-void            ubt_attach(device_t, device_t, void *);
-int             ubt_detach(device_t, int);
-int             ubt_activate(device_t, enum devact);
+int	ubt_match(device_t, cfdata_t, void *);
+void	ubt_attach(device_t, device_t, void *);
+int	ubt_detach(device_t, int);
+int	ubt_activate(device_t, enum devact);
 extern struct cfdriver ubt_cd;
-CFATTACH_DECL_NEW(ubt, sizeof(struct ubt_softc), ubt_match, ubt_attach, ubt_detach, ubt_activate);
+CFATTACH_DECL_NEW(ubt, sizeof(struct ubt_softc), ubt_match, ubt_attach,
+    ubt_detach, ubt_activate);
 
 static int ubt_set_isoc_config(struct ubt_softc *);
 static int ubt_sysctl_config(SYSCTLFN_PROTO);
@@ -440,19 +441,19 @@ ubt_match(device_t parent, cfdata_t match, void *aux)
 	DPRINTFN(50, "ubt_match\n");
 
 	for (i = 0; i < __arraycount(ubt_dev); i++) {
-		if (ubt_dev[i].vendor != -1 
+		if (ubt_dev[i].vendor != -1
 		    && ubt_dev[i].vendor != (int)uaa->uaa_vendor)
 			continue;
-		if (ubt_dev[i].product != -1 
+		if (ubt_dev[i].product != -1
 		    && ubt_dev[i].product != (int)uaa->uaa_product)
 			continue;
-		if (ubt_dev[i].class != -1 
+		if (ubt_dev[i].class != -1
 		    && ubt_dev[i].class != uaa->uaa_class)
 			continue;
-		if (ubt_dev[i].subclass != -1 
+		if (ubt_dev[i].subclass != -1
 		    && ubt_dev[i].subclass != uaa->uaa_subclass)
 			continue;
-		if (ubt_dev[i].proto != -1 
+		if (ubt_dev[i].proto != -1
 		    && ubt_dev[i].proto != uaa->uaa_proto)
 			continue;
 
@@ -495,7 +496,8 @@ ubt_attach(device_t parent, device_t self, void *aux)
 	 */
 	err = usbd_set_config_index(sc->sc_udev, 0, 1);
 	if (err) {
-		aprint_error_dev(self, "failed to set configuration idx 0: %s\n",
+		aprint_error_dev(self,
+		    "failed to set configuration idx 0: %s\n",
 		    usbd_errstr(err));
 
 		return;
@@ -509,8 +511,9 @@ ubt_attach(device_t parent, device_t self, void *aux)
 	 */
 	err = usbd_device2interface_handle(sc->sc_udev, 0, &sc->sc_iface0);
 	if (err) {
-		aprint_error_dev(self, "Could not get interface 0 handle %s (%d)\n",
-				usbd_errstr(err), err);
+		aprint_error_dev(self,
+		    "Could not get interface 0 handle %s (%d)\n",
+		    usbd_errstr(err), err);
 
 		return;
 	}
@@ -601,8 +604,7 @@ ubt_attach(device_t parent, device_t self, void *aux)
 	/* Attach HCI */
 	sc->sc_unit = hci_attach_pcb(&ubt_hci, sc->sc_dev, 0);
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-			   sc->sc_dev);
+	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev, sc->sc_dev);
 
 	/* sysctl set-up for alternate configs */
 	sysctl_createv(&sc->sc_log, 0, NULL, &node,
@@ -700,8 +702,7 @@ ubt_detach(device_t self, int flags)
 
 	splx(s);
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   sc->sc_dev);
+	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev, sc->sc_dev);
 
 	DPRINTFN(1, "driver detached\n");
 

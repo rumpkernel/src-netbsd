@@ -1,4 +1,4 @@
-/* $NetBSD: hdaudio_pci.c,v 1.2 2015/07/05 08:14:46 nonaka Exp $ */
+/* $NetBSD: hdaudio_pci.c,v 1.4 2016/07/14 04:19:27 msaitoh Exp $ */
 
 /*
  * Copyright (c) 2009 Precedence Technologies Ltd <support@precedence.co.uk>
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hdaudio_pci.c,v 1.2 2015/07/05 08:14:46 nonaka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hdaudio_pci.c,v 1.4 2016/07/14 04:19:27 msaitoh Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -60,17 +60,17 @@ struct hdaudio_pci_softc {
 	pcireg_t		sc_id;
 };
 
-static int		hdaudio_pci_match(device_t, cfdata_t, void *);
-static void		hdaudio_pci_attach(device_t, device_t, void *);
-static int		hdaudio_pci_detach(device_t, int);
-static int		hdaudio_pci_rescan(device_t, const char *, const int *);
-static void		hdaudio_pci_childdet(device_t, device_t);
+static int	hdaudio_pci_match(device_t, cfdata_t, void *);
+static void	hdaudio_pci_attach(device_t, device_t, void *);
+static int	hdaudio_pci_detach(device_t, int);
+static int	hdaudio_pci_rescan(device_t, const char *, const int *);
+static void	hdaudio_pci_childdet(device_t, device_t);
 
-static int		hdaudio_pci_intr(void *);
-static void		hdaudio_pci_reinit(struct hdaudio_pci_softc *);
+static int	hdaudio_pci_intr(void *);
+static void	hdaudio_pci_reinit(struct hdaudio_pci_softc *);
 
 /* power management */
-static bool		hdaudio_pci_resume(device_t, const pmf_qual_t *);
+static bool	hdaudio_pci_resume(device_t, const pmf_qual_t *);
 
 CFATTACH_DECL2_NEW(
     hdaudio_pci,
@@ -170,9 +170,11 @@ hdaudio_pci_attach(device_t parent, device_t self, void *opaque)
 				sc->sc_hdaudio.sc_memh,
 				sc->sc_hdaudio.sc_memsize);
 		sc->sc_hdaudio.sc_memvalid = false;
-		csr = pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_COMMAND_STATUS_REG);
+		csr = pci_conf_read(sc->sc_pc, sc->sc_tag,
+		    PCI_COMMAND_STATUS_REG);
 		csr &= ~(PCI_COMMAND_MASTER_ENABLE | PCI_COMMAND_BACKTOBACK_ENABLE);
-		pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_COMMAND_STATUS_REG, csr);
+		pci_conf_write(sc->sc_pc, sc->sc_tag,
+		    PCI_COMMAND_STATUS_REG, csr);
 		pmf_device_deregister(self);
 	}
 }

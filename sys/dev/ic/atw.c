@@ -1,4 +1,4 @@
-/*	$NetBSD: atw.c,v 1.157 2016/01/26 16:00:12 christos Exp $  */
+/*	$NetBSD: atw.c,v 1.160 2016/06/10 13:27:13 ozaki-r Exp $  */
 
 /*-
  * Copyright (c) 1998, 1999, 2000, 2002, 2003, 2004 The NetBSD Foundation, Inc.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: atw.c,v 1.157 2016/01/26 16:00:12 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: atw.c,v 1.160 2016/06/10 13:27:13 ozaki-r Exp $");
 
 
 #include <sys/param.h>
@@ -3139,7 +3139,7 @@ atw_rxintr(struct atw_softc *sc)
 		}
 
 		ifp->if_ipackets++;
-		m->m_pkthdr.rcvif = ifp;
+		m_set_rcvif(m, ifp);
 		m->m_pkthdr.len = m->m_len = MIN(m->m_ext.ext_size, len);
 
 		rate = (rate0 < __arraycount(rate_tbl)) ? rate_tbl[rate0] : 0;
@@ -3491,8 +3491,8 @@ atw_start(struct ifnet *ifp)
 		 */
 		IF_DEQUEUE(&ic->ic_mgtq, m0);
 		if (m0 != NULL) {
-			ni = (struct ieee80211_node *)m0->m_pkthdr.rcvif;
-			m0->m_pkthdr.rcvif = NULL;
+			ni = M_GETCTX(m0, struct ieee80211_node *);
+			M_CLEARCTX(m0);
 		} else if (ic->ic_state != IEEE80211_S_RUN)
 			break; /* send no data until associated */
 		else {

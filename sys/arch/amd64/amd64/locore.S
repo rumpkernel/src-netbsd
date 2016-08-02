@@ -1,4 +1,4 @@
-/*	$NetBSD: locore.S,v 1.85 2016/05/08 08:22:58 maxv Exp $	*/
+/*	$NetBSD: locore.S,v 1.108 2016/07/25 16:03:38 maxv Exp $	*/
 
 /*
  * Copyright-o-rama!
@@ -9,7 +9,7 @@
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Charles M. Hannum and Maxime Villard.
+ * by Charles M. Hannum and by Maxime Villard.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -187,6 +187,9 @@
 #define	_RELOC(x)	((x) - KERNBASE)
 #define	RELOC(x)	_RELOC(_C_LABEL(x))
 
+/* 32bit version of PG_NX */
+#define PG_NX32	0x80000000
+
 #if L2_SLOT_KERNBASE > 0
 #define TABLE_L2_ENTRIES (2 * (NKL2_KIMG_ENTRIES + 1))
 #else
@@ -217,11 +220,44 @@
  * Each entry is 8 (PDE_SIZE) bytes long: we must set the 4 upper bytes to 0.
  */
 #define fillkpt	\
-1:	movl	%eax,(%ebx)		; 	/* store phys addr */	\
-	movl	$0,(PDE_SIZE-4)(%ebx)	; 	/* upper 32 bits: 0 */	\
-	addl	$PDE_SIZE,%ebx		; 	/* next PTE/PDE */	\
-	addl	$PAGE_SIZE,%eax		; 	/* next phys page */	\
-	loop	1b			;
+	cmpl	$0,%ecx			;	/* zero-sized? */	\
+	je 	2f			; \
+1:	movl	$0,(PDE_SIZE-4)(%ebx)	;	/* upper 32 bits: 0 */	\
+	movl	%eax,(%ebx)		;	/* store phys addr */	\
+	addl	$PDE_SIZE,%ebx		;	/* next PTE/PDE */	\
+	addl	$PAGE_SIZE,%eax		;	/* next phys page */	\
+	loop	1b			; \
+2:					;
+
+/*
+ * fillkpt_nox - Same as fillkpt, but sets the NX/XD bit.
+ */
+#define fillkpt_nox \
+	cmpl	$0,%ecx			;	/* zero-sized? */	\
+	je 	2f			; \
+	pushl	%ebp			; \
+	movl	RELOC(nox_flag),%ebp	; \
+1:	movl	%ebp,(PDE_SIZE-4)(%ebx)	;	/* upper 32 bits: NX */ \
+	movl	%eax,(%ebx)		;	/* store phys addr */	\
+	addl	$PDE_SIZE,%ebx		;	/* next PTE/PDE */	\
+	addl	$PAGE_SIZE,%eax		;	/* next phys page */	\
+	loop	1b			; \
+	popl	%ebp			; \
+2:					;
+
+/*
+ * fillkpt_blank - Fill in a kernel page table with blank entries
+ *	ebx = page table address
+ *	ecx = number of pages to map
+ */
+#define fillkpt_blank	\
+	cmpl	$0,%ecx			;	/* zero-sized? */	\
+	je 	2f			; \
+1:	movl	$0,(PDE_SIZE-4)(%ebx)	;	/* upper 32 bits: 0 */	\
+	movl	$0,(%ebx)		;	/* lower 32 bits: 0 */	\
+	addl	$PDE_SIZE,%ebx		;	/* next PTE/PDE */	\
+	loop	1b			; \
+2:					;
 
 /*
  * killkpt - Destroy a kernel page table (long mode)
@@ -235,21 +271,41 @@
 
 
 #ifdef XEN
+#define __ASSEMBLY__
+#include <xen/xen-public/elfnote.h>
+#include <xen/xen-public/xen.h>
+#define ELFNOTE(name, type, desctype, descdata...) \
+.pushsection .note.name			;	\
+  .align 4				;	\
+  .long 2f - 1f		/* namesz */	;	\
+  .long 4f - 3f		/* descsz */	;	\
+  .long type				;	\
+1:.asciz #name				;	\
+2:.align 4				;	\
+3:desctype descdata			;	\
+4:.align 4				;	\
+.popsection
+
 /*
  * Xen guest identifier and loader selection
  */
 .section __xen_guest
-	.ascii	"GUEST_OS=NetBSD,GUEST_VER=4.99"
-	.ascii	",XEN_VER=xen-3.0"
-	.ascii	",LOADER=generic"
-	.ascii	",VIRT_BASE=0xffffffff80000000"
-	.ascii	",ELF_PADDR_OFFSET=0xffffffff80000000"
-	.ascii	",VIRT_ENTRY=0xffffffff80100000"
-	.ascii	",HYPERCALL_PAGE=0x00000101" /*  (???+HYPERCALL_PAGE_OFFSET)/PAGE_SIZE) */
+	ELFNOTE(Xen, XEN_ELFNOTE_GUEST_OS,       .asciz, "NetBSD")
+	ELFNOTE(Xen, XEN_ELFNOTE_GUEST_VERSION,  .asciz, "4.99")
+	ELFNOTE(Xen, XEN_ELFNOTE_XEN_VERSION,    .asciz, "xen-3.0")
+	ELFNOTE(Xen, XEN_ELFNOTE_VIRT_BASE,      .quad,  KERNBASE)
+	ELFNOTE(Xen, XEN_ELFNOTE_PADDR_OFFSET,   .quad,  KERNBASE)
+	ELFNOTE(Xen, XEN_ELFNOTE_ENTRY,          .quad,  start)
+	ELFNOTE(Xen, XEN_ELFNOTE_HYPERCALL_PAGE, .quad,  hypercall_page)
+	ELFNOTE(Xen, XEN_ELFNOTE_HV_START_LOW,   .quad,  HYPERVISOR_VIRT_START)
+	ELFNOTE(Xen, XEN_ELFNOTE_FEATURES,       .asciz, "")
+	ELFNOTE(Xen, XEN_ELFNOTE_PAE_MODE,       .asciz, "yes")
+	ELFNOTE(Xen, XEN_ELFNOTE_L1_MFN_VALID,   .long,  PG_V, PG_V)\
+	ELFNOTE(Xen, XEN_ELFNOTE_LOADER,         .asciz, "generic")     
+	ELFNOTE(Xen, XEN_ELFNOTE_SUSPEND_CANCEL, .long,  0)
 #if NKSYMS > 0 || defined(DDB) || defined(MODULAR)
-	.ascii	",BSD_SYMTAB=yes"
+	ELFNOTE(Xen, XEN_ELFNOTE_BSD_SYMTAB,     .asciz, "yes")
 #endif
-	.byte	0
 #endif	/* XEN */
 
 /*
@@ -260,44 +316,38 @@
 #if NLAPIC > 0
 	.align	PAGE_SIZE
 	.globl	_C_LABEL(local_apic)
-	.globl	_C_LABEL(lapic_id)
 	.globl	_C_LABEL(lapic_tpr)
 
 	.type	_C_LABEL(local_apic), @object
 LABEL(local_apic)
-	.space	LAPIC_ID
+	.space	LAPIC_TPRI
 END(local_apic)
-	.type	_C_LABEL(lapic_id), @object
-LABEL(lapic_id)
-	.long	0x00000000
-	.space	LAPIC_TPRI-(LAPIC_ID+4)
-END(lapic_id)
 	.type	_C_LABEL(lapic_tpr), @object
 LABEL(lapic_tpr)
-	.space	LAPIC_PPRI-LAPIC_TPRI
+	.space	PAGE_SIZE-LAPIC_TPRI
 END(lapic_tpr)
-	.type	_C_LABEL(lapic_ppr), @object
-_C_LABEL(lapic_ppr):
-	.space	LAPIC_ISR-LAPIC_PPRI
-END(lapic_ppr)
-	.type	_C_LABEL(lapic_isr), @object
-_C_LABEL(lapic_isr):
-	.space	PAGE_SIZE-LAPIC_ISR
-END(lapic_isr)
 #endif /* NLAPIC > 0 */
 
+	.globl	_C_LABEL(tablesize)
+	.globl	_C_LABEL(nox_flag)
+	.globl	_C_LABEL(cputype)
 	.globl	_C_LABEL(cpuid_level)
 	.globl	_C_LABEL(esym)
 	.globl	_C_LABEL(eblob)
-	.globl	_C_LABEL(boothowto)
-	.globl	_C_LABEL(bootinfo)
 	.globl	_C_LABEL(atdevbase)
 	.globl	_C_LABEL(PDPpaddr)
+	.globl	_C_LABEL(boothowto)
+	.globl	_C_LABEL(bootinfo)
 	.globl	_C_LABEL(biosbasemem)
 	.globl	_C_LABEL(biosextmem)
 	.globl	_C_LABEL(gdtstore)
-	.globl	_C_LABEL(cputype)
 
+	.type	_C_LABEL(tablesize), @object
+_C_LABEL(tablesize):	.long	TABLESIZE
+END(tablesize)
+	.type	_C_LABEL(nox_flag), @object
+LABEL(nox_flag)		.long	0	/* 32bit NOX flag, set if supported */
+END(nox_flag)
 	.type	_C_LABEL(cputype), @object
 LABEL(cputype)		.long	0	/* are we 80486, Pentium, or.. */
 END(cputype)
@@ -395,7 +445,7 @@ ENTRY(start)
 
 	/*
 	 * Load parameters from the stack (32 bits):
-	 *     boothowto, [bootdev], bootinfo, esym, biosbasemem, biosextmem
+	 *     boothowto, [bootdev], bootinfo, esym, biosextmem, biosbasemem
 	 * We are not interested in 'bootdev'.
 	 */
 
@@ -521,11 +571,21 @@ biosbasemem_finished:
 	 * The boot program should check:
 	 *	text+data <= &stack_variable - more_space_for_stack
 	 *	text+data+bss+pad+space_for_page_tables <= end_of_memory
-	 * 
+	 *
 	 * XXX: the gdt is in the carcass of the boot program so clearing
 	 * the rest of memory is still not possible.
 	 */
 	movl	$RELOC(tmpstk),%esp
+
+	/*
+	 * Retrieve the NX/XD flag. We use the 32bit version of PG_NX.
+	 */
+	movl	$0x80000001,%eax
+	cpuid
+	andl	$CPUID_NOX,%edx
+	jz	no_NOX
+	movl	$PG_NX32,RELOC(nox_flag)
+no_NOX:
 
 /*
  * There are four levels of pages in amd64: PML4 -> PDP -> PD -> PT. They will
@@ -537,9 +597,9 @@ biosbasemem_finished:
  * +------+--------+------+-----+--------+---------------------+----------
  *                             (1)      (2)                   (3)
  *
- * --------------+-----+-----+----+------------+
- * -> PROC0 STK -> L3 -> L2 -> L1 | ISA IO MEM |
- * --------------+-----+-----+----+------------+
+ * --------------+-----+-----+----+-------------+
+ * -> PROC0 STK -> L3 -> L2 -> L1 | ISA I/O MEM |
+ * --------------+-----+-----+----+-------------+
  *                               (4)
  *
  * PROC0 STK is obviously not linked as a page level. It just happens to be
@@ -547,6 +607,8 @@ biosbasemem_finished:
  *
  * (PROC0 STK + L4 + L3 + L2 + L1) is later referred to as BOOTSTRAP TABLES.
  *
+ * Important note: the kernel segments are properly 4k-aligned
+ * (see kern.ldscript), so there's no need to enforce alignment.
  */
 
 	/* Find end of kernel image; brings us on (1). */
@@ -573,9 +635,14 @@ biosbasemem_finished:
 	movl	%edi,%esi
 	addl	$PGOFSET,%esi
 	andl	$~PGOFSET,%esi
-	movl	%esi,%edi
+
+	/* We are on the BOOTSTRAP TABLES. Save L4's physical address. */
+	movl	$RELOC(PDPpaddr),%ebp
+	movl	%esi,(%ebp)
+	movl	$0,4(%ebp)
 
 	/* Now, zero out the BOOTSTRAP TABLES (before filling them in). */
+	movl	%esi,%edi
 	xorl	%eax,%eax
 	cld
 	movl	$TABLESIZE,%ecx
@@ -594,45 +661,55 @@ biosbasemem_finished:
 	leal	(PROC0_PTP1_OFF)(%esi),%ebx
 
 	/* Skip the first MB. */
-	movl	$(KERNTEXTOFF_LO - KERNBASE_LO),%eax
-	movl	%eax,%ecx
-	shrl	$(PGSHIFT-3),%ecx	/* ((n >> PGSHIFT) << 3) for # PDEs */
-	addl	%ecx,%ebx
+	movl	$(KERNTEXTOFF_LO - KERNBASE_LO),%ecx
+	shrl	$PGSHIFT,%ecx
+	fillkpt_blank
 
-	/*
-	 * Compute &__data_start - KERNBASE. This can't be > 4G, or we can't
-	 * deal with it anyway, since we can't load it in 32 bit mode. So use
-	 * the bottom 32 bits.
-	 */
-	movl	$RELOC(__data_start),%edx
-	andl	$~PGOFSET,%edx
-
-	/* Map the kernel text read-only. */
-	movl	%edx,%ecx
+	/* Map the kernel text RX. */
+	movl	$(KERNTEXTOFF_LO - KERNBASE_LO),%eax	/* start of TEXT */
+	movl	$RELOC(__rodata_start),%ecx
 	subl	%eax,%ecx
 	shrl	$PGSHIFT,%ecx
 	orl	$(PG_V|PG_KR),%eax
 	fillkpt
 
-	/*
-	 * We actually have to be careful here. The memory layout is as
-	 * follows:
-	 *  +--------+----------+-------------------+------------------+
-	 *  | RODATA < DATA+BSS | PRELOADED MODULES | BOOTSTRAP TABLES >
-	 *  +--------+----------+-------------------+------------------+
-	 * We just map everything from < to > with RWX rights.
-	 */
-	leal	(PG_V|PG_KW)(%edx),%eax
-	movl	$TABLESIZE,%ecx
-	addl	%esi,%ecx		/* end of tables */
-	subl	%edx,%ecx		/* subtract end of text */
+	/* Map the kernel rodata R. */
+	movl	$RELOC(__rodata_start),%eax
+	movl	$RELOC(__data_start),%ecx
+	subl	%eax,%ecx
 	shrl	$PGSHIFT,%ecx
-	fillkpt
+	orl	$(PG_V|PG_KR),%eax
+	fillkpt_nox
 
-	/* We are on (4). Map ISA I/O mem (later atdevbase) RWX. */
-	movl	$(IOM_BEGIN|PG_V|PG_KW/*|PG_N*/),%eax
-	movl	$(IOM_SIZE>>PGSHIFT),%ecx
-	fillkpt
+	/* Map the kernel data+bss RW. */
+	movl	$RELOC(__data_start),%eax
+	movl	$RELOC(__kernel_end),%ecx
+	subl	%eax,%ecx
+	shrl	$PGSHIFT,%ecx
+	orl	$(PG_V|PG_KW),%eax
+	fillkpt_nox
+
+	/* Map [SYMS]+[PRELOADED MODULES] RW. */
+	movl	$RELOC(__kernel_end),%eax
+	movl	%esi,%ecx		/* start of BOOTSTRAP TABLES */
+	subl	%eax,%ecx
+	shrl	$PGSHIFT,%ecx
+	orl	$(PG_V|PG_KW),%eax
+	fillkpt_nox
+
+	/* Map the BOOTSTRAP TABLES RW. */
+	movl	%esi,%eax		/* start of BOOTSTRAP TABLES */
+	movl	$TABLESIZE,%ecx		/* length of BOOTSTRAP TABLES */
+	shrl	$PGSHIFT,%ecx
+	orl	$(PG_V|PG_KW),%eax
+	fillkpt_nox
+
+	/* We are on (4). Map ISA I/O MEM RW. */
+	movl	$IOM_BEGIN,%eax
+	movl	$IOM_SIZE,%ecx	/* size of ISA I/O MEM */
+	shrl	$PGSHIFT,%ecx
+	orl	$(PG_V|PG_KW/*|PG_N*/),%eax
+	fillkpt_nox
 
 	/*
 	 * Build L2. Linked to L1.
@@ -686,17 +763,12 @@ biosbasemem_finished:
 	movl	$NKL4_KIMG_ENTRIES,%ecx
 	fillkpt
 
-	/* Install recursive top level PDE */
+	/* Install recursive top level PDE (one entry) */
 	leal	(PROC0_PML4_OFF + PDIR_SLOT_PTE * PDE_SIZE)(%esi),%ebx
 	leal	(PROC0_PML4_OFF)(%esi),%eax
 	orl	$(PG_V|PG_KW),%eax
-	movl	%eax,(%ebx)
-	movl	$0,(PDE_SIZE-4)(%ebx)
-
-	/* Save physical address of L4. */
-	movl	$RELOC(PDPpaddr),%ebp
-	movl	%esi,(%ebp)
-	movl	$0,(PDE_SIZE-4)(%ebp)
+	movl	$1,%ecx
+	fillkpt_nox
 
 	/*
 	 * Startup checklist:
@@ -707,13 +779,18 @@ biosbasemem_finished:
 	movl	%eax,%cr4
 
 	/*
-	 * 2. Set Long Mode Enable in EFER. Also enable the
-	 *    syscall extensions.
+	 * 2. Set Long Mode Enable in EFER. Also enable the syscall extensions,
+	 *    and NOX if available.
 	 */
 	movl	$MSR_EFER,%ecx
 	rdmsr
 	xorl	%eax,%eax	/* XXX */
 	orl	$(EFER_LME|EFER_SCE),%eax
+	movl	RELOC(nox_flag),%ebx
+	cmpl	$0,%ebx
+	je 	skip_NOX
+	orl	$(EFER_NXE),%eax
+skip_NOX:
 	wrmsr
 
 	/*
@@ -894,10 +971,9 @@ longmode_hi:
 	movq	%rsi,%rdi
 	addq	$USPACE,%rdi
 	subq	$KERNBASE,%rdi	/* init_x86_64 wants a physical address */
-
 #endif	/* XEN */
-	call	_C_LABEL(init_x86_64)
 
+	call	_C_LABEL(init_x86_64)
 	call 	_C_LABEL(main)
 END(start)
 
@@ -981,7 +1057,7 @@ END(dumpsys)
 
 /*
  * struct lwp *cpu_switchto(struct lwp *oldlwp, struct lwp *newlwp,
- *			    bool returning)
+ *     bool returning)
  *
  *	1. if (oldlwp != NULL), save its context.
  *	2. then, restore context of newlwp.
@@ -1000,18 +1076,19 @@ ENTRY(cpu_switchto)
 	movq	%rdi,%r13	/* oldlwp */
 	movq	%rsi,%r12	/* newlwp */
 
-	testq	%r13,%r13
-	jz	1f
+	testq	%r13,%r13	/* oldlwp = NULL ? */
+	jz	skip_save
 
 	/* Save old context. */
 	movq	L_PCB(%r13),%rax
 	movq	%rsp,PCB_RSP(%rax)
 	movq	%rbp,PCB_RBP(%rax)
+skip_save:
 
 	/* Switch to newlwp's stack. */
-1:	movq	L_PCB(%r12),%r14
+	movq	L_PCB(%r12),%r14
 #ifdef XEN /* XXX debug code */
-	cmpq	$0, PCB_RSP(%r14)
+	cmpq	$0,PCB_RSP(%r14)
 	jne 999f
 	callq _C_LABEL(cpu_Debugger);
 999:
@@ -1027,32 +1104,40 @@ ENTRY(cpu_switchto)
 	xchgq	%rcx,CPUVAR(CURLWP)
 
 	/* Skip the rest if returning to a pinned LWP. */
-	testb	%dl,%dl
-	jnz	4f
+	testb	%dl,%dl		/* returning = true ? */
+	jnz	switch_return
 
 	/* Switch ring0 stack */
 #ifndef XEN
 	movq	PCB_RSP0(%r14),%rax
 	movq	%rax,CPUVAR(RSP0)
 #else
-	movq	%r14, %rdi
+	movq	%r14,%rdi
 	callq	_C_LABEL(x86_64_switch_context);
 #endif
 
 	/* Don't bother with the rest if switching to a system process. */
 	testl	$LW_SYSTEM,L_FLAG(%r12)
-	jnz	4f
+	jnz	switch_return
 
 	/* Is this process using RAS (restartable atomic sequences)? */
 	movq	L_PROC(%r12),%rdi
 	cmpq	$0,P_RASLIST(%rdi)
-	jne	5f
+	je	no_RAS
+
+	/* Handle restartable atomic sequences (RAS). */
+	movq	L_MD_REGS(%r12),%rbx
+	movq	TF_RIP(%rbx),%rsi
+	call	_C_LABEL(ras_lookup)
+	cmpq	$-1,%rax
+	je	no_RAS
+	movq	%rax,TF_RIP(%rbx)
+no_RAS:
 
 	/*
 	 * Restore cr0 including FPU state (may have CR0_TS set).  Note that
 	 * IPL_SCHED prevents from FPU interrupt altering the LWP's saved cr0.
 	 */
-2:
 #ifndef XEN
 	movl	$IPL_HIGH,CPUVAR(ILEVEL)
 	movl	PCB_CR0(%r14),%ecx	/* has CR0_TS clear */
@@ -1063,80 +1148,77 @@ ENTRY(cpu_switchto)
 	 * set CR0_TS so we'll trap rather than reuse bogus state.
 	 */
 	cmpq	CPUVAR(FPCURLWP),%r12
-	je	3f
+	je	skip_TS
 	orq	$CR0_TS,%rcx
+skip_TS:
 
 	/* Reloading CR0 is very expensive - avoid if possible. */
-3:	cmpq	%rdx,%rcx
-	je	6f
+	cmpq	%rdx,%rcx
+	je	skip_CR0
 	movq	%rcx,%cr0
+skip_CR0:
 
-6:	testl	$PCB_COMPAT32, PCB_FLAGS(%r14)
-	jne	32f
+	/* The 32bit LWPs are handled differently. */
+	testl	$PCB_COMPAT32,PCB_FLAGS(%r14)
+	jne	lwp_64bit
 
-	/* Zero out %fs/%gs registers and GDT descriptors. */
-	xorq	%rax, %rax
-	movw	%ax, %fs
+lwp_32bit:
+	/* Zero out %fs/%gs registers. */
+	xorq	%rax,%rax
+	movw	%ax,%fs
 	CLI(cx)
 	SWAPGS
-	movw	%ax, %gs
+	movw	%ax,%gs
 	SWAPGS
 	STI(cx)
 
+	/* Zero out GDT descriptors. */
 	movq	CPUVAR(GDT),%rcx
-	movq	%rax, (GUFS_SEL*8)(%rcx)
-	movq	%rax, (GUGS_SEL*8)(%rcx)
+	movq	%rax,(GUFS_SEL*8)(%rcx)
+	movq	%rax,(GUGS_SEL*8)(%rcx)
 
 	/* Reload 64-bit %fs/%gs MSRs. */
-	movl	$MSR_FSBASE, %ecx
-	movl	PCB_FS(%r14), %eax
-	movl	4+PCB_FS(%r14), %edx
+	movl	$MSR_FSBASE,%ecx
+	movl	PCB_FS(%r14),%eax
+	movl	4+PCB_FS(%r14),%edx
 	wrmsr
-	movl	$MSR_KERNELGSBASE, %ecx
-	movl	PCB_GS(%r14), %eax
-	movl	4+PCB_GS(%r14), %edx
+	movl	$MSR_KERNELGSBASE,%ecx
+	movl	PCB_GS(%r14),%eax
+	movl	4+PCB_GS(%r14),%edx
 	wrmsr
-	jmp	4f
 
-32:
+	jmp	switch_return
+
+lwp_64bit:
 	/* Reload %fs/%gs GDT descriptors. */
 	movq	CPUVAR(GDT),%rcx
-	movq	PCB_FS(%r14), %rax
-	movq	%rax, (GUFS_SEL*8)(%rcx)
-	movq	PCB_GS(%r14), %rax
-	movq	%rax, (GUGS_SEL*8)(%rcx)
+	movq	PCB_FS(%r14),%rax
+	movq	%rax,(GUFS_SEL*8)(%rcx)
+	movq	PCB_GS(%r14),%rax
+	movq	%rax,(GUGS_SEL*8)(%rcx)
 
 	/* Reload %fs and %gs */
-	movq	L_MD_REGS(%r12), %rbx
-	movw	TF_FS(%rbx), %fs
+	movq	L_MD_REGS(%r12),%rbx
+	movw	TF_FS(%rbx),%fs
 	CLI(ax)
 	SWAPGS
-	movw	TF_GS(%rbx), %gs
+	movw	TF_GS(%rbx),%gs
 	SWAPGS
 	STI(ax)
-
 #else
 	movq	%r12,%rdi
 	callq	_C_LABEL(x86_64_tls_switch)
 #endif
 
+switch_return:
 	/* Return to the new LWP, returning 'oldlwp' in %rax. */
-4:	movq	%r13,%rax
+	movq	%r13,%rax
 	popq	%r15
 	popq	%r14
 	popq	%r13
 	popq	%r12
 	popq	%rbx
 	ret
-
-	/* Check for restartable atomic sequences (RAS). */
-5:	movq	L_MD_REGS(%r12),%rbx
-	movq	TF_RIP(%rbx),%rsi
-	call	_C_LABEL(ras_lookup)
-	cmpq	$-1,%rax
-	je	2b
-	movq	%rax,TF_RIP(%rbx)
-	jmp	2b
 END(cpu_switchto)
 
 /*
@@ -1165,14 +1247,16 @@ IDTVEC_END(syscall32)
 IDTVEC(syscall)
 #ifndef XEN
 	/*
-	 * The user %rip is in %rcx and the user %flags in %r11.
-	 * The kernel %cs and %ss are loaded, but nothing else is.
-	 * The 'swapgs' gives us access to cpu-specific memory where
-	 * we can save a user register and then read the lwps
-	 * kernel stack pointer,
-	 * This code doesn't seem to set %ds, this may not matter since it
-	 * is ignored in 64bit mode, OTOH the syscall instruction sets %ss
-	 * and that is ignored as well.
+	 * The user %rip is in %rcx and the user %flags in %r11. The kernel %cs
+	 * and %ss are loaded, but nothing else is.
+	 *
+	 * The 'swapgs' instruction gives us access to cpu-specific memory where
+	 * we can save a user register and then read the LWP's kernel stack
+	 * pointer.
+	 *
+	 * This code doesn't seem to set %ds, this may not matter since it is
+	 * ignored in 64bit mode, OTOH the syscall instruction sets %ss and that
+	 * is ignored as well.
 	 */
 	swapgs
 	movq	%r15,CPUVAR(SCRATCH)
@@ -1182,19 +1266,19 @@ IDTVEC(syscall)
 
 	/* Make stack look like an 'int nn' frame */
 #define SP(x)	(x)-(TF_SS+8)(%r15)
-	movq	$(LSEL(LUDATA_SEL, SEL_UPL)), SP(TF_SS) /* user %ss */
-	movq	%rsp, SP(TF_RSP) 	/* User space rsp */
+	movq	$(LSEL(LUDATA_SEL, SEL_UPL)),SP(TF_SS) /* user %ss */
+	movq	%rsp,SP(TF_RSP)		/* User space rsp */
 
-	movq	%r11, SP(TF_RFLAGS)	/* old rflags from syscall insn */
-	movq	$(LSEL(LUCODE_SEL, SEL_UPL)), SP(TF_CS)
-	movq	%rcx, SP(TF_RIP)	/* syscall saves rip in rcx */
+	movq	%r11,SP(TF_RFLAGS)	/* old rflags from syscall insn */
+	movq	$(LSEL(LUCODE_SEL, SEL_UPL)),SP(TF_CS)
+	movq	%rcx,SP(TF_RIP)		/* syscall saves rip in rcx */
 
 	leaq	SP(0),%rsp		/* %rsp now valid after frame */
 	movq	CPUVAR(SCRATCH),%r15
 #undef SP
 
 	movq	$2,TF_ERR(%rsp)		/* syscall instruction size */
-	movq	$T_ASTFLT, TF_TRAPNO(%rsp)
+	movq	$T_ASTFLT,TF_TRAPNO(%rsp)
 
 	movw	%es,TF_ES(%rsp)
 	sti
@@ -1234,27 +1318,29 @@ do_syscall:
 	 */
 	CLI(si)
 	/* Check for ASTs on exit to user mode. */
-	movl	L_MD_ASTPENDING(%r14), %eax
-	orl	CPUVAR(WANT_PMAPLOAD), %eax
+	movl	L_MD_ASTPENDING(%r14),%eax
+	orl	CPUVAR(WANT_PMAPLOAD),%eax
 	jnz	9f
+
 #ifdef DIAGNOSTIC
 	cmpl	$IPL_NONE,CPUVAR(ILEVEL)
-	jne	3f
+	jne	spl_error
 #endif
-	testl	$(MDL_IRET | MDL_COMPAT32), L_MD_FLAGS(%r14)
+
+	testl	$(MDL_IRET|MDL_COMPAT32),L_MD_FLAGS(%r14)
 	INTR_RESTORE_GPRS
 	movw	TF_ES(%rsp),%es
 	SWAPGS
 	jnz	2f
 #ifndef XEN
-	movq	TF_RIP(%rsp), %rcx	/* %rip for sysret */
-	movq	TF_RFLAGS(%rsp), %r11	/* %flags for sysret */
-	movw	TF_DS(%rsp), %ds
-	movq	TF_RSP(%rsp), %rsp
+	movq	TF_RIP(%rsp),%rcx	/* %rip for sysret */
+	movq	TF_RFLAGS(%rsp),%r11	/* %flags for sysret */
+	movw	TF_DS(%rsp),%ds
+	movq	TF_RSP(%rsp),%rsp
 	sysretq
 #else
-	movw	TF_DS(%rsp), %ds
-	addq	$TF_RIP, %rsp
+	movw	TF_DS(%rsp),%ds
+	addq	$TF_RIP,%rsp
 	pushq	$256	/* VGCF_IN_SYSCALL */
 	jmp	HYPERVISOR_iret
 #endif
@@ -1266,13 +1352,14 @@ do_syscall:
  * then a SIGSEGV will be signalled.
  */
 2:
-	movw	TF_DS(%rsp), %ds
-	addq	$TF_RIP, %rsp
+	movw	TF_DS(%rsp),%ds
+	addq	$TF_RIP,%rsp
 	iretq
 
-/* Report SPL error */
 #ifdef DIAGNOSTIC
-3:	movabsq	$4f, %rdi
+	/* Report SPL error */
+spl_error:
+	movabsq	$4f,%rdi
 	movl	TF_RAX(%rsp),%esi
 	movl	TF_RDI(%rsp),%edx
 	movl	%ebx,%ecx
@@ -1287,7 +1374,7 @@ do_syscall:
 
 /* AST pending or pmap load needed */
 9:
-	cmpl	$0, CPUVAR(WANT_PMAPLOAD)
+	cmpl	$0,CPUVAR(WANT_PMAPLOAD)
 	jz	10f
 	STI(si)
 	call	_C_LABEL(do_pmap_load)

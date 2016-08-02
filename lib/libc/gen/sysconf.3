@@ -1,4 +1,4 @@
-.\"	$NetBSD: sysconf.3,v 1.45 2016/02/26 17:13:01 christos Exp $
+.\"	$NetBSD: sysconf.3,v 1.50 2016/07/05 09:51:10 wiz Exp $
 .\"
 .\" Copyright (c) 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -29,7 +29,7 @@
 .\"
 .\"	@(#)sysconf.3	8.3 (Berkeley) 4/19/94
 .\"
-.Dd February 28, 2016
+.Dd July 3, 2016
 .Dt SYSCONF 3
 .Os
 .Sh NAME
@@ -149,6 +149,9 @@ and its
 Semaphores
 option to which the system attempts to conform,
 otherwise \-1.
+.It Li _SC_SEM_NSEMS_MAX
+The maximum number of semaphores that one process can have open at a time,
+otherwise \-1.
 .It Li _SC_SHELL
 Return 1 if
 .Tn POSIX
@@ -175,12 +178,23 @@ and its
 Threads
 option to which the system attempts to conform,
 otherwise \-1.
+.It Li _SC_THREAD_PRIO_PROTECT
+System supports the priority ceiling protocol for POSIX threads.
 .It Li _SC_TIMERS
 The version of
 .St -p1003.1
 and its
 Timers
 option to which the system attempts to conform,
+otherwise \-1.
+.It Li _SC_CPUTIME
+The clockID CLOCK_PROCESS_CPUTIME_ID is supported,
+otherwise \-1.
+.It Li _SC_THREAD_CPUTIME
+The clockID CLOCK_THREAD_CPUTIME_ID is supported,
+otherwise \-1.
+.It Li _SC_DELAYTIMER_MAX
+The maximum number of overrun for a specific timer,
 otherwise \-1.
 .It Li _SC_TZNAME_MAX
 The minimum maximum number of types supported for the name of a

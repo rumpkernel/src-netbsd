@@ -1,4 +1,4 @@
-/*	$NetBSD: ohci_cardbus.c,v 1.41 2016/04/23 10:15:31 skrll Exp $	*/
+/*	$NetBSD: ohci_cardbus.c,v 1.43 2016/07/14 04:00:45 msaitoh Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ohci_cardbus.c,v 1.41 2016/04/23 10:15:31 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ohci_cardbus.c,v 1.43 2016/07/14 04:00:45 msaitoh Exp $");
 
 #include "ehci_cardbus.h"
 
@@ -83,7 +83,8 @@ struct ohci_cardbus_softc {
 };
 
 CFATTACH_DECL_NEW(ohci_cardbus, sizeof(struct ohci_cardbus_softc),
-    ohci_cardbus_match, ohci_cardbus_attach, ohci_cardbus_detach, ohci_activate);
+    ohci_cardbus_match, ohci_cardbus_attach, ohci_cardbus_detach,
+    ohci_activate);
 
 int
 ohci_cardbus_match(device_t parent, cfdata_t match, void *aux)
@@ -120,7 +121,7 @@ ohci_cardbus_attach(device_t parent, device_t self, void *aux)
 	/* Map I/O registers */
 	if (Cardbus_mapreg_map(ct, PCI_CBMEM, PCI_MAPREG_TYPE_MEM, 0,
 			   &sc->sc.iot, &sc->sc.ioh, NULL, &sc->sc.sc_size)) {
-		printf("%s: can't map mem space\n", devname);
+		aprint_error("%s: can't map mem space\n", devname);
 		return;
 	}
 
@@ -130,8 +131,7 @@ ohci_cardbus_attach(device_t parent, device_t self, void *aux)
 	sc->sc.sc_bus.ub_dmatag = ca->ca_dmat;
 
 	/* Enable the device. */
-	csr = Cardbus_conf_read(ct, ca->ca_tag,
-				PCI_COMMAND_STATUS_REG);
+	csr = Cardbus_conf_read(ct, ca->ca_tag, PCI_COMMAND_STATUS_REG);
 	Cardbus_conf_write(ct, ca->ca_tag, PCI_COMMAND_STATUS_REG,
 		       csr | PCI_COMMAND_MASTER_ENABLE
 			   | PCI_COMMAND_MEM_ENABLE);
@@ -142,7 +142,7 @@ ohci_cardbus_attach(device_t parent, device_t self, void *aux)
 
 	sc->sc_ih = Cardbus_intr_establish(ct, IPL_USB, ohci_intr, sc);
 	if (sc->sc_ih == NULL) {
-		printf("%s: couldn't establish interrupt\n", devname);
+		aprint_error("%s: couldn't establish interrupt\n", devname);
 		return;
 	}
 
@@ -153,7 +153,7 @@ ohci_cardbus_attach(device_t parent, device_t self, void *aux)
 
 	int err = ohci_init(&sc->sc);
 	if (err) {
-		printf("%s: init failed, error=%d\n", devname, err);
+		aprint_error("%s: init failed, error=%d\n", devname, err);
 
 		/* Avoid spurious interrupts. */
 		Cardbus_intr_disestablish(ct, sc->sc_ih);
