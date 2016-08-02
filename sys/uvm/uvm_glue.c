@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_glue.c,v 1.161 2014/11/27 14:25:01 uebayasi Exp $	*/
+/*	$NetBSD: uvm_glue.c,v 1.163 2016/05/22 09:10:37 maxv Exp $	*/
 
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -62,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_glue.c,v 1.161 2014/11/27 14:25:01 uebayasi Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_glue.c,v 1.163 2016/05/22 09:10:37 maxv Exp $");
 
 #include "opt_kgdb.h"
 #include "opt_kstack.h"

@@ -1,4 +1,4 @@
-/*	$NetBSD: sctp_output.c,v 1.3 2016/04/25 21:21:02 rjs Exp $ */
+/*	$NetBSD: sctp_output.c,v 1.7 2016/07/07 09:32:02 ozaki-r Exp $ */
 /*	$KAME: sctp_output.c,v 1.48 2005/06/16 18:29:24 jinmei Exp $	*/
 
 /*
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sctp_output.c,v 1.3 2016/04/25 21:21:02 rjs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sctp_output.c,v 1.7 2016/07/07 09:32:02 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_ipsec.h"
@@ -546,7 +546,7 @@ sctp_choose_v4_boundspecific_inp(struct sctp_inpcb *inp,
 	ifn = rt->rt_ifp;
 	if (ifn) {
 		/* is a prefered one on the interface we route out? */
-		IFADDR_FOREACH(ifa, ifn) {
+		IFADDR_READER_FOREACH(ifa, ifn) {
 			sin = sctp_is_v4_ifa_addr_prefered (ifa, loopscope, ipv4_scope, &sin_loop, &sin_local);
 			if (sin == NULL)
 				continue;
@@ -555,7 +555,7 @@ sctp_choose_v4_boundspecific_inp(struct sctp_inpcb *inp,
 			}
 		}
 		/* is an acceptable one on the interface we route out? */
-		IFADDR_FOREACH(ifa, ifn) {
+		IFADDR_READER_FOREACH(ifa, ifn) {
 			sin = sctp_is_v4_ifa_addr_acceptable (ifa, loopscope, ipv4_scope, &sin_loop, &sin_local);
 			if (sin == NULL)
 				continue;
@@ -648,7 +648,7 @@ sctp_choose_v4_boundspecific_stcb(struct sctp_inpcb *inp,
 		 */
 		if (ifn) {
 			/* first try for an prefered address on the ep */
-			IFADDR_FOREACH(ifa, ifn) {
+			IFADDR_READER_FOREACH(ifa, ifn) {
 				if (sctp_is_addr_in_ep(inp, ifa)) {
 					sin = sctp_is_v4_ifa_addr_prefered (ifa, loopscope, ipv4_scope, &sin_loop, &sin_local);
 					if (sin == NULL)
@@ -662,7 +662,7 @@ sctp_choose_v4_boundspecific_stcb(struct sctp_inpcb *inp,
 				}
 			}
 			/* next try for an acceptable address on the ep */
-			IFADDR_FOREACH(ifa, ifn) {
+			IFADDR_READER_FOREACH(ifa, ifn) {
 				if (sctp_is_addr_in_ep(inp, ifa)) {
 					sin = sctp_is_v4_ifa_addr_acceptable (ifa, loopscope, ipv4_scope, &sin_loop, &sin_local);
 					if (sin == NULL)
@@ -762,7 +762,7 @@ sctp_choose_v4_boundspecific_stcb(struct sctp_inpcb *inp,
 				continue;
 			/* first question, is laddr->ifa an address associated with the emit interface */
 			if (ifn) {
-				IFADDR_FOREACH(ifa, ifn) {
+				IFADDR_READER_FOREACH(ifa, ifn) {
 					if (laddr->ifa == ifa) {
 						sin = (struct sockaddr_in *)laddr->ifa->ifa_addr;
 						return (sin->sin_addr);
@@ -786,7 +786,7 @@ sctp_choose_v4_boundspecific_stcb(struct sctp_inpcb *inp,
 				continue;
 			/* first question, is laddr->ifa an address associated with the emit interface */
 			if (ifn) {
-				IFADDR_FOREACH(ifa, ifn) {
+				IFADDR_READER_FOREACH(ifa, ifn) {
 					if (laddr->ifa == ifa) {
 						sin = (struct sockaddr_in *)laddr->ifa->ifa_addr;
 						return (sin->sin_addr);
@@ -836,7 +836,7 @@ sctp_select_v4_nth_prefered_addr_from_ifn_boundall (struct ifnet *ifn, struct sc
 	struct sockaddr_in *sin;
 	uint8_t sin_loop, sin_local;
 	int num_eligible_addr = 0;
-	IFADDR_FOREACH(ifa, ifn) {
+	IFADDR_READER_FOREACH(ifa, ifn) {
 		sin = sctp_is_v4_ifa_addr_prefered (ifa, loopscope, ipv4_scope, &sin_loop, &sin_local);
 		if (sin == NULL)
 			continue;
@@ -864,7 +864,7 @@ sctp_count_v4_num_prefered_boundall (struct ifnet *ifn, struct sctp_tcb *stcb, i
 	struct sockaddr_in *sin;
 	int num_eligible_addr = 0;
 
-	IFADDR_FOREACH(ifa, ifn) {
+	IFADDR_READER_FOREACH(ifa, ifn) {
 		sin = sctp_is_v4_ifa_addr_prefered (ifa, loopscope, ipv4_scope, sin_loop, sin_local);
 		if (sin == NULL)
 			continue;
@@ -897,6 +897,7 @@ sctp_choose_v4_boundall(struct sctp_inpcb *inp,
 	struct sockaddr_in *sin;
 	struct in_addr ans;
 	struct ifaddr *ifa;
+	int s;
 	/*
 	 * For v4 we can use (in boundall) any address in the association. If
 	 * non_asoc_addr_ok is set we can use any address (at least in theory).
@@ -956,7 +957,7 @@ sctp_choose_v4_boundall(struct sctp_inpcb *inp,
 	 *         and see if we can find an acceptable address.
 	 */
  bound_all_v4_plan_b:
-	IFADDR_FOREACH(ifa, ifn) {
+	IFADDR_READER_FOREACH(ifa, ifn) {
 		sin = sctp_is_v4_ifa_addr_acceptable (ifa, loopscope, ipv4_scope, &sin_loop, &sin_local);
 		if (sin == NULL)
 			continue;
@@ -975,7 +976,8 @@ sctp_choose_v4_boundall(struct sctp_inpcb *inp,
 	 *         address. If we reache here we are in trouble I think.
 	 */
  bound_all_v4_plan_c:
-	IFNET_FOREACH(ifn) {
+	s = pserialize_read_enter();
+	IFNET_READER_FOREACH(ifn) {
 		if (ifn == inp->next_ifn_touse)
 			break;
 		if (loopscope == 0 && ifn->if_type == IFT_LOOP) {
@@ -1008,9 +1010,11 @@ sctp_choose_v4_boundall(struct sctp_inpcb *inp,
 									  ipv4_scope, cur_addr_num);
 		if (sin == NULL)
 			continue;
+		pserialize_read_exit(s);
 		return (sin->sin_addr);
 
 	}
+	pserialize_read_exit(s);
 
 	/*
 	 * plan_d: We are in deep trouble. No prefered address on
@@ -1021,7 +1025,8 @@ sctp_choose_v4_boundall(struct sctp_inpcb *inp,
 	 *         illicit an ABORT, falling through.
 	 */
 
-	IFNET_FOREACH(ifn) {
+	s = pserialize_read_enter();
+	IFNET_READER_FOREACH(ifn) {
 		if (ifn == inp->next_ifn_touse)
 			break;
 		if (loopscope == 0 && ifn->if_type == IFT_LOOP) {
@@ -1032,7 +1037,7 @@ sctp_choose_v4_boundall(struct sctp_inpcb *inp,
 			/* already looked at this guy */
 			continue;
 
-		IFADDR_FOREACH(ifa, ifn) {
+		IFADDR_READER_FOREACH(ifa, ifn) {
 			sin = sctp_is_v4_ifa_addr_acceptable (ifa, loopscope, ipv4_scope, &sin_loop, &sin_local);
 			if (sin == NULL)
 				continue;
@@ -1044,9 +1049,11 @@ sctp_choose_v4_boundall(struct sctp_inpcb *inp,
 					continue;
 				}
 			}
+			pserialize_read_exit(s);
 			return (sin->sin_addr);
 		}
 	}
+	pserialize_read_exit(s);
 	/*
 	 * Ok we can find NO address to source from that is
 	 * not on our negative list. It is either the special
@@ -1297,7 +1304,7 @@ sctp_choose_v6_boundspecific_stcb(struct sctp_inpcb *inp,
 		 * in our list, if so, we want that one.
 		 */
 		if (ifn) {
-			IFADDR_FOREACH(ifa, ifn) {
+			IFADDR_READER_FOREACH(ifa, ifn) {
 				if (sctp_is_addr_in_ep(inp, ifa)) {
 					sin6 = sctp_is_v6_ifa_addr_acceptable (ifa, loopscope, loc_scope, &sin_loop, &sin_local);
 					if (sin6 == NULL)
@@ -1398,7 +1405,7 @@ sctp_choose_v6_boundspecific_stcb(struct sctp_inpcb *inp,
 				continue;
 			/* first question, is laddr->ifa an address associated with the emit interface */
 			if (ifn) {
-				IFADDR_FOREACH(ifa, ifn) {
+				IFADDR_READER_FOREACH(ifa, ifn) {
 					if (laddr->ifa == ifa) {
 						sin6 = (struct sockaddr_in6 *)laddr->ifa->ifa_addr;
 						return (sin6);
@@ -1477,7 +1484,7 @@ sctp_choose_v6_boundspecific_inp(struct sctp_inpcb *inp,
 
 	ifn = rt->rt_ifp;
 	if (ifn) {
-		IFADDR_FOREACH(ifa, ifn) {
+		IFADDR_READER_FOREACH(ifa, ifn) {
 			sin6 = sctp_is_v6_ifa_addr_acceptable (ifa, loopscope, loc_scope, &sin_loop, &sin_local);
 			if (sin6 == NULL)
 				continue;
@@ -1547,7 +1554,7 @@ sctp_select_v6_nth_addr_from_ifn_boundall (struct ifnet *ifn, struct sctp_tcb *s
 	int sin_loop, sin_local;
 	int num_eligible_addr = 0;
 
-	IFADDR_FOREACH(ifa, ifn) {
+	IFADDR_READER_FOREACH(ifa, ifn) {
 		sin6 = sctp_is_v6_ifa_addr_acceptable (ifa, loopscope, loc_scope, &sin_loop, &sin_local);
 		if (sin6 == NULL)
 			continue;
@@ -1595,7 +1602,7 @@ sctp_count_v6_num_eligible_boundall (struct ifnet *ifn, struct sctp_tcb *stcb,
 	int num_eligible_addr = 0;
 	int sin_loop, sin_local;
 
-	IFADDR_FOREACH(ifa, ifn) {
+	IFADDR_READER_FOREACH(ifa, ifn) {
 		sin6 = sctp_is_v6_ifa_addr_acceptable (ifa, loopscope, loc_scope, &sin_loop, &sin_local);
 		if (sin6 == NULL)
 			continue;
@@ -1636,6 +1643,7 @@ sctp_choose_v6_boundall(struct sctp_inpcb *inp,
 	 */
 	struct ifnet *ifn;
 	struct sockaddr_in6 *sin6;
+	int s;
 
 	ifn = rt->rt_ifp;
 	if (net) {
@@ -1715,14 +1723,14 @@ sctp_choose_v6_boundall(struct sctp_inpcb *inp,
 #endif
 	if (inp->next_ifn_touse == NULL) {
 		started_at_beginning=1;
-		inp->next_ifn_touse = IFNET_FIRST();
+		inp->next_ifn_touse = IFNET_READER_FIRST();
 #ifdef SCTP_DEBUG
 		if (sctp_debug_on & SCTP_DEBUG_OUTPUT1) {
 			printf("Start at first IFN:%p\n", inp->next_ifn_touse);
 		}
 #endif
 	} else {
-		inp->next_ifn_touse = IFNET_NEXT(inp->next_ifn_touse);
+		inp->next_ifn_touse = IFNET_READER_NEXT(inp->next_ifn_touse);
 #ifdef SCTP_DEBUG
 		if (sctp_debug_on & SCTP_DEBUG_OUTPUT1) {
 			printf("Resume at IFN:%p\n", inp->next_ifn_touse);
@@ -1735,10 +1743,12 @@ sctp_choose_v6_boundall(struct sctp_inpcb *inp,
 			}
 #endif
 			started_at_beginning=1;
-			inp->next_ifn_touse = IFNET_FIRST();
+			inp->next_ifn_touse = IFNET_READER_FIRST();
 		}
 	}
-	IFNET_FOREACH(ifn) {
+
+	s = pserialize_read_enter();
+	IFNET_READER_FOREACH(ifn) {
 		if (loopscope == 0 && ifn->if_type == IFT_LOOP) {
 			/* wrong base scope */
 			continue;
@@ -1797,8 +1807,11 @@ sctp_choose_v6_boundall(struct sctp_inpcb *inp,
 			       cur_addr_num, ifn);
 		}
 #endif
+		pserialize_read_exit(s);
 		return (sin6);
 	}
+	pserialize_read_exit(s);
+
 	if (started_at_beginning == 0) {
 		/* we have not been through all of them yet, force
 		 * us to go through them all.
@@ -2711,9 +2724,11 @@ sctp_send_initiate(struct sctp_inpcb *inp, struct sctp_tcb *stcb)
 		struct ifnet *ifn;
 		struct ifaddr *ifa;
 		int cnt;
+		int s;
 
 		cnt = cnt_inits_to;
- 		IFNET_FOREACH(ifn) {
+		s = pserialize_read_enter();
+		IFNET_READER_FOREACH(ifn) {
 			if ((stcb->asoc.loopback_scope == 0) &&
 			    (ifn->if_type == IFT_LOOP)) {
 				/*
@@ -2722,7 +2737,7 @@ sctp_send_initiate(struct sctp_inpcb *inp, struct sctp_tcb *stcb)
 				 */
 				continue;
 			}
-			IFADDR_FOREACH(ifa, ifn) {
+			IFADDR_READER_FOREACH(ifa, ifn) {
 				if (sctp_is_address_in_scope(ifa,
 				    stcb->asoc.ipv4_addr_legal,
 				    stcb->asoc.ipv6_addr_legal,
@@ -2735,8 +2750,11 @@ sctp_send_initiate(struct sctp_inpcb *inp, struct sctp_tcb *stcb)
 				cnt++;
 			}
 		}
+		pserialize_read_exit(s);
+
 		if (cnt > 1) {
-			IFNET_FOREACH(ifn) {
+			s = pserialize_read_enter();
+			IFNET_READER_FOREACH(ifn) {
 				if ((stcb->asoc.loopback_scope == 0) &&
 				    (ifn->if_type == IFT_LOOP)) {
 					/*
@@ -2745,7 +2763,7 @@ sctp_send_initiate(struct sctp_inpcb *inp, struct sctp_tcb *stcb)
 					 */
 					continue;
 				}
-				IFADDR_FOREACH(ifa, ifn) {
+				IFADDR_READER_FOREACH(ifa, ifn) {
 					if (sctp_is_address_in_scope(ifa,
 					    stcb->asoc.ipv4_addr_legal,
 					    stcb->asoc.ipv6_addr_legal,
@@ -2758,6 +2776,7 @@ sctp_send_initiate(struct sctp_inpcb *inp, struct sctp_tcb *stcb)
 					m_at = sctp_add_addr_to_mbuf(m_at, ifa);
 				}
 			}
+			pserialize_read_exit(s);
 		}
 	} else {
 		struct sctp_laddr *laddr;
@@ -3276,7 +3295,7 @@ sctp_send_initiate_ack(struct sctp_inpcb *inp, struct sctp_tcb *stcb,
 		return;
 	}
 	m->m_data += SCTP_MIN_OVERHEAD;
-	m->m_pkthdr.rcvif = 0;
+	m_reset_rcvif(m);
 	m->m_len = sizeof(struct sctp_init_msg);
 
 	/* the time I built cookie */
@@ -3451,7 +3470,7 @@ sctp_send_initiate_ack(struct sctp_inpcb *inp, struct sctp_tcb *stcb,
 				/* pull out the scope_id from incoming pkt */
 #if defined(SCTP_BASE_FREEBSD) || defined(__APPLE__)
 				(void)in6_recoverscope(sin6, &in6_src,
-				    init_pkt->m_pkthdr.rcvif);
+				    m_get_rcvif_NOMPSAFE(init_pkt));
 				in6_embedscope(&sin6->sin6_addr, sin6, NULL,
 				    NULL);
 #else
@@ -3657,8 +3676,10 @@ sctp_send_initiate_ack(struct sctp_inpcb *inp, struct sctp_tcb *stcb,
 		struct ifnet *ifn;
 		struct ifaddr *ifa;
 		int cnt = cnt_inits_to;
+		int s;
 
-		IFNET_FOREACH(ifn) {
+		s = pserialize_read_enter();
+		IFNET_READER_FOREACH(ifn) {
 			if ((stc.loopback_scope == 0) &&
 			    (ifn->if_type == IFT_LOOP)) {
 				/*
@@ -3667,7 +3688,7 @@ sctp_send_initiate_ack(struct sctp_inpcb *inp, struct sctp_tcb *stcb,
 				 */
 				continue;
 			}
-			IFADDR_FOREACH(ifa, ifn) {
+			IFADDR_READER_FOREACH(ifa, ifn) {
 				if (sctp_is_address_in_scope(ifa,
 				    stc.ipv4_addr_legal, stc.ipv6_addr_legal,
 				    stc.loopback_scope, stc.ipv4_scope,
@@ -3677,8 +3698,11 @@ sctp_send_initiate_ack(struct sctp_inpcb *inp, struct sctp_tcb *stcb,
 				cnt++;
 			}
 		}
+		pserialize_read_exit(s);
+
 		if (cnt > 1) {
-			IFNET_FOREACH(ifn) {
+			s = pserialize_read_enter();
+			IFNET_READER_FOREACH(ifn) {
 				if ((stc.loopback_scope == 0) &&
 				    (ifn->if_type == IFT_LOOP)) {
 					/*
@@ -3687,7 +3711,7 @@ sctp_send_initiate_ack(struct sctp_inpcb *inp, struct sctp_tcb *stcb,
 					 */
 					continue;
 				}
-				IFADDR_FOREACH(ifa, ifn) {
+				IFADDR_READER_FOREACH(ifa, ifn) {
 					if (sctp_is_address_in_scope(ifa,
 					    stc.ipv4_addr_legal,
 					    stc.ipv6_addr_legal,
@@ -3698,6 +3722,7 @@ sctp_send_initiate_ack(struct sctp_inpcb *inp, struct sctp_tcb *stcb,
 					m_at = sctp_add_addr_to_mbuf(m_at, ifa);
 				}
 			}
+			pserialize_read_exit(s);
 		}
 	} else {
 		struct sctp_laddr *laddr;
@@ -5816,7 +5841,7 @@ sctp_med_chunk_output(struct sctp_inpcb *inp,
 				}
 				t->m_next = outchain;
 				t->m_pkthdr.len = 0;
-				t->m_pkthdr.rcvif = 0;
+				m_reset_rcvif(t);
 				t->m_len = 0;
 
 				outchain = t;
@@ -6052,7 +6077,7 @@ sctp_send_cookie_echo(struct mbuf *m,
 			return (-4);
 		}
 		mat->m_len = 0;
-		mat->m_pkthdr.rcvif = 0;
+		m_reset_rcvif(mat);
 		mat->m_next = cookie;
 		cookie = mat;
 	}
@@ -6115,7 +6140,7 @@ sctp_send_heartbeat_ack(struct sctp_tcb *stcb,
 			return;
 		}
 		tmp->m_len = 0;
-		tmp->m_pkthdr.rcvif = 0;
+		m_reset_rcvif(tmp);
 		tmp->m_next = outchain;
 		outchain = tmp;
 	}
@@ -6190,7 +6215,7 @@ sctp_send_cookie_ack(struct sctp_tcb *stcb) {
 	hdr->chunk_flags = 0;
 	hdr->chunk_length = htons(chk->send_size);
 	cookie_ack->m_pkthdr.len = cookie_ack->m_len = chk->send_size;
-	cookie_ack->m_pkthdr.rcvif = 0;
+	m_reset_rcvif(cookie_ack);
 	TAILQ_INSERT_TAIL(&chk->asoc->control_send_queue, chk, sctp_next);
 	chk->asoc->ctrl_queue_cnt++;
 	return (0);
@@ -6236,7 +6261,7 @@ sctp_send_shutdown_ack(struct sctp_tcb *stcb, struct sctp_nets *net)
 	ack_cp->ch.chunk_flags = 0;
 	ack_cp->ch.chunk_length = htons(chk->send_size);
 	m_shutdown_ack->m_pkthdr.len = m_shutdown_ack->m_len = chk->send_size;
-	m_shutdown_ack->m_pkthdr.rcvif = 0;
+	m_reset_rcvif(m_shutdown_ack);
 	TAILQ_INSERT_TAIL(&chk->asoc->control_send_queue, chk, sctp_next);
 	chk->asoc->ctrl_queue_cnt++;
 	return (0);
@@ -6282,7 +6307,7 @@ sctp_send_shutdown(struct sctp_tcb *stcb, struct sctp_nets *net)
 	shutdown_cp->ch.chunk_length = htons(chk->send_size);
 	shutdown_cp->cumulative_tsn_ack = htonl(stcb->asoc.cumulative_tsn);
 	m_shutdown->m_pkthdr.len = m_shutdown->m_len = chk->send_size;
-	m_shutdown->m_pkthdr.rcvif = 0;
+	m_reset_rcvif(m_shutdown);
 	TAILQ_INSERT_TAIL(&chk->asoc->control_send_queue, chk, sctp_next);
 	chk->asoc->ctrl_queue_cnt++;
 
@@ -7959,7 +7984,7 @@ sctp_send_abort_tcb(struct sctp_tcb *stcb, struct mbuf *operr)
 	abort_m->sh.v_tag = htonl(stcb->asoc.peer_vtag);
 	abort_m->sh.checksum = 0;
 	m_abort->m_pkthdr.len = m_abort->m_len + sz;
-	m_abort->m_pkthdr.rcvif = 0;
+	m_reset_rcvif(m_abort);
 	sctp_lowlevel_chunk_output(stcb->sctp_ep, stcb,
 	    stcb->asoc.primary_destination,
 	    rtcache_getdst(&stcb->asoc.primary_destination->ro),
@@ -7992,7 +8017,7 @@ sctp_send_shutdown_complete(struct sctp_tcb *stcb,
 	comp_cp->sh.checksum = 0;
 
 	m_shutdown_comp->m_pkthdr.len = m_shutdown_comp->m_len = sizeof(struct sctp_shutdown_complete_msg);
-	m_shutdown_comp->m_pkthdr.rcvif = 0;
+	m_reset_rcvif(m_shutdown_comp);
 	sctp_lowlevel_chunk_output(stcb->sctp_ep, stcb, net,
 	    rtcache_getdst(&net->ro), m_shutdown_comp,
 	    1, 0, NULL, 0);
@@ -8079,16 +8104,15 @@ sctp_send_shutdown_complete2(struct mbuf *m, int iphlen, struct sctphdr *sh)
 
 	mout->m_pkthdr.len = mout->m_len;
 	/* add checksum */
-	if ((sctp_no_csum_on_loopback) &&
-	   (m->m_pkthdr.rcvif) &&
-	   (m->m_pkthdr.rcvif->if_type == IFT_LOOP)) {
+	if ((sctp_no_csum_on_loopback) && m_get_rcvif_NOMPSAFE(m) != NULL &&
+	    m_get_rcvif_NOMPSAFE(m)->if_type == IFT_LOOP) {
 		comp_cp->sh.checksum =  0;
 	} else {
 		comp_cp->sh.checksum = sctp_calculate_sum(mout, NULL, offset_out);
 	}
 
 	/* zap the rcvif, it should be null */
-	mout->m_pkthdr.rcvif = 0;
+	m_reset_rcvif(mout);
 	/* zap the stack pointer to the route */
 	if (iph_out != NULL) {
 		struct route ro;
@@ -9021,16 +9045,15 @@ sctp_send_abort(struct mbuf *m, int iphlen, struct sctphdr *sh, uint32_t vtag,
 	}
 
 	/* add checksum */
-	if ((sctp_no_csum_on_loopback) &&
-	   (m->m_pkthdr.rcvif) &&
-	   (m->m_pkthdr.rcvif->if_type == IFT_LOOP)) {
+	if ((sctp_no_csum_on_loopback) && m_get_rcvif_NOMPSAFE(m) != NULL &&
+	    m_get_rcvif_NOMPSAFE(m)->if_type == IFT_LOOP) {
 		abm->sh.checksum =  0;
 	} else {
 		abm->sh.checksum = sctp_calculate_sum(mout, NULL, iphlen_out);
 	}
 
 	/* zap the rcvif, it should be null */
-	mout->m_pkthdr.rcvif = 0;
+	m_reset_rcvif(mout);
 	if (iph_out != NULL) {
 		struct route ro;
 
@@ -9105,9 +9128,8 @@ sctp_send_operr_to(struct mbuf *m, int iphlen,
 		padlen = 4 - (scm->m_pkthdr.len % 4);
 		m_copyback(scm, scm->m_pkthdr.len, padlen, (void *)&cpthis);
 	}
-	if ((sctp_no_csum_on_loopback) &&
-	    (m->m_pkthdr.rcvif) &&
-	    (m->m_pkthdr.rcvif->if_type == IFT_LOOP)) {
+	if ((sctp_no_csum_on_loopback) && m_get_rcvif_NOMPSAFE(m) != NULL &&
+	    m_get_rcvif_NOMPSAFE(m)->if_type == IFT_LOOP) {
 		val = 0;
 	} else {
 		val = sctp_calculate_sum(scm, NULL, 0);

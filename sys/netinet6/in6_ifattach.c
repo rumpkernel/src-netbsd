@@ -1,4 +1,4 @@
-/*	$NetBSD: in6_ifattach.c,v 1.97 2016/04/27 07:51:14 ozaki-r Exp $	*/
+/*	$NetBSD: in6_ifattach.c,v 1.102 2016/07/20 07:37:51 ozaki-r Exp $	*/
 /*	$KAME: in6_ifattach.c,v 1.124 2001/07/18 08:32:51 jinmei Exp $	*/
 
 /*
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: in6_ifattach.c,v 1.97 2016/04/27 07:51:14 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: in6_ifattach.c,v 1.102 2016/07/20 07:37:51 ozaki-r Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -244,14 +244,16 @@ generate_tmp_ifid(u_int8_t *seed0, const u_int8_t *seed1, u_int8_t *ret)
 		badid = 1;
 	else {
 		struct in6_ifaddr *ia;
+		int s = pserialize_read_enter();
 
-		for (ia = in6_ifaddr; ia; ia = ia->ia_next) {
+		IN6_ADDRLIST_READER_FOREACH(ia) {
 			if (!memcmp(&ia->ia_addr.sin6_addr.s6_addr[8], 
 			    ret, 8)) {
 				badid = 1;
 				break;
 			}
 		}
+		pserialize_read_exit(s);
 	}
 
 	/*
@@ -325,7 +327,7 @@ in6_get_hw_ifid(struct ifnet *ifp, struct in6_addr *in6)
 	static u_int8_t allone[8] =
 		{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
-	IFADDR_FOREACH(ifa, ifp) {
+	IFADDR_READER_FOREACH(ifa, ifp) {
 		if (ifa->ifa_addr->sa_family != AF_LINK)
 			continue;
 		tsdl = satocsdl(ifa->ifa_addr);
@@ -454,6 +456,7 @@ get_ifid(struct ifnet *ifp0, struct ifnet *altifp,
 	struct in6_addr *in6)
 {
 	struct ifnet *ifp;
+	int s;
 
 	/* first, try to get it from the interface itself */
 	if (in6_get_hw_ifid(ifp0, in6) == 0) {
@@ -470,7 +473,8 @@ get_ifid(struct ifnet *ifp0, struct ifnet *altifp,
 	}
 
 	/* next, try to get it from some other hardware interface */
-	IFNET_FOREACH(ifp) {
+	s = pserialize_read_enter();
+	IFNET_READER_FOREACH(ifp) {
 		if (ifp == ifp0)
 			continue;
 		if (in6_get_hw_ifid(ifp, in6) != 0)
@@ -487,6 +491,7 @@ get_ifid(struct ifnet *ifp0, struct ifnet *altifp,
 			goto success;
 		}
 	}
+	pserialize_read_exit(s);
 
 #if 0
 	/* get from hostid - only for certain architectures */
@@ -835,11 +840,6 @@ in6_ifattach(struct ifnet *ifp, struct ifnet *altifp)
 void
 in6_ifdetach(struct ifnet *ifp)
 {
-	struct in6_ifaddr *ia, *oia;
-	struct ifaddr *ifa, *next;
-	struct rtentry *rt;
-	short rtflags;
-	struct in6_multi_mship *imm;
 
 	/* remove ip6_mrouter stuff */
 	ip6_mrouter_detach(ifp);
@@ -847,63 +847,8 @@ in6_ifdetach(struct ifnet *ifp)
 	/* remove neighbor management table */
 	nd6_purge(ifp, NULL);
 
-	/* XXX this code is duplicated in in6_purgeif() --dyoung */
 	/* nuke any of IPv6 addresses we have */
 	if_purgeaddrs(ifp, AF_INET6, in6_purgeaddr);
-
-	/* XXX isn't this code is redundant, given the above? --dyoung */
-	/* XXX doesn't this code replicate code in in6_purgeaddr() ? --dyoung */
-	/* undo everything done by in6_ifattach(), just in case */
-	for (ifa = IFADDR_FIRST(ifp); ifa != NULL; ifa = next) {
-		next = IFADDR_NEXT(ifa);
-
-		if (ifa->ifa_addr->sa_family != AF_INET6
-		 || !IN6_IS_ADDR_LINKLOCAL(&satosin6(&ifa->ifa_addr)->sin6_addr)) {
-			continue;
-		}
-
-		ia = (struct in6_ifaddr *)ifa;
-
-		/*
-		 * leave from multicast groups we have joined for the interface
-		 */
-		while ((imm = LIST_FIRST(&ia->ia6_memberships)) != NULL) {
-			LIST_REMOVE(imm, i6mm_chain);
-			in6_leavegroup(imm);
-		}
-
-		/* remove from the routing table */
-		if ((ia->ia_flags & IFA_ROUTE) &&
-		    (rt = rtalloc1((struct sockaddr *)&ia->ia_addr, 0))) {
-			rtflags = rt->rt_flags;
-			rtfree(rt);
-			rtrequest(RTM_DELETE, (struct sockaddr *)&ia->ia_addr,
-			    (struct sockaddr *)&ia->ia_addr,
-			    (struct sockaddr *)&ia->ia_prefixmask,
-			    rtflags, NULL);
-		}
-
-		/* remove from the linked list */
-		ifa_remove(ifp, &ia->ia_ifa);
-
-		/* also remove from the IPv6 address chain(itojun&jinmei) */
-		oia = ia;
-		if (oia == (ia = in6_ifaddr))
-			in6_ifaddr = ia->ia_next;
-		else {
-			while (ia->ia_next && (ia->ia_next != oia))
-				ia = ia->ia_next;
-			if (ia->ia_next)
-				ia->ia_next = oia->ia_next;
-			else {
-				nd6log(LOG_ERR,
-				    "%s: didn't unlink in6ifaddr from list\n",
-				    if_name(ifp));
-			}
-		}
-
-		ifafree(&oia->ia_ifa);
-	}
 
 	/* cleanup multicast address kludge table, if there is any */
 	in6_purgemkludge(ifp);
@@ -954,6 +899,7 @@ in6_tmpaddrtimer(void *ignored_arg)
 	struct nd_ifinfo *ndi;
 	u_int8_t nullbuf[8];
 	struct ifnet *ifp;
+	int s;
 
 	mutex_enter(softnet_lock);
 	KERNEL_LOCK(1, NULL);
@@ -963,7 +909,8 @@ in6_tmpaddrtimer(void *ignored_arg)
 	    ip6_temp_regen_advance) * hz, in6_tmpaddrtimer, NULL);
 
 	memset(nullbuf, 0, sizeof(nullbuf));
-	IFNET_FOREACH(ifp) {
+	s = pserialize_read_enter();
+	IFNET_READER_FOREACH(ifp) {
 		ndi = ND_IFINFO(ifp);
 		if (memcmp(ndi->randomid, nullbuf, sizeof(nullbuf)) != 0) {
 			/*
@@ -974,6 +921,7 @@ in6_tmpaddrtimer(void *ignored_arg)
 			    ndi->randomseed1, ndi->randomid);
 		}
 	}
+	pserialize_read_exit(s);
 
 	KERNEL_UNLOCK_ONE(NULL);
 	mutex_exit(softnet_lock);

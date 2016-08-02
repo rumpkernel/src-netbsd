@@ -1,4 +1,4 @@
-/*	$NetBSD: bwi.c,v 1.27 2016/03/02 19:26:15 christos Exp $	*/
+/*	$NetBSD: bwi.c,v 1.30 2016/06/10 13:27:13 ozaki-r Exp $	*/
 /*	$OpenBSD: bwi.c,v 1.74 2008/02/25 21:13:30 mglocker Exp $	*/
 
 /*
@@ -48,7 +48,7 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: bwi.c,v 1.27 2016/03/02 19:26:15 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: bwi.c,v 1.30 2016/06/10 13:27:13 ozaki-r Exp $");
 
 #include <sys/param.h>
 #include <sys/callout.h>
@@ -7365,8 +7365,8 @@ bwi_start(struct ifnet *ifp)
 
 		IF_DEQUEUE(&ic->ic_mgtq, m);
 		if (m != NULL) {
-			ni = (struct ieee80211_node *)m->m_pkthdr.rcvif;
-			m->m_pkthdr.rcvif = NULL;
+			ni = M_GETCTX(m, struct ieee80211_node *);
+			M_CLEARCTX(m);
 
 			mgt_pkt = 1;
 		} else {
@@ -8458,7 +8458,7 @@ bwi_rxeof(struct bwi_softc *sc, int end_idx)
 		plcp = ((const uint8_t *)(hdr + 1) + hdr_extra);
 		rssi = bwi_calc_rssi(sc, hdr);
 
-		m->m_pkthdr.rcvif = ifp;
+		m_set_rcvif(m, ifp);
 		m->m_len = m->m_pkthdr.len = buflen + sizeof(*hdr);
 		m_adj(m, sizeof(*hdr) + wh_ofs);
 

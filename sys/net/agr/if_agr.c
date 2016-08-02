@@ -1,4 +1,4 @@
-/*	$NetBSD: if_agr.c,v 1.34 2016/02/09 08:32:12 ozaki-r Exp $	*/
+/*	$NetBSD: if_agr.c,v 1.38 2016/07/20 07:37:51 ozaki-r Exp $	*/
 
 /*-
  * Copyright (c)2005 YAMAMOTO Takashi,
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_agr.c,v 1.34 2016/02/09 08:32:12 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_agr.c,v 1.38 2016/07/20 07:37:51 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
@@ -134,7 +134,7 @@ agr_input(struct ifnet *ifp_port, struct mbuf *m)
 	}
 
 	ifp->if_ipackets++;
-	m->m_pkthdr.rcvif = ifp;
+	m_set_rcvif(m, ifp);
 
 #define DNH_DEBUG
 #if NVLAN > 0
@@ -209,7 +209,7 @@ agr_xmit_frame(struct ifnet *ifp_port, struct mbuf *m)
 	m_copydata(m, 0, hdrlen, &dst->sa_data);
 	m_adj(m, hdrlen);
 
-	error = (*ifp_port->if_output)(ifp_port, m, dst, NULL);
+	error = if_output_lock(ifp_port, ifp_port, m, dst, NULL);
 
 	return error;
 }
@@ -567,6 +567,7 @@ agr_addport(struct ifnet *ifp, struct ifnet *ifp_port)
 	struct agr_softc *sc = ifp->if_softc;
 	struct agr_port *port = NULL;
 	int error = 0;
+	int s;
 
 	if (ifp_port->if_ioctl == NULL) {
 		error = EOPNOTSUPP;
@@ -591,12 +592,15 @@ agr_addport(struct ifnet *ifp, struct ifnet *ifp_port)
 	}
 	port->port_flags = AGRPORT_LARVAL;
 
-	IFADDR_FOREACH(ifa, ifp_port) {
+	s = pserialize_read_enter();
+	IFADDR_READER_FOREACH(ifa, ifp_port) {
 		if (ifa->ifa_addr->sa_family != AF_LINK) {
+			pserialize_read_exit(s);
 			error = EBUSY;
 			goto out;
 		}
 	}
+	pserialize_read_exit(s);
 
 	if (sc->sc_nports == 0) {
 		switch (ifp_port->if_type) {

@@ -1,4 +1,4 @@
-/*	$NetBSD: sctp_asconf.c,v 1.2 2016/04/03 09:57:40 mlelstv Exp $ */
+/*	$NetBSD: sctp_asconf.c,v 1.5 2016/07/07 09:32:02 ozaki-r Exp $ */
 /*	$KAME: sctp_asconf.c,v 1.25 2005/06/16 20:44:24 jinmei Exp $	*/
 
 /*
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sctp_asconf.c,v 1.2 2016/04/03 09:57:40 mlelstv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sctp_asconf.c,v 1.5 2016/07/07 09:32:02 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_ipsec.h"
@@ -2114,14 +2114,16 @@ static struct sockaddr *
 sctp_find_valid_localaddr(struct sctp_tcb *stcb)
 {
 	struct ifnet *ifn;
-	struct ifaddr *ifa, *nifa;
+	struct ifaddr *ifa;
+	int s;
 
-	IFNET_FOREACH(ifn) {
+	s = pserialize_read_enter();
+	IFNET_READER_FOREACH(ifn) {
 		if (stcb->asoc.loopback_scope == 0 && ifn->if_type == IFT_LOOP) {
 			/* Skip if loopback_scope not set */
 			continue;
 		}
-		IFADDR_FOREACH_SAFE(ifa, ifn, nifa) {
+		IFADDR_READER_FOREACH(ifa, ifn) {
 			if (ifa->ifa_addr->sa_family == AF_INET &&
 			    stcb->asoc.ipv4_addr_legal) {
 				struct sockaddr_in *sin;
@@ -2138,6 +2140,8 @@ sctp_find_valid_localaddr(struct sctp_tcb *stcb)
 				if (sctp_is_addr_restricted(stcb,
 				    ifa->ifa_addr))
 					continue;
+				pserialize_read_exit(s);
+
 				/* found a valid local v4 address to use */
 				return (ifa->ifa_addr);
 			} else if (ifa->ifa_addr->sa_family == AF_INET6 &&
@@ -2163,11 +2167,14 @@ sctp_find_valid_localaddr(struct sctp_tcb *stcb)
 				    IN6_IS_ADDR_SITELOCAL(&sin6->sin6_addr))
 					continue;
 
+				pserialize_read_exit(s);
 				/* found a valid local v6 address to use */
 				return (ifa->ifa_addr);
 			}
 		}
 	}
+	pserialize_read_exit(s);
+
 	/* no valid addresses found */
 	return (NULL);
 }
@@ -2772,16 +2779,18 @@ sctp_check_address_list_all(struct sctp_tcb *stcb, struct mbuf *m, int offset,
 {
 	struct ifnet *ifn;
 	struct ifaddr *ifa;
+	int s;
 
 	/* go through all our known interfaces */
-	IFNET_FOREACH(ifn) {
+	s = pserialize_read_enter();
+	IFNET_READER_FOREACH(ifn) {
 		if (loopback_scope == 0 && ifn->if_type == IFT_LOOP) {
 			/* skip loopback interface */
 			continue;
 		}
 
 		/* go through each interface address */
-		IFADDR_FOREACH(ifa, ifn) {
+		IFADDR_READER_FOREACH(ifa, ifn) {
 			/* do i have it implicitly? */
 			if (sctp_cmpaddr(ifa->ifa_addr, init_addr)) {
 #ifdef SCTP_DEBUG
@@ -2801,6 +2810,7 @@ sctp_check_address_list_all(struct sctp_tcb *stcb, struct mbuf *m, int offset,
 			}
 		} /* end foreach ifa */
 	} /* end foreach ifn */
+	pserialize_read_exit(s);
 }
 
 /*

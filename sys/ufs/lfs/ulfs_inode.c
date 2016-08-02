@@ -1,5 +1,5 @@
-/*	$NetBSD: ulfs_inode.c,v 1.12 2015/11/14 22:03:54 pgoyette Exp $	*/
-/*  from NetBSD: ufs_inode.c,v 1.89 2013/01/22 09:39:18 dholland Exp  */
+/*	$NetBSD: ulfs_inode.c,v 1.15 2016/06/20 03:36:09 dholland Exp $	*/
+/*  from NetBSD: ufs_inode.c,v 1.95 2015/06/13 14:56:45 hannken Exp  */
 
 /*
  * Copyright (c) 1991, 1993
@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ulfs_inode.c,v 1.12 2015/11/14 22:03:54 pgoyette Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ulfs_inode.c,v 1.15 2016/06/20 03:36:09 dholland Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_lfs.h"
@@ -226,6 +226,7 @@ ulfs_balloc_range(struct vnode *vp, off_t off, off_t len, kauth_cred_t cred,
 	    VM_PROT_WRITE, 0, PGO_SYNCIO | PGO_PASTEOF | PGO_NOBLOCKALLOC |
 	    PGO_NOTIMESTAMP | PGO_GLOCKHELD);
 	if (error) {
+		genfs_node_unlock(vp);
 		goto out;
 	}
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: init_main.c,v 1.479 2016/03/28 16:45:44 macallan Exp $	*/
+/*	$NetBSD: init_main.c,v 1.482 2016/07/07 06:55:43 msaitoh Exp $	*/
 
 /*-
  * Copyright (c) 2008, 2009 The NetBSD Foundation, Inc.
@@ -97,7 +97,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.479 2016/03/28 16:45:44 macallan Exp $");
+__KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.482 2016/07/07 06:55:43 msaitoh Exp $");
 
 #include "opt_ddb.h"
 #include "opt_inet.h"
@@ -198,9 +198,7 @@ extern void *_binary_splash_image_end;
 #include <sys/syscall.h>
 #include <sys/syscallargs.h>
 
-#if defined(PAX_MPROTECT) || defined(PAX_SEGVGUARD) || defined(PAX_ASLR)
 #include <sys/pax.h>
-#endif /* PAX_MPROTECT || PAX_SEGVGUARD || PAX_ASLR */
 
 #include <secmodel/secmodel.h>
 
@@ -527,9 +525,7 @@ main(void)
 	veriexec_init();
 #endif /* NVERIEXEC > 0 */
 
-#if defined(PAX_MPROTECT) || defined(PAX_SEGVGUARD) || defined(PAX_ASLR)
 	pax_init();
-#endif /* PAX_MPROTECT || PAX_SEGVGUARD || PAX_ASLR */
 
 #ifdef	IPSEC
 	/* Attach network crypto subsystem */
@@ -799,7 +795,7 @@ rootconf_handle_wedges(void)
 	struct vnode *vp;
 	daddr_t startblk;
 	uint64_t nblks;
-	device_t dev; 
+	device_t dev;
 	int error;
 
 	if (booted_nblks) {
@@ -1048,7 +1044,7 @@ start_init(void *arg)
 			goto copyerr;
 
 		/*
-		 * Now try to exec the program.  If can't for any reason
+		 * Now try to exec the program.  If it can't for any reason
 		 * other than it doesn't exist, complain.
 		 */
 		error = sys_execve(l, &args, retval);

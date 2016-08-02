@@ -1,4 +1,4 @@
-/*	$NetBSD: puffs_vnops.c,v 1.203 2015/04/20 23:03:08 riastradh Exp $	*/
+/*	$NetBSD: puffs_vnops.c,v 1.205 2016/07/21 18:21:27 christos Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007  Antti Kantee.  All Rights Reserved.
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: puffs_vnops.c,v 1.203 2015/04/20 23:03:08 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: puffs_vnops.c,v 1.205 2016/07/21 18:21:27 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -1147,7 +1147,7 @@ puffs_vnop_getattr(void *v)
 static void
 zerofill_lastpage(struct vnode *vp, voff_t off)
 {
-	char zbuf[PAGE_SIZE];
+	char zbuf[16384];
 	struct iovec iov;
 	struct uio uio;
 	vsize_t len;
@@ -1160,6 +1160,7 @@ zerofill_lastpage(struct vnode *vp, voff_t off)
 		return;
 
 	len = round_page(off) - off;
+	KASSERT(len < sizeof(zbuf));
 	memset(zbuf, 0, len);
 
 	iov.iov_base = zbuf;
@@ -1421,7 +1422,7 @@ puffs_vnop_inactive(void *v)
 				kmem_free(psopr, sizeof(*psopr));
 			} else {
 				TAILQ_INSERT_TAIL(&pmp->pmp_sopnodereqs,
-				    psopr, psopr_entries); 
+				    psopr, psopr_entries);
 				pnode->pn_stat |= PNODE_SOPEXP;
 			}
 
@@ -2717,7 +2718,7 @@ puffs_vnop_advlock(void *v)
 	int error;
 
 	if (!EXISTSOP(pmp, ADVLOCK))
-		return lf_advlock(ap, &pn->pn_lockf, vp->v_size); 
+		return lf_advlock(ap, &pn->pn_lockf, vp->v_size);
 	
 	PUFFS_MSG_ALLOC(vn, advlock);
 	(void)memcpy(&advlock_msg->pvnr_fl, ap->a_fl, 

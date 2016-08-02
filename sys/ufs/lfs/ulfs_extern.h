@@ -1,5 +1,5 @@
-/*	$NetBSD: ulfs_extern.h,v 1.20 2015/09/21 01:24:23 dholland Exp $	*/
-/*  from NetBSD: ufs_extern.h,v 1.72 2012/05/09 00:21:18 riastradh Exp  */
+/*	$NetBSD: ulfs_extern.h,v 1.24 2016/06/20 03:36:09 dholland Exp $	*/
+/*  from NetBSD: ufs_extern.h,v 1.79 2015/03/27 17:27:56 riastradh Exp   */
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -154,9 +154,6 @@ int	ulfs_fhtovp(struct mount *, struct ulfs_ufid *, struct vnode **);
 /* ulfs_vnops.c */
 void	ulfs_vinit(struct mount *, int (**)(void *),
 		  int (**)(void *), struct vnode **);
-int	ulfs_makeinode(struct vattr *vap, struct vnode *,
-		      const struct ulfs_lookup_results *,
-		      struct vnode **, struct componentname *);
 int	ulfs_gop_alloc(struct vnode *, off_t, off_t, int, kauth_cred_t);
 void	ulfs_gop_markupdate(struct vnode *, int);
 int	ulfs_bufio(enum uio_rw, struct vnode *, void *, size_t, off_t, int,

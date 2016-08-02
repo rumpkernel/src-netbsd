@@ -1,4 +1,4 @@
-/*	$NetBSD: xform_ipip.c,v 1.37 2016/01/26 06:00:10 knakahara Exp $	*/
+/*	$NetBSD: xform_ipip.c,v 1.42 2016/07/07 09:32:03 ozaki-r Exp $	*/
 /*	$FreeBSD: src/sys/netipsec/xform_ipip.c,v 1.3.2.1 2003/01/24 05:11:36 sam Exp $	*/
 /*	$OpenBSD: ip_ipip.c,v 1.25 2002/06/10 18:04:55 itojun Exp $ */
 
@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xform_ipip.c,v 1.37 2016/01/26 06:00:10 knakahara Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xform_ipip.c,v 1.42 2016/07/07 09:32:03 ozaki-r Exp $");
 
 /*
  * IP-inside-IP processing
@@ -330,11 +330,12 @@ _ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp)
 	}
 
 	/* Check for local address spoofing. */
-	if ((m->m_pkthdr.rcvif == NULL ||
-	    !(m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK)) &&
+	if ((m_get_rcvif_NOMPSAFE(m) == NULL ||
+	    !(m_get_rcvif_NOMPSAFE(m)->if_flags & IFF_LOOPBACK)) &&
 	    ipip_allow != 2) {
-		IFNET_FOREACH(ifp) {
-			IFADDR_FOREACH(ifa, ifp) {
+		int s = pserialize_read_enter();
+		IFNET_READER_FOREACH(ifp) {
+			IFADDR_READER_FOREACH(ifa, ifp) {
 #ifdef INET
 				if (ipo) {
 					if (ifa->ifa_addr->sa_family !=
@@ -345,6 +346,7 @@ _ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp)
 
 					if (sin->sin_addr.s_addr ==
 					    ipo->ip_src.s_addr)	{
+						pserialize_read_exit(s);
 						IPIP_STATINC(IPIP_STAT_SPOOF);
 						m_freem(m);
 						return;
@@ -361,6 +363,7 @@ _ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp)
 					sin6 = (struct sockaddr_in6 *) ifa->ifa_addr;
 
 					if (IN6_ARE_ADDR_EQUAL(&sin6->sin6_addr, &ip6->ip6_src)) {
+						pserialize_read_exit(s);
 						IPIP_STATINC(IPIP_STAT_SPOOF);
 						m_freem(m);
 						return;
@@ -370,6 +373,7 @@ _ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp)
 #endif /* INET6 */
 			}
 		}
+		pserialize_read_exit(s);
 	}
 
 	/* Statistics */
@@ -721,6 +725,11 @@ ipe4_attach(void)
 	xform_register(&ipe4_xformsw);
 	/* attach to encapsulation framework */
 	/* XXX save return cookie for detach on module remove */
+
+	encapinit();
+	/* This function is called before ifinit(). Who else gets lock? */
+	(void)encap_lock_enter();
+	/* ipe4_encapsw and ipe4_encapsw must be added atomically */
 #ifdef INET
 	(void) encap_attach_func(AF_INET, -1,
 		ipe4_encapcheck, &ipe4_encapsw, NULL);
@@ -729,6 +738,7 @@ ipe4_attach(void)
 	(void) encap_attach_func(AF_INET6, -1,
 		ipe4_encapcheck, &ipe4_encapsw6, NULL);
 #endif
+	encap_lock_exit();
 }
 
 #ifdef SYSINIT

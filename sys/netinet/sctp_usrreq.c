@@ -1,5 +1,5 @@
 /*	$KAME: sctp_usrreq.c,v 1.50 2005/06/16 20:45:29 jinmei Exp $	*/
-/*	$NetBSD: sctp_usrreq.c,v 1.4 2016/04/25 21:21:02 rjs Exp $	*/
+/*	$NetBSD: sctp_usrreq.c,v 1.6 2016/07/07 09:32:02 ozaki-r Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002, 2003, 2004 Cisco Systems, Inc.
@@ -33,7 +33,7 @@
  * SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sctp_usrreq.c,v 1.4 2016/04/25 21:21:02 rjs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sctp_usrreq.c,v 1.6 2016/07/07 09:32:02 ozaki-r Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
@@ -943,13 +943,14 @@ sctp_fill_up_addresses(struct sctp_inpcb *inp,
 	}
 
 	if (inp->sctp_flags & SCTP_PCB_FLAGS_BOUNDALL) {
-		IFNET_FOREACH(ifn) {
+		int s = pserialize_read_enter();
+		IFNET_READER_FOREACH(ifn) {
 			if ((loopback_scope == 0) &&
 			    (ifn->if_type == IFT_LOOP)) {
 				/* Skip loopback if loopback_scope not set */
 				continue;
 			}
-			IFADDR_FOREACH(ifa, ifn) {
+			IFADDR_READER_FOREACH(ifa, ifn) {
 				if (stcb) {
 				/*
 				 * For the BOUND-ALL case, the list
@@ -988,6 +989,7 @@ sctp_fill_up_addresses(struct sctp_inpcb *inp,
 						actual += sizeof(*sin);
 					}
 					if (actual >= limit) {
+						pserialize_read_exit(s);
 						return (actual);
 					}
 				} else if ((ifa->ifa_addr->sa_family == AF_INET6) &&
@@ -1010,11 +1012,13 @@ sctp_fill_up_addresses(struct sctp_inpcb *inp,
 					sas = (struct sockaddr_storage *)((vaddr_t)sas + sizeof(*sin6));
 					actual += sizeof(*sin6);
 					if (actual >= limit) {
+						pserialize_read_exit(s);
 						return (actual);
 					}
 				}
 			}
 		}
+		pserialize_read_exit(s);
 	} else {
 		struct sctp_laddr *laddr;
 		/*
@@ -1095,9 +1099,11 @@ sctp_count_max_addresses(struct sctp_inpcb *inp)
 	if (inp->sctp_flags & SCTP_PCB_FLAGS_BOUNDALL) {
 		struct ifnet *ifn;
 		struct ifaddr *ifa;
+		int s;
 
-		IFNET_FOREACH(ifn) {
-			IFADDR_FOREACH(ifa, ifn) {
+		s = pserialize_read_enter();
+		IFNET_READER_FOREACH(ifn) {
+			IFADDR_READER_FOREACH(ifa, ifn) {
 				/* Count them if they are the right type */
 				if (ifa->ifa_addr->sa_family == AF_INET) {
 					if (inp->sctp_flags & SCTP_PCB_FLAGS_NEEDS_MAPPED_V4)
@@ -1109,6 +1115,7 @@ sctp_count_max_addresses(struct sctp_inpcb *inp)
 					cnt += sizeof(struct sockaddr_in6);
 			}
 		}
+		pserialize_read_exit(s);
 	} else {
 		struct sctp_laddr *laddr;
 		LIST_FOREACH(laddr, &inp->sctp_addr_list, sctp_nxt_addr) {
@@ -3843,7 +3850,7 @@ static int
 sctp_purgeif(struct socket *so, struct ifnet *ifp)
 {
 	struct ifaddr *ifa;
-	IFADDR_FOREACH(ifa, ifp) {
+	IFADDR_READER_FOREACH(ifa, ifp) {
 		if (ifa->ifa_addr->sa_family == PF_INET) {
 			sctp_delete_ip_address(ifa);
 		}
