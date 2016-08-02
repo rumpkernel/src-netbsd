@@ -1,19 +1,9 @@
-#include "config.h"
-
-#if HAVE_FGETLN
-
-int dummy;
-
-#else
-
-/*	$NetBSD: compat_fgetln.c,v 1.4 2015/12/17 22:31:12 christos Exp $	*/
-
 /*-
- * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * Copyright (c) 2011 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Christos Zoulas.
+ * by Matt Thomas of 3am Software Foundry.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,9 +13,6 @@ int dummy;
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -40,55 +27,10 @@ int dummy;
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
+#define	LINE_SHIFT	6
+#define	WANT_SDCACHE_OPS
 
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#define	OPNAME(op)	_OPNAME(cache_r4k,op,64)
+#define	OPNAME32(op)	_OPNAME32(cache_r4k,op,64)
 
-char *
-fgetln(fp, len)
-	FILE *fp;
-	size_t *len;
-{
-	static char *buf = NULL;
-	static size_t bufsiz = 0;
-	char *ptr;
-
-
-	if (buf == NULL) {
-		bufsiz = BUFSIZ;
-		if ((buf = malloc(bufsiz)) == NULL)
-			return NULL;
-	}
-
-	if (fgets(buf, bufsiz, fp) == NULL)
-		return NULL;
-
-	*len = 0;
-	while ((ptr = strchr(&buf[*len], '\n')) == NULL) {
-		size_t nbufsiz = bufsiz + BUFSIZ;
-		char *nbuf = realloc(buf, nbufsiz);
-
-		if (nbuf == NULL) {
-			int oerrno = errno;
-			free(buf);
-			errno = oerrno;
-			buf = NULL;
-			return NULL;
-		} else
-			buf = nbuf;
-
-		*len = bufsiz;
-		if (fgets(&buf[bufsiz], BUFSIZ, fp) == NULL)
-			return buf;
-
-		bufsiz = nbufsiz;
-	}
-
-	*len = (ptr - buf) + 1;
-	return buf;
-}
-
-#endif
+#include <mips/mips/cache_r4k_subr.S>

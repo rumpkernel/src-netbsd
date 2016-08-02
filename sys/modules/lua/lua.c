@@ -1,4 +1,4 @@
-/*	$NetBSD: lua.c,v 1.16 2015/02/07 04:09:13 christos Exp $ */
+/*	$NetBSD: lua.c,v 1.18 2016/07/14 04:00:46 msaitoh Exp $ */
 
 /*
  * Copyright (c) 2014 by Lourival Vieira Neto <lneto@NetBSD.org>.
@@ -152,7 +152,7 @@ lua_attach(device_t parent, device_t self, void *aux)
             CTL_KERN, CTL_CREATE, CTL_EOL);
 
         if (node == NULL) {
-		printf(": can't create sysctl node\n");
+		aprint_error(": can't create sysctl node\n");
                 return;
 	}
 
@@ -355,7 +355,10 @@ luaioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	case LUAREQUIRE:	/* 'require' a module in a State */
 		require = data;
 		LIST_FOREACH(s, &lua_states, lua_next)
-			if (!strcmp(s->lua_name, require->state))
+			if (!strcmp(s->lua_name, require->state)) {
+				LIST_FOREACH(m, &s->lua_modules, mod_next)
+					if (!strcmp(m->mod_name, require->module))
+						return ENXIO;
 				LIST_FOREACH(m, &lua_modules, mod_next)
 					if (!strcmp(m->mod_name,
 					    require->module)) {
@@ -379,6 +382,7 @@ luaioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 					    	    mod_next);
 					    	return 0;
 					}
+			}
 		return ENXIO;
 	case LUALOAD:
 		load = data;

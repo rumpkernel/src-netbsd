@@ -1,4 +1,4 @@
-/*	$NetBSD: sysconf.c,v 1.37 2016/02/26 17:13:01 christos Exp $	*/
+/*	$NetBSD: sysconf.c,v 1.40 2016/07/03 14:24:58 christos Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -37,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)sysconf.c	8.2 (Berkeley) 3/20/94";
 #else
-__RCSID("$NetBSD: sysconf.c,v 1.37 2016/02/26 17:13:01 christos Exp $");
+__RCSID("$NetBSD: sysconf.c,v 1.40 2016/07/03 14:24:58 christos Exp $");
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -411,15 +411,24 @@ yesno:		if (sysctl(mib, mib_len, &value, &len, NULL, 0) == -1)
 		return _POSIX_THREAD_ATTR_STACKSIZE;
 	case _SC_THREAD_SAFE_FUNCTIONS:
 		return _POSIX_THREAD_SAFE_FUNCTIONS;
+	case _SC_THREAD_PRIO_PROTECT:
+		return _POSIX_THREAD_PRIO_PROTECT;
 	case _SC_THREAD_PRIORITY_SCHEDULING:
 	case _SC_THREAD_PRIO_INHERIT:
-	case _SC_THREAD_PRIO_PROTECT:
 	case _SC_THREAD_PROCESS_SHARED:
 		return -1;
 	case _SC_TTY_NAME_MAX:
 		return pathconf(_PATH_DEV, _PC_NAME_MAX);
 	case _SC_TIMER_MAX:
 		return _POSIX_TIMER_MAX;
+	case _SC_SEM_NSEMS_MAX:
+		return _POSIX_SEM_NSEMS_MAX;
+	case _SC_CPUTIME:
+		return _POSIX_CPUTIME;
+	case _SC_THREAD_CPUTIME:
+		return _POSIX_THREAD_CPUTIME;
+	case _SC_DELAYTIMER_MAX:
+		return _POSIX_DELAYTIMER_MAX;
 	default:
 		errno = EINVAL;
 		return (-1);

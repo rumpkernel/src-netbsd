@@ -1,4 +1,4 @@
-/*	$NetBSD: if_run.c,v 1.12 2016/04/23 10:15:31 skrll Exp $	*/
+/*	$NetBSD: if_run.c,v 1.15 2016/06/10 13:27:15 ozaki-r Exp $	*/
 /*	$OpenBSD: if_run.c,v 1.90 2012/03/24 15:11:04 jsg Exp $	*/
 
 /*-
@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_run.c,v 1.12 2016/04/23 10:15:31 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_run.c,v 1.15 2016/06/10 13:27:15 ozaki-r Exp $");
 
 #include <sys/param.h>
 #include <sys/sockio.h>
@@ -2068,7 +2068,7 @@ run_rx_frame(struct run_softc *sc, uint8_t *buf, int dmalen)
 		}
 	}
 	/* finalize mbuf */
-	m->m_pkthdr.rcvif = ifp;
+	m_set_rcvif(m, ifp);
 	memcpy(mtod(m, void *), wh, len);
 	m->m_pkthdr.len = m->m_len = len;
 
@@ -2379,8 +2379,8 @@ run_start(struct ifnet *ifp)
 		/* send pending management frames first */
 		IF_DEQUEUE(&ic->ic_mgtq, m);
 		if (m != NULL) {
-			ni = (void *)m->m_pkthdr.rcvif;
-			m->m_pkthdr.rcvif = NULL;
+			ni = M_GETCTX(m, struct ieee80211_node *);
+			M_CLEARCTX(m);
 			goto sendit;
 		}
 		if (ic->ic_state != IEEE80211_S_RUN)

@@ -1,4 +1,4 @@
-/*	$NetBSD: if_iwm.c,v 1.40 2016/02/09 08:32:11 ozaki-r Exp $	*/
+/*	$NetBSD: if_iwm.c,v 1.42 2016/06/10 13:27:14 ozaki-r Exp $	*/
 /*	OpenBSD: if_iwm.c,v 1.41 2015/05/22 06:50:54 kettenis Exp	*/
 
 /*
@@ -105,7 +105,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_iwm.c,v 1.40 2016/02/09 08:32:11 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_iwm.c,v 1.42 2016/06/10 13:27:14 ozaki-r Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -3206,7 +3206,7 @@ iwm_mvm_rx_rx_mpdu(struct iwm_softc *sc,
 	if (iwm_rx_addbuf(sc, IWM_RBUF_SIZE, sc->rxq.cur) != 0)
 		return;
 
-	m->m_pkthdr.rcvif = IC2IFP(ic);
+	m_set_rcvif(m, IC2IFP(ic));
 
 	if (sc->sc_scanband == IEEE80211_CHAN_5GHZ) {
 		if (le32toh(phy_info->channel) < __arraycount(ic->ic_channels))
@@ -5793,7 +5793,7 @@ iwm_start(struct ifnet *ifp)
 		/* need to send management frames even if we're not RUNning */
 		IF_DEQUEUE(&ic->ic_mgtq, m);
 		if (m) {
-			ni = (void *)m->m_pkthdr.rcvif;
+			ni = M_GETCTX(m, struct ieee80211_node *);
 			ac = 0;
 			goto sendit;
 		}

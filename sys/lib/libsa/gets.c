@@ -1,4 +1,4 @@
-/*	$NetBSD: gets.c,v 1.10 2007/11/24 13:20:55 isaki Exp $	*/
+/*	$NetBSD: gets.c,v 1.13 2016/06/11 06:20:11 dholland Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -36,10 +36,21 @@
 void
 gets(char *buf)
 {
+	kgets(buf, (size_t)-1);
+}
+
+void
+kgets(char *buf, size_t size)
+{
 	int c;
 	char *lp;
 
 	for (lp = buf;;) {
+		if (lp - buf == size) {
+			lp--;
+			*lp = '\0';
+			return;
+		}
 		switch (c = getchar() & 0177) {
 		case '\n':
 		case '\r':

@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.h,v 1.35 2015/01/09 01:08:49 riastradh Exp $	*/
+/*	$NetBSD: pmap.h,v 1.38 2016/07/22 14:08:33 maxv Exp $	*/
 
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -155,27 +155,26 @@
 /* Xen use slots 256-272, let's move farther */
 #define L4_SLOT_KERN		320
 #endif
-#define L4_SLOT_KERNBASE	511
+#define L4_SLOT_KERNBASE	511 /* pl4_i(KERNBASE) */
 
 #define PDIR_SLOT_KERN	L4_SLOT_KERN
 #define PDIR_SLOT_PTE	L4_SLOT_PTE
 
 /*
- * the following defines give the virtual addresses of various MMU
+ * The following defines give the virtual addresses of various MMU
  * data structures:
  * PTE_BASE: the base VA of the linear PTE mappings
- * PTD_BASE: the base VA of the recursive mapping of the PTD
+ * PDP_BASE: the base VA of the recursive mapping of the PTD
  * PDP_PDE: the VA of the PDE that points back to the PDP
- *
  */
 
-#define PTE_BASE  ((pt_entry_t *) (L4_SLOT_PTE * NBPD_L4))
-#define KERN_BASE  ((pt_entry_t *) (L4_SLOT_KERN * NBPD_L4))
+#define PTE_BASE	((pt_entry_t *)(L4_SLOT_PTE * NBPD_L4))
+#define KERN_BASE	((pt_entry_t *)(L4_SLOT_KERN * NBPD_L4))
 
-#define L1_BASE		PTE_BASE
-#define L2_BASE ((pd_entry_t *)((char *)L1_BASE + L4_SLOT_PTE * NBPD_L3))
-#define L3_BASE ((pd_entry_t *)((char *)L2_BASE + L4_SLOT_PTE * NBPD_L2))
-#define L4_BASE ((pd_entry_t *)((char *)L3_BASE + L4_SLOT_PTE * NBPD_L1))
+#define L1_BASE	PTE_BASE
+#define L2_BASE	((pd_entry_t *)((char *)L1_BASE + L4_SLOT_PTE * NBPD_L3))
+#define L3_BASE	((pd_entry_t *)((char *)L2_BASE + L4_SLOT_PTE * NBPD_L2))
+#define L4_BASE	((pd_entry_t *)((char *)L3_BASE + L4_SLOT_PTE * NBPD_L1))
 
 #define PDP_PDE		(L4_BASE + PDIR_SLOT_PTE)
 
@@ -307,7 +306,7 @@ pmap_pte_setbits(volatile pt_entry_t *pte, pt_entry_t bits)
 
 static __inline void
 pmap_pte_clearbits(volatile pt_entry_t *pte, pt_entry_t bits)
-{	
+{
 	mutex_enter(&pte_lock);
 	xpq_queue_pte_update(xpmap_ptetomach(__UNVOLATILE(pte)),
 	    (*pte) & ~bits);
@@ -324,7 +323,6 @@ pmap_pte_flush(void)
 }
 #endif
 
-void pmap_prealloc_lowmem_ptps(void);
 void pmap_changeprot_local(vaddr_t, vm_prot_t);
 
 #include <x86/pmap_pv.h>

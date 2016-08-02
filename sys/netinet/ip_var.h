@@ -1,4 +1,4 @@
-/*	$NetBSD: ip_var.h,v 1.112 2016/04/28 00:16:56 ozaki-r Exp $	*/
+/*	$NetBSD: ip_var.h,v 1.114 2016/06/21 03:28:27 ozaki-r Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -114,7 +114,7 @@ struct ipoption {
  * passed to ip_output when IP multicast options are in use.
  */
 struct ip_moptions {
-	struct	  ifnet *imo_multicast_ifp; /* ifp for outgoing multicasts */
+	if_index_t imo_multicast_if_index; /* I/F for outgoing multicasts */
 	struct in_addr imo_multicast_addr; /* ifindex/addr on MULTICAST_IF */
 	u_int8_t  imo_multicast_ttl;	/* TTL for outgoing multicasts */
 	u_int8_t  imo_multicast_loop;	/* 1 => hear sends if a member */
@@ -244,7 +244,6 @@ int	ip_if_output(struct ifnet * const, struct mbuf * const,
 /* IP Flow interface. */
 void	ipflow_init(void);
 void	ipflow_poolinit(void);
-struct ipflow *ipflow_reap(bool);
 void	ipflow_create(const struct route *, struct mbuf *);
 void	ipflow_slowtimo(void);
 int	ipflow_invalidate_all(int);

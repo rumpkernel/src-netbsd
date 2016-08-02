@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_socket.c,v 1.126 2015/07/24 13:02:52 maxv Exp $	*/
+/*	$NetBSD: linux_socket.c,v 1.131 2016/07/07 09:32:02 ozaki-r Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1998, 2008 The NetBSD Foundation, Inc.
@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: linux_socket.c,v 1.126 2015/07/24 13:02:52 maxv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux_socket.c,v 1.131 2016/07/07 09:32:02 ozaki-r Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_inet.h"
@@ -1092,16 +1092,21 @@ linux_getifname(struct lwp *l, register_t *retval, void *data)
 	struct ifnet *ifp;
 	struct linux_ifreq ifr;
 	int error;
+	int s;
 
 	error = copyin(data, &ifr, sizeof(ifr));
 	if (error)
 		return error;
 
+	s = pserialize_read_enter();
 	ifp = if_byindex(ifr.ifr_ifru.ifru_ifindex);
-	if (ifp == NULL)
+	if (ifp == NULL) {
+		pserialize_read_exit(s);
 		return ENODEV;
+	}
 
 	strncpy(ifr.ifr_name, ifp->if_xname, sizeof(ifr.ifr_name));
+	pserialize_read_exit(s);
 
 	return copyout(&ifr, data, sizeof(ifr));
 }
@@ -1118,6 +1123,9 @@ linux_getifconf(struct lwp *l, register_t *retval, void *data)
 	int space = 0, error;
 	const int sz = (int)sizeof(ifr);
 	bool docopy;
+	int s;
+	int bound;
+	struct psref psref;
 
 	error = copyin(data, &ifc, sizeof(ifc));
 	if (error)
@@ -1129,14 +1137,20 @@ linux_getifconf(struct lwp *l, register_t *retval, void *data)
 		ifrp = ifc.ifc_req;
 	}
 
-	IFNET_FOREACH(ifp) {
+	bound = curlwp_bind();
+	s = pserialize_read_enter();
+	IFNET_READER_FOREACH(ifp) {
+		psref_acquire(&psref, &ifp->if_psref, ifnet_psref_class);
+		pserialize_read_exit(s);
+
 		(void)strncpy(ifr.ifr_name, ifp->if_xname,
 		    sizeof(ifr.ifr_name));
-		if (ifr.ifr_name[sizeof(ifr.ifr_name) - 1] != '\0')
-			return ENAMETOOLONG;
-		if (IFADDR_EMPTY(ifp))
-			continue;
-		IFADDR_FOREACH(ifa, ifp) {
+		if (ifr.ifr_name[sizeof(ifr.ifr_name) - 1] != '\0') {
+			error = ENAMETOOLONG;
+			goto release_exit;
+		}
+
+		IFADDR_READER_FOREACH(ifa, ifp) {
 			sa = ifa->ifa_addr;
 			if (sa->sa_family != AF_INET ||
 			    sa->sa_len > sizeof(*osa))
@@ -1147,12 +1161,17 @@ linux_getifconf(struct lwp *l, register_t *retval, void *data)
 			if (space >= sz) {
 				error = copyout(&ifr, ifrp, sz);
 				if (error != 0)
-					return error;
+					goto release_exit;
 				ifrp++;
 			}
 			space -= sz;
 		}
+
+		s = pserialize_read_enter();
+		psref_release(&psref, &ifp->if_psref, ifnet_psref_class);
 	}
+	pserialize_read_exit(s);
+	curlwp_bindx(bound);
 
 	if (docopy)
 		ifc.ifc_len -= space;
@@ -1160,6 +1179,11 @@ linux_getifconf(struct lwp *l, register_t *retval, void *data)
 		ifc.ifc_len = -space;
 
 	return copyout(&ifc, data, sizeof(ifc));
+
+release_exit:
+	psref_release(&psref, &ifp->if_psref, ifnet_psref_class);
+	curlwp_bindx(bound);
+	return error;
 }
 
 int
@@ -1174,6 +1198,7 @@ linux_getifhwaddr(struct lwp *l, register_t *retval, u_int fd,
 	struct sockaddr_dl *sadl;
 	int error, found;
 	int index, ifnum;
+	int s;
 
 	/*
 	 * We can't emulate this ioctl by calling sys_ioctl() to run
@@ -1205,18 +1230,21 @@ linux_getifhwaddr(struct lwp *l, register_t *retval, u_int fd,
 	 * Try real interface name first, then fake "ethX"
 	 */
 	found = 0;
-	IFNET_FOREACH(ifp) {
+	s = pserialize_read_enter();
+	IFNET_READER_FOREACH(ifp) {
 		if (found)
 			break;
 		if (strcmp(lreq.ifr_name, ifp->if_xname))
 			/* not this interface */
 			continue;
+
 		found=1;
-		if (IFADDR_EMPTY(ifp)) {
+		if (IFADDR_READER_EMPTY(ifp)) {
+			pserialize_read_exit(s);
 			error = ENODEV;
 			goto out;
 		}
-		IFADDR_FOREACH(ifa, ifp) {
+		IFADDR_READER_FOREACH(ifa, ifp) {
 			sadl = satosdl(ifa->ifa_addr);
 			/* only return ethernet addresses */
 			/* XXX what about FDDI, etc. ? */
@@ -1228,10 +1256,13 @@ linux_getifhwaddr(struct lwp *l, register_t *retval, u_int fd,
 				   sizeof(lreq.ifr_hwaddr.sa_data)));
 			lreq.ifr_hwaddr.sa_family =
 				sadl->sdl_family;
+			pserialize_read_exit(s);
+
 			error = copyout(&lreq, data, sizeof(lreq));
 			goto out;
 		}
 	}
+	pserialize_read_exit(s);
 
 	if (strncmp(lreq.ifr_name, "eth", 3) != 0) {
 		/* unknown interface, not even an "eth*" name */
@@ -1247,13 +1278,11 @@ linux_getifhwaddr(struct lwp *l, register_t *retval, u_int fd,
 	}
 
 	error = EINVAL;			/* in case we don't find one */
-	found = 0;
-	IFNET_FOREACH(ifp) {
-		if (found)
-			break;
+	s = pserialize_read_enter();
+	IFNET_READER_FOREACH(ifp) {
 		memcpy(lreq.ifr_name, ifp->if_xname,
 		       MIN(LINUX_IFNAMSIZ, IFNAMSIZ));
-		IFADDR_FOREACH(ifa, ifp) {
+		IFADDR_READER_FOREACH(ifa, ifp) {
 			sadl = satosdl(ifa->ifa_addr);
 			/* only return ethernet addresses */
 			/* XXX what about FDDI, etc. ? */
@@ -1269,11 +1298,13 @@ linux_getifhwaddr(struct lwp *l, register_t *retval, u_int fd,
 				   sizeof(lreq.ifr_hwaddr.sa_data)));
 			lreq.ifr_hwaddr.sa_family =
 				sadl->sdl_family;
+			pserialize_read_exit(s);
+
 			error = copyout(&lreq, data, sizeof(lreq));
-			found = 1;
-			break;
+			goto out;
 		}
 	}
+	pserialize_read_exit(s);
 
 out:
 	KERNEL_UNLOCK_ONE(NULL);

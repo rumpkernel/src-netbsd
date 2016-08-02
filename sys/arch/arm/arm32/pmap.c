@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.c,v 1.332 2015/12/14 09:48:40 skrll Exp $	*/
+/*	$NetBSD: pmap.c,v 1.335 2016/07/14 15:51:41 skrll Exp $	*/
 
 /*
  * Copyright 2003 Wasabi Systems, Inc.
@@ -217,7 +217,7 @@
 
 #include <arm/locore.h>
 
-__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.332 2015/12/14 09:48:40 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.335 2016/07/14 15:51:41 skrll Exp $");
 
 //#define PMAP_DEBUG
 #ifdef PMAP_DEBUG
@@ -5013,11 +5013,34 @@ pmap_update(pmap_t pm)
 		    "pmap/asid %p/%#x != %s cur pmap/asid %p/%#x", pm,
 		    pm->pm_pai[0].pai_asid, curcpu()->ci_data.cpu_name,
 		    curcpu()->ci_pmap_cur, curcpu()->ci_pmap_asid_cur);
+
+#ifdef MULTIPROCESSOR
 		/*
 		 * Finish up the pmap_remove_all() optimisation by flushing
 		 * all our ASIDs.
 		 */
-		pmap_tlb_asid_release_all(pm);
+		// This should be the last CPU with this pmap onproc
+		KASSERT(!kcpuset_isotherset(pm->pm_onproc, cpu_index(curcpu())));
+		if (kcpuset_isset(pm->pm_onproc, cpu_index(curcpu()))) {
+			if (pm != pmap_kernel()) {
+				struct cpu_info * const ci = curcpu();
+				KASSERT(!cpu_intr_p());
+				/*
+				 * The bits in pm_onproc that belong to this
+				 * TLB can be changed while this TLBs lock is
+				 * not held as long as we use atomic ops.
+				 */
+				kcpuset_atomic_clear(pm->pm_onproc,
+				    cpu_index(ci));
+			}
+		}
+		KASSERT(kcpuset_iszero(pm->pm_onproc));
+#endif
+		struct pmap_asid_info * const pai =
+		    PMAP_PAI(pm, cpu_tlb_info(ci));
+
+		tlb_invalidate_asids(pai->pai_asid, pai->pai_asid);
+
 #else
 		/*
 		 * Finish up the pmap_remove_all() optimisation by flushing
@@ -5035,7 +5058,7 @@ pmap_update(pmap_t pm)
 	armreg_bpiall_write(0);
 #endif
 
-#if defined(MULTIPROCESSOR) && PMAP_MAX_TLB > 1
+#if defined(MULTIPROCESSOR) && PMAP_TLB_MAX > 1
 	u_int pending = atomic_swap_uint(&pmap->pm_shootdown_pending, 0);
 	if (pending && pmap_tlb_shootdown_bystanders(pmap)) {
 		PMAP_COUNT(shootdown_ipis);
@@ -7857,7 +7880,7 @@ pmap_md_tlb_info_attach(struct pmap_tlb_info *ti, struct cpu_info *ci)
 int
 pic_ipi_shootdown(void *arg)
 {
-#if PMAP_NEED_TLB_SHOOTDOWN
+#if PMAP_TLB_NEED_SHOOTDOWN
 	pmap_tlb_shootdown_process();
 #endif
 	return 1;

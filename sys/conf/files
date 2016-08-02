@@ -1,4 +1,4 @@
-#	$NetBSD: files,v 1.1158 2016/05/01 10:21:02 nonaka Exp $
+#	$NetBSD: files,v 1.1160 2016/06/23 07:32:12 skrll Exp $
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
 
 version 	20150846
@@ -192,6 +192,14 @@ include "crypto/cprng_fast/files.cprng_fast"
 defflag opt_kernhist.h			KERNHIST KERNHIST_PRINT
 defparam opt_kernhist.h			KERNHIST_DELAY
 file	kern/kern_history.c		kernhist
+
+#
+# These are here for the benefit of kern_history.c so that
+# UVMHIST can be built in kernels without usb.
+#
+# top level usb debug defines
+defflag	opt_usb.h			USB_DEBUG: KERNHIST
+defparam opt_usb.h			USBHIST_SIZE
 
 #
 # System monitoring framework
@@ -870,7 +878,7 @@ defflag	opt_com.h		COM_DEBUG
 # XXX In a perfect world, this would be done with attributes
 defflag	opt_com.h		COM_16650 COM_16750
 				COM_HAYESP COM_PXA2X0 COM_AU1X00
-				COM_REGMAP COM_FUNCMAP
+				COM_REGMAP COM_FUNCMAP COM_AWIN
 defparam opt_com.h		COM_TOLERANCE
 device	com { } : tty
 file	dev/ic/com.c			com			needs-flag

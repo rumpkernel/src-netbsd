@@ -1,4 +1,4 @@
-/*	$NetBSD: if_bge.c,v 1.295 2016/02/09 08:32:11 ozaki-r Exp $	*/
+/*	$NetBSD: if_bge.c,v 1.298 2016/07/11 06:14:51 knakahara Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -79,7 +79,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_bge.c,v 1.295 2016/02/09 08:32:11 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_bge.c,v 1.298 2016/07/11 06:14:51 knakahara Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1516,6 +1516,7 @@ bge_update_all_threshes(int lvl)
 	struct ifnet *ifp;
 	const char * const namebuf = "bge";
 	int namelen;
+	int s;
 
 	if (lvl < 0)
 		lvl = 0;
@@ -1526,13 +1527,15 @@ bge_update_all_threshes(int lvl)
 	/*
 	 * Now search all the interfaces for this name/number
 	 */
-	IFNET_FOREACH(ifp) {
+	s = pserialize_read_enter();
+	IFNET_READER_FOREACH(ifp) {
 		if (strncmp(ifp->if_xname, namebuf, namelen) != 0)
 		      continue;
 		/* We got a match: update if doing auto-threshold-tuning */
 		if (bge_auto_thresh)
 			bge_set_thresh(ifp, lvl);
 	}
+	pserialize_read_exit(s);
 }
 
 /*
@@ -3741,7 +3744,7 @@ alloc_retry:
 	sc->bge_intrhand = pci_intr_establish(pc, sc->bge_pihp[0], IPL_NET,
 	    bge_intr, sc);
 	if (sc->bge_intrhand == NULL) {
-		intr_type = pci_intr_type(sc->bge_pihp[0]);
+		intr_type = pci_intr_type(pc, sc->bge_pihp[0]);
 		aprint_error_dev(sc->bge_dev,"unable to establish %s\n",
 		    (intr_type == PCI_INTR_TYPE_MSI) ? "MSI" : "INTx");
 		pci_intr_release(pc, sc->bge_pihp, 1);
@@ -4557,7 +4560,7 @@ bge_rxeof(struct bge_softc *sc)
 #endif
 
 		m->m_pkthdr.len = m->m_len = cur_rx->bge_len - ETHER_CRC_LEN;
-		m->m_pkthdr.rcvif = ifp;
+		m_set_rcvif(m, ifp);
 
 		/*
 		 * Handle BPF listeners. Let the BPF user see the packet.

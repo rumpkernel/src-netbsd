@@ -1,4 +1,4 @@
-/*	$NetBSD: if_rtwn.c,v 1.5 2016/02/09 08:32:11 ozaki-r Exp $	*/
+/*	$NetBSD: if_rtwn.c,v 1.8 2016/06/10 13:27:14 ozaki-r Exp $	*/
 /*	$OpenBSD: if_rtwn.c,v 1.5 2015/06/14 08:02:47 stsp Exp $	*/
 #define	IEEE80211_NO_HT
 /*-
@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_rtwn.c,v 1.5 2016/02/09 08:32:11 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_rtwn.c,v 1.8 2016/06/10 13:27:14 ozaki-r Exp $");
 
 #include <sys/param.h>
 #include <sys/sockio.h>
@@ -1748,7 +1748,7 @@ rtwn_rx_frame(struct rtwn_softc *sc, struct r92c_rx_desc *rx_desc,
 	m = rx_data->m;
 	rx_data->m = m1;
 	m->m_pkthdr.len = m->m_len = totlen;
-	m->m_pkthdr.rcvif = ifp;
+	m_set_rcvif(m, ifp);
 
 	bus_dmamap_sync(sc->sc_dmat, rx_data->map, 0, MCLBYTES,
 	    BUS_DMASYNC_PREREAD);
@@ -2060,8 +2060,8 @@ rtwn_start(struct ifnet *ifp)
 		/* Send pending management frames first. */
 		IF_DEQUEUE(&ic->ic_mgtq, m);
 		if (m != NULL) {
-			ni = (void *)m->m_pkthdr.rcvif;
-			m->m_pkthdr.rcvif = NULL;
+			ni = M_GETCTX(m, struct ieee80211_node *);
+			M_CLEARCTX(m);
 			goto sendit;
 		}
 		if (ic->ic_state != IEEE80211_S_RUN)
