@@ -2101,8 +2101,8 @@ RUMP_LIBSETS='
 	-lrumpfs_tmpfs -lrumpvfs -lrump,
 	-lrumpfs_ffs -lrumpfs_msdos -lrumpvfs -lrumpdev_disk -lrumpdev -lrump,
 	-lrumpnet_virtif -lrumpnet_netinet -lrumpnet_net -lrumpnet -lrump,
-	-lrumpnet_sockin -lrumpfs_smbfs -lrumpdev_netsmb
-	    -lrumpkern_crypto -lrumpdev -lrumpnet -lrumpvfs -lrump,
+	-lrumpnet_sockin -lrumpfs_smbfs -lrumpdev_netsmb -lrumpnet_tap -lrumpnet_tun,
+	-lrumpkern_crypto -lrumpdev -lrumpnet -lrumpvfs -lrump,
 	-lrumpnet_sockin -lrumpfs_nfs -lrumpnet -lrumpvfs -lrump,
 	-lrumpdev_cgd -lrumpdev_raidframe -lrumpdev_disk -lrumpdev_rnd
 	    -lrumpdev_dm -lrumpdev -lrumpvfs -lrumpkern_crypto -lrump'
