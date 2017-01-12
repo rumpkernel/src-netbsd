@@ -4,7 +4,7 @@
 .include <bsd.own.mk>
 
 RUMPNETCOMP=	agr bridge net net80211 netbt netinet netinet6
-RUMPNETCOMP+=	gif netmpls npf local pppoe shmif tap
+RUMPNETCOMP+=	gif netmpls npf local pppoe shmif tap tun
 
 .if ${MKSLJIT} != "no" || make(rumpdescribe)
 RUMPNETCOMP+=	bpfjit
