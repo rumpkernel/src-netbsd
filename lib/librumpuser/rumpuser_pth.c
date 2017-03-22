@@ -47,6 +47,10 @@ __RCSID("$NetBSD: rumpuser_pth.c,v 1.45 2015/09/18 10:56:25 pooka Exp $");
 #include <stdint.h>
 #include <unistd.h>
 
+#if defined(HAVE_PTHREAD_NP_H)
+#include <pthread_np.h>
+#endif
+
 #include <rump/rumpuser.h>
 
 #include "rumpuser_int.h"
@@ -80,15 +84,9 @@ rumpuser_thread_create(void *(*f)(void *), void *arg, const char *thrname,
 		nanosleep(&ts, NULL);
 	}
 
-#if defined(HAVE_PTHREAD_SETNAME3)
 	if (rv == 0 && thrname) {
-		pthread_setname_np(*ptidp, thrname, NULL);
+		pthread_setname_npx(*ptidp, thrname);
 	}
-#elif defined(HAVE_PTHREAD_SETNAME2)
-	if (rv == 0 && thrname) {
-		pthread_setname_np(*ptidp, thrname);
-	}
-#endif
 
 	if (joinable) {
 		assert(ptcookie);

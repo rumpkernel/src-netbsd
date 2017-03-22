@@ -25,10 +25,10 @@
 #define HAVE_GETSUBOPT 1
 #define HAVE_INTTYPES_H 1
 #define HAVE_KQUEUE 1
+#define HAVE_LIBPTHREAD 1
 #define HAVE_MEMORY_H 1
 #define HAVE_PATHS_H 1
 #define HAVE_POSIX_MEMALIGN 1
-#define HAVE_PTHREAD_SETNAME3 1
 #define HAVE_REGISTER_T 1
 #define HAVE_SETPROGNAME 1
 #define HAVE_STDINT_H 1
@@ -59,6 +59,7 @@
 #ifndef _DARWIN_USE_64_BIT_INODE
 # define _DARWIN_USE_64_BIT_INODE 1
 #endif
+#define pthread_setname_npx(a, b) pthread_setname_np(a, b, NULL)
 
 #else /* RUMPUSER_CONFIG */
 #include "rumpuser_config.h"
