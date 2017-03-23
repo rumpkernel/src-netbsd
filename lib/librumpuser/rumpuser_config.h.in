@@ -42,6 +42,9 @@
 /* Define to 1 if you have the `kqueue' function. */
 #undef HAVE_KQUEUE
 
+/* Define to 1 if you have the `pthread' library (-lpthread). */
+#undef HAVE_LIBPTHREAD
+
 /* Define to 1 if you have the `rt' library (-lrt). */
 #undef HAVE_LIBRT
 
@@ -57,11 +60,8 @@
 /* Define to 1 if you have the `posix_memalign' function. */
 #undef HAVE_POSIX_MEMALIGN
 
-/* Define to 1 if you have 2-arg pthread_setname_np() */
-#undef HAVE_PTHREAD_SETNAME2
-
-/* Define to 1 if you have 3-arg pthread_setname_np() */
-#undef HAVE_PTHREAD_SETNAME3
+/* Define to 1 if you have the <pthread_np.h> header file. */
+#undef HAVE_PTHREAD_NP_H
 
 /* Define to 1 if the system has the type `register_t'. */
 #undef HAVE_REGISTER_T
@@ -154,3 +154,6 @@
 
 /* Define for large files, on AIX-style hosts. */
 #undef _LARGE_FILES
+
+/* Replacement for pthread_setname_np() */
+#undef pthread_setname_npx
